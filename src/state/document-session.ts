@@ -12,13 +12,14 @@
  */
 
 import { applyDocumentPatch } from '../core/documents/factories';
+import type { DocumentPatch } from '../core/documents/patch';
 import type { ForgeDocument } from '../core/documents/types';
 import { isDocumentStructurallySound } from '../core/documents/validation';
 import { HistoryStack, type HistorySnapshot } from '../core/history/history';
 import { err, forgeError, ok, toErrorMessage, type ForgeError, type Result } from '../core/result';
 import { createStore, type Store } from '../lib/create-store';
 
-export type DocumentPatch = Partial<Omit<ForgeDocument, 'id' | 'schemaVersion' | 'createdAt'>>;
+export type { DocumentPatch };
 
 export type DocumentSessionState = {
   readonly document: ForgeDocument;

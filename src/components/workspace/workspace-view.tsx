@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
+import { EMPTY_SELECTION, type Selection } from '../../core/editor/selection';
+import type { Scene } from '../../core/documents/layer-types';
 import { getStudio } from '../../core/studios';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -15,12 +17,18 @@ import { EmptyState, ErrorState, InlineNote, SkeletonCard } from '../ui/states';
 import { useForgeServices } from '../../state/forge-provider';
 import { useDocumentSession } from '../../state/hooks';
 import { storageBadge } from '../../state/storage-status';
+import type { Result } from '../../core/result';
 import type { DocumentPatch } from '../../state/document-session';
+import type { SceneCommand } from '../../core/editor/commands';
 import { ContextHelp } from './context-help';
 import { DocumentAside } from './document-aside';
 import { DocumentStage } from './document-stage';
 import { SaveState } from './history-panel';
+import { useSceneImages } from './use-scene-images';
 import type { WorkspaceApi } from './workspace-api';
+
+/** Stable identity for "no document yet", so the image cache is not invalidated every render. */
+const EMPTY_SCENE: Scene = { layers: [] };
 
 /**
  * Document workspace.
@@ -35,6 +43,14 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
   const badge = storageBadge(storageStatus);
   const { session, state, library } = useDocumentSession(documentId);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // Selection is transient interaction state: it is never persisted and never enters history.
+  const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION);
+  const [snapping, setSnapping] = useState(true);
+  const [showGuides, setShowGuides] = useState(true);
+  // One image cache for the whole workspace, so the artboard and the export renderer resolve the
+  // same decoded bitmaps and cannot disagree about what a graphic looks like.
+  const scene = state?.document.scene;
+  const images = useSceneImages(scene ?? EMPTY_SCENE);
 
   const commit = useCallback(
     async (label: string, patch: DocumentPatch): Promise<boolean> => {
@@ -47,6 +63,21 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
       return true;
     },
     [session, toasts],
+  );
+
+  /**
+   * Runs an editor command. A command that cannot be built (a layer that vanished, an invalid value)
+   * reports why instead of failing silently.
+   */
+  const run = useCallback(
+    async (command: Result<SceneCommand>): Promise<boolean> => {
+      if (!command.ok) {
+        toasts.warning('That edit was not applied', command.error.message);
+        return false;
+      }
+      return commit(command.value.label, command.value.patch);
+    },
+    [commit, toasts],
   );
 
   const undo = useCallback(() => {
@@ -139,7 +170,7 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
 
   const doc = state.document;
   const studio = getStudio(doc.studioId);
-  const api: WorkspaceApi = { doc, commit, undo, redo };
+  const api: WorkspaceApi = { doc, commit, run, undo, redo };
 
   return (
     <div className="mx-auto max-w-[100rem] space-y-5 p-4 sm:p-6">
@@ -228,12 +259,25 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_26rem]">
         <div className="min-w-0 space-y-5">
-          <DocumentStage doc={doc} />
+          <DocumentStage
+            api={api}
+            selection={selection}
+            onSelectionChange={setSelection}
+            images={images}
+            snapping={snapping}
+            onSnappingChange={setSnapping}
+            showGuides={showGuides}
+            onGuidesChange={setShowGuides}
+          />
           <ContextHelp studioId={doc.studioId} />
         </div>
 
         <DocumentAside
           api={api}
+          scene={doc.scene}
+          images={images}
+          selection={selection}
+          onSelectionChange={setSelection}
           history={state.history}
           canUndo={state.canUndo}
           canRedo={state.canRedo}

@@ -4,13 +4,27 @@ import { Check, CircleAlert, Download, Info, XCircle } from 'lucide-react';
 import { useState } from 'react';
 
 import { buildExportChecklist, type CheckStatus } from '../../core/export/checklist';
+import { downloadBlob } from '../../core/export/download';
 import { EXPORT_FORMATS, PROJECT_FILE_FORMAT_ID, getExportFormat } from '../../core/export/formats';
 import { downloadProjectFile, serialiseProjectFile } from '../../core/export/project-file';
+import {
+  DEFAULT_JPEG_QUALITY,
+  JPEG_BACKGROUND_LABELS,
+  JPEG_BACKGROUNDS,
+  MAX_JPEG_QUALITY,
+  MIN_JPEG_QUALITY,
+  RASTER_SCALES,
+  exportRasterImage,
+  type JpegBackground,
+  type RasterExport,
+} from '../../core/export/raster';
+import { createBrowserCanvas, canRasteriseHere } from '../../core/render/browser-canvas';
 import { cn } from '../../lib/cn';
 import { useForgeServices } from '../../state/forge-provider';
 import { Button } from '../ui/button';
 import { Field, Select } from '../ui/field';
 import { InlineNote } from '../ui/states';
+import type { SceneImages } from './use-scene-images';
 import type { WorkspaceApi } from './workspace-api';
 
 const STATUS_ICONS: Record<CheckStatus, typeof Check> = {
@@ -25,18 +39,92 @@ const STATUS_COLORS: Record<CheckStatus, string> = {
   blocked: 'text-rose-400',
 };
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${String(bytes)} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 /**
  * Export panel.
  *
- * Runs the real readiness checks for the selected format, then offers only what actually works:
- * downloading the `.forge.json` project file. Planned formats stay selectable so a user can see
- * what each will require, and the panel states plainly that they produce no file yet.
+ * Runs the real readiness checks for the selected format and then does the work: `.forge.json` writes
+ * the document definition, PNG and JPEG rasterise the actual scene through the same renderer the
+ * artboard uses (ADR-0016). Planned formats stay listed so a user can read what each will require, and
+ * the panel states plainly that they produce no file.
  */
-export function ExportPanel({ api }: { readonly api: WorkspaceApi }) {
+export function ExportPanel({
+  api,
+  images,
+}: {
+  readonly api: WorkspaceApi;
+  readonly images: SceneImages;
+}) {
   const { toasts } = useForgeServices();
   const [formatId, setFormatId] = useState<string>(PROJECT_FILE_FORMAT_ID);
-  const checklist = buildExportChecklist(api.doc, formatId);
+  const [scale, setScale] = useState<number>(1);
+  const [quality, setQuality] = useState<number>(DEFAULT_JPEG_QUALITY);
+  const [jpegBackground, setJpegBackground] = useState<JpegBackground>('white');
+  const [busy, setBusy] = useState(false);
+  const [lastExport, setLastExport] = useState<RasterExport | null>(null);
+
   const selected = getExportFormat(formatId);
+  const isRaster = selected?.kind === 'raster';
+  const rasteriserAvailable = canRasteriseHere();
+  const checklist = buildExportChecklist(api.doc, formatId, {
+    rasteriserAvailable,
+    scale,
+    jpegBackground,
+    // A graphic the browser could not decode blocks the export: it would otherwise be missing from
+    // the file while the export reported success.
+    renderIssues: images.errors.map((href) => ({
+      message: `“${href}” could not be loaded.`,
+      blocking: true,
+    })),
+  });
+
+  const runRaster = async () => {
+    if (!selected || !isRaster) return;
+    setBusy(true);
+    const result = await exportRasterImage({
+      document: api.doc,
+      format: selected.id === 'jpg' ? 'jpeg' : 'png',
+      scale,
+      createCanvas: createBrowserCanvas,
+      resolveImage: images.resolver,
+      quality,
+      jpegBackground,
+    });
+    setBusy(false);
+
+    if (!result.ok) {
+      setLastExport(null);
+      toasts.error(
+        'The image was not exported',
+        result.error.detail
+          ? `${result.error.message} ${result.error.detail}`
+          : result.error.message,
+      );
+      return;
+    }
+
+    const exported = result.value;
+    const downloaded = downloadBlob(exported.blob, exported.fileName);
+    if (!downloaded) {
+      setLastExport(null);
+      toasts.error(
+        'The file could not be handed to the browser',
+        'The image was rendered, but this environment has nowhere to save it.',
+      );
+      return;
+    }
+
+    setLastExport(exported);
+    toasts.success(
+      `${selected.label} exported`,
+      `${exported.fileName} — ${String(exported.width)} × ${String(exported.height)} px, ${formatBytes(exported.bytes)}.`,
+    );
+  };
 
   return (
     <section aria-labelledby="export-panel-heading" className="space-y-4">
@@ -52,6 +140,7 @@ export function ExportPanel({ api }: { readonly api: WorkspaceApi }) {
           value={formatId}
           onChange={(event) => {
             setFormatId(event.target.value);
+            setLastExport(null);
           }}
           options={EXPORT_FORMATS.map((format) => ({
             value: format.id,
@@ -59,6 +148,62 @@ export function ExportPanel({ api }: { readonly api: WorkspaceApi }) {
           }))}
         />
       </Field>
+
+      {isRaster ? (
+        <div className="space-y-3">
+          <Field
+            label="Output scale"
+            hint="Multiplies the canvas pixel size; it is not the zoom level."
+          >
+            <Select
+              value={String(scale)}
+              onChange={(event) => {
+                setScale(Number(event.target.value));
+              }}
+              options={RASTER_SCALES.map((value) => ({
+                value: String(value),
+                label: `${String(value)}x — ${String(
+                  Math.max(1, Math.round(api.doc.canvas.width * value)),
+                )} × ${String(Math.max(1, Math.round(api.doc.canvas.height * value)))} px`,
+              }))}
+            />
+          </Field>
+
+          {selected.id === 'jpg' ? (
+            <>
+              <Field label="Quality" hint={`${String(Math.round(quality * 100))}%`}>
+                <input
+                  type="range"
+                  min={MIN_JPEG_QUALITY * 100}
+                  max={MAX_JPEG_QUALITY * 100}
+                  step={1}
+                  value={Math.round(quality * 100)}
+                  onChange={(event) => {
+                    setQuality(Number(event.target.value) / 100);
+                  }}
+                  className="accent-mint-400 w-full"
+                  aria-label="JPEG quality"
+                />
+              </Field>
+              <Field
+                label="Transparent areas"
+                hint="JPEG has no alpha channel, so alpha is flattened onto this colour."
+              >
+                <Select
+                  value={jpegBackground}
+                  onChange={(event) => {
+                    setJpegBackground(event.target.value as JpegBackground);
+                  }}
+                  options={JPEG_BACKGROUNDS.map((value) => ({
+                    value,
+                    label: JPEG_BACKGROUND_LABELS[value],
+                  }))}
+                />
+              </Field>
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       {selected ? (
         <InlineNote
@@ -121,19 +266,70 @@ export function ExportPanel({ api }: { readonly api: WorkspaceApi }) {
           variant="primary"
           fullWidth
           iconLeft={<Download aria-hidden />}
-          disabled={formatId !== PROJECT_FILE_FORMAT_ID}
+          disabled={busy || !checklist.ready}
           onClick={() => {
-            downloadProjectFile(api.doc);
-            toasts.success(
-              'Project file downloaded',
-              'It contains the document definition, not a rendered image.',
-            );
+            if (formatId === PROJECT_FILE_FORMAT_ID) {
+              const started = downloadProjectFile(api.doc);
+              if (started) {
+                toasts.success(
+                  'Project file downloaded',
+                  'It contains the document definition, not a rendered image.',
+                );
+              } else {
+                toasts.warning(
+                  'The download could not start',
+                  'This environment cannot save files.',
+                );
+              }
+              return;
+            }
+            void runRaster();
           }}
         >
-          {formatId === PROJECT_FILE_FORMAT_ID
-            ? 'Download project file'
-            : 'Download unavailable for this format'}
+          {busy
+            ? 'Rendering…'
+            : formatId === PROJECT_FILE_FORMAT_ID
+              ? 'Download project file'
+              : checklist.ready
+                ? `Export ${selected?.label ?? 'image'}`
+                : 'Export blocked'}
         </Button>
+
+        {lastExport ? (
+          <dl
+            data-testid="last-export"
+            className="text-fg-subtle forge-numeric border-line-subtle text-2xs space-y-0.5 rounded-sm border px-2.5 py-2"
+          >
+            <div className="flex justify-between gap-2">
+              <dt>File</dt>
+              <dd className="truncate">{lastExport.fileName}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt>Size</dt>
+              <dd>
+                {lastExport.width} × {lastExport.height} px · {formatBytes(lastExport.bytes)}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt>Scale</dt>
+              <dd>{lastExport.scale}x</dd>
+            </div>
+          </dl>
+        ) : null}
+
+        {lastExport && lastExport.warnings.length > 0 ? (
+          <InlineNote
+            tone="warning"
+            icon={<CircleAlert aria-hidden />}
+            title="Rendered with caveats"
+          >
+            <ul className="list-disc space-y-0.5 pl-4">
+              {lastExport.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          </InlineNote>
+        ) : null}
 
         <Button
           variant="outline"
@@ -159,10 +355,10 @@ export function ExportPanel({ api }: { readonly api: WorkspaceApi }) {
           Copy document definition as JSON
         </Button>
 
-        {formatId !== PROJECT_FILE_FORMAT_ID ? (
+        {selected?.status === 'planned' ? (
           <p className="text-2xs text-fg-subtle">
-            {selected?.label} export needs a renderer that is not built yet. The project file is the
-            only format this build can produce — the roadmap tracks the rest.
+            {selected.label} export is not implemented in this build. PNG, JPEG and the project file
+            are the formats it can really produce — the roadmap tracks the rest.
           </p>
         ) : null}
       </div>

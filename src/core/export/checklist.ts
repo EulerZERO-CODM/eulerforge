@@ -11,6 +11,13 @@ import type { ForgeDocument } from '../documents/types';
 import { MAX_CANVAS_PX, PRINT_DPI, SCREEN_DPI } from '../documents/units';
 import { forgeDocumentSchema } from '../documents/schema';
 import {
+  jpegBackgroundColor,
+  validateRasterRequest,
+  MAX_EXPORT_PIXELS,
+  type JpegBackground,
+  type RasterFormat,
+} from './raster';
+import {
   getExportFormat,
   PROJECT_FILE_FORMAT_ID,
   type ExportFormat,
@@ -93,17 +100,73 @@ function projectFileChecks(document: ForgeDocument): readonly ExportCheck[] {
   ];
 }
 
-function rasterChecks(document: ForgeDocument, format: ExportFormat): readonly ExportCheck[] {
+/**
+ * Context the raster checks need from the running editor.
+ *
+ * The checks themselves stay pure: the panel tells them whether this environment can rasterise, what
+ * the scene planner found, and which output settings are selected.
+ */
+export type ExportCheckContext = {
+  /** `false` when the environment has no 2D canvas context (some SSR or headless setups). */
+  readonly rasteriserAvailable?: boolean | undefined;
+  /** Issues the scene planner found, so a missing graphic blocks instead of being reported later. */
+  readonly renderIssues?:
+    readonly { readonly message: string; readonly blocking: boolean }[] | undefined;
+  readonly scale?: number | undefined;
+  readonly jpegBackground?: JpegBackground | undefined;
+};
+
+function rasterChecks(
+  document: ForgeDocument,
+  format: ExportFormat,
+  context: ExportCheckContext,
+): readonly ExportCheck[] {
   const { canvas } = document;
   const checks: ExportCheck[] = [];
+  const rasterFormat: RasterFormat = format.id === 'jpg' ? 'jpeg' : 'png';
 
   checks.push(
     check(
       'renderer',
       'Raster renderer available',
-      'blocked',
-      `${format.label} export requires a raster renderer, which is not implemented in this build.`,
-      'Export the project file instead, or follow the roadmap for the raster pipeline.',
+      context.rasteriserAvailable === false ? 'blocked' : 'pass',
+      context.rasteriserAvailable === false
+        ? 'This environment did not provide a canvas 2D context, so no image can be produced here.'
+        : 'Export draws the document with the same renderer the artboard uses.',
+      context.rasteriserAvailable === false
+        ? 'Open the workspace in a browser with canvas support.'
+        : undefined,
+    ),
+  );
+
+  const blocking = (context.renderIssues ?? []).filter((issue) => issue.blocking);
+  checks.push(
+    check(
+      'graphics',
+      'Every graphic can be drawn',
+      blocking.length > 0 ? 'blocked' : 'pass',
+      blocking.length > 0
+        ? blocking.map((issue) => issue.message).join(' ')
+        : 'All graphic layers resolved, so the file will contain them.',
+      blocking.length > 0
+        ? 'Reload the graphics, or delete the layer that cannot be loaded.'
+        : undefined,
+    ),
+  );
+
+  const scale = context.scale ?? 1;
+  const validated = validateRasterRequest({ document, format: rasterFormat, scale });
+  checks.push(
+    check(
+      'output-size',
+      'Output size within limits',
+      validated.ok ? 'pass' : 'blocked',
+      validated.ok
+        ? `Output will be ${String(validated.value.width)} × ${String(validated.value.height)} px at ${String(
+            scale,
+          )}x (${((validated.value.width * validated.value.height) / 1_000_000).toFixed(1)} MP).`
+        : `That scale would need more than the ${String(MAX_EXPORT_PIXELS / 1_000_000)} MP budget.`,
+      validated.ok ? undefined : 'Choose a smaller scale or reduce the canvas size.',
     ),
   );
 
@@ -143,16 +206,17 @@ function rasterChecks(document: ForgeDocument, format: ExportFormat): readonly E
       ),
     );
   } else {
+    const background = jpegBackgroundColor(document, context.jpegBackground ?? 'white');
     checks.push(
       check(
         'transparency',
-        'Transparency supported by the chosen format',
-        canvas.transparent ? 'blocked' : 'pass',
+        'Transparent areas are flattened predictably',
+        canvas.transparent ? 'warning' : 'pass',
         canvas.transparent
-          ? `${format.label} cannot store transparency, so the transparent area would be flattened.`
+          ? `${format.label} cannot store transparency, so transparent pixels will be flattened onto ${background}.`
           : `${format.label} does not store alpha; this document has a background colour, so nothing is lost.`,
         canvas.transparent
-          ? 'Set a background colour or choose a format with alpha support.'
+          ? 'Choose the flattening colour, or export PNG if you need transparency.'
           : undefined,
       ),
     );
@@ -175,21 +239,26 @@ function plannedFormatChecks(format: ExportFormat): readonly ExportCheck[] {
 
 /**
  * Builds the checklist for a document + chosen format.
- * @param formatId defaults to the project file, the only implemented format.
+ * @param formatId defaults to the project file, which needs no environment context.
+ * @param context environment and output settings the raster checks depend on.
  */
 export function buildExportChecklist(
   document: ForgeDocument,
   formatId: ExportFormatId | string = PROJECT_FILE_FORMAT_ID,
+  context: ExportCheckContext = {},
 ): ExportChecklist {
   const format = getExportFormat(String(formatId));
   if (!format) {
     throw new Error(`Unknown export format: ${String(formatId)}`);
   }
 
+  const implemented = format.status === 'available';
   const checks =
     format.id === PROJECT_FILE_FORMAT_ID
       ? projectFileChecks(document)
-      : [...plannedFormatChecks(format), ...rasterChecks(document, format)];
+      : implemented
+        ? rasterChecks(document, format, context)
+        : [...plannedFormatChecks(format), ...rasterChecks(document, format, context)];
 
   const blocked = checks.filter((entry) => entry.status === 'blocked');
   const warnings = checks.filter((entry) => entry.status === 'warning');

@@ -1,5 +1,7 @@
 import type { DocumentPatch } from '../../state/document-session';
+import type { SceneCommand } from '../../core/editor/commands';
 import type { ForgeDocument } from '../../core/documents/types';
+import type { Result } from '../../core/result';
 
 /**
  * The contract every workspace panel uses to read and change the open document.
@@ -12,6 +14,14 @@ export type WorkspaceApi = {
   readonly doc: ForgeDocument;
   /** Applies a change. Resolves to `true` when it was recorded and persisted. */
   readonly commit: (label: string, patch: DocumentPatch) => Promise<boolean>;
+  /**
+   * Applies an editor command.
+   *
+   * Takes the command's `Result` rather than a bare command so a panel can pass the outcome of a
+   * builder without unwrapping it: a failure (a layer that no longer exists, an invalid value) is
+   * reported to the user instead of being dropped on the floor.
+   */
+  readonly run: (command: Result<SceneCommand>) => Promise<boolean>;
   readonly undo: () => void;
   readonly redo: () => void;
 };

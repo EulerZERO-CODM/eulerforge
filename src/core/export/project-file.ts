@@ -8,6 +8,7 @@
 
 import { migrateDocument } from '../documents/migrations';
 import type { ForgeDocument } from '../documents/types';
+import { downloadBlob } from './download';
 import { err, forgeError, type Result } from '../result';
 
 export const PROJECT_FILE_SCHEMA = 'forge/project-file';
@@ -98,16 +99,7 @@ export function projectFileName(document: ForgeDocument): string {
  * Triggers a browser download. Kept in the export module (rather than a component) so the only
  * DOM-touching code for exports is in one auditable place.
  */
-export function downloadProjectFile(document: ForgeDocument, now: Date = new Date()): void {
-  if (typeof window === 'undefined') return;
+export function downloadProjectFile(document: ForgeDocument, now: Date = new Date()): boolean {
   const blob = new Blob([serialiseProjectFile(document, now)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const anchor = window.document.createElement('a');
-  anchor.href = url;
-  anchor.download = projectFileName(document);
-  anchor.rel = 'noopener';
-  window.document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+  return downloadBlob(blob, projectFileName(document));
 }
