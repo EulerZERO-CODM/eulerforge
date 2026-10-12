@@ -1,0 +1,427 @@
+/**
+ * The studios Euler's Forge intends to ship, as data.
+ *
+ * Adding a studio means adding a definition here (or registering a new definition at boot) — no
+ * shell, navigation or discovery code needs to change. Availability flags are deliberately
+ * conservative: a studio is only `available` when a real, working entry point exists.
+ */
+
+import type { StudioDefinition } from './types';
+import { createStudioId, createStudioSlug } from './registry';
+import { brand } from '../types/brand';
+import type { DocumentTypeId } from '../documents/types';
+
+const documentType = (value: string): DocumentTypeId => brand<'DocumentTypeId'>(value);
+
+export const DESIGN_STUDIO: StudioDefinition = {
+  id: createStudioId('design'),
+  slug: createStudioSlug('design'),
+  name: 'Design Studio',
+  tagline: 'Posters, thumbnails, banners, social posts and slides.',
+  purpose:
+    'Design Studio is the layout discipline: fixed-size artboards where type, shapes and imagery are arranged on a grid. It is the first studio with a working workspace in Euler’s Forge, because canvas setup, units, guides and export readiness are foundations every other studio reuses.',
+  icon: 'layout',
+  accent: 'cobalt',
+  availability: 'available',
+  maturityNote:
+    'Document setup, units, guides, palette, local project library and project-file export are implemented. Drawing tools, text and image layers arrive in Phase 2.',
+  produces: [
+    'Social posts and stories',
+    'Video thumbnails and channel art',
+    'Link preview images',
+    'Presentation slides',
+    'Print posters, flyers and business cards',
+  ],
+  documentTypes: [documentType('design.canvas')],
+  capabilities: [
+    {
+      id: 'canvas.setup',
+      label: 'Canvas setup with real-world presets',
+      status: 'available',
+      detail:
+        'Start from 13 presets (social, web, video, presentation, print) or type exact pixel, millimetre and inch dimensions.',
+    },
+    {
+      id: 'canvas.guides',
+      label: 'Guides, safe areas and bleed preview',
+      status: 'available',
+      detail: 'Toggle margins, centre lines and grids, and see them drawn at the correct scale.',
+    },
+    {
+      id: 'project.library',
+      label: 'Local project library',
+      status: 'available',
+      detail: 'Projects are saved in this browser on this device only — no account required.',
+    },
+    {
+      id: 'project.file',
+      label: 'Project file export',
+      status: 'available',
+      detail: 'Download the document definition as a .forge.json file for backup and inspection.',
+    },
+    {
+      id: 'document.property-inspector',
+      label: 'Property inspector with undo/redo',
+      status: 'available',
+      detail: 'Changes to canvas, guides and metadata are command-based and can be undone.',
+    },
+    {
+      id: 'tools.selection',
+      label: 'Selection, move and transform tools',
+      status: 'planned',
+      detail: 'Direct manipulation on the artboard, with snapping to guides and objects.',
+    },
+    {
+      id: 'layers.text',
+      label: 'Text and shape layers',
+      status: 'planned',
+      detail: 'A layer stack with typography controls, alignment and reusable styles.',
+    },
+    {
+      id: 'assets.brand-kits',
+      label: 'Templates and brand kits',
+      status: 'planned',
+      detail: 'Pull fonts, palettes and components from the asset catalogue into a document.',
+    },
+    {
+      id: 'export.raster',
+      label: 'Raster and vector export',
+      status: 'planned',
+      detail: 'PNG, JPEG, PDF and SVG output once the raster/vector renderers exist.',
+    },
+  ],
+  engine: {
+    renderer: 'DOM + CSS layout surface with SVG guide overlays',
+    pipeline: 'Shared document model, unit conversion and geometry from Forge Core',
+    integrationPoint: 'src/studios/design (presentation surface: src/components/workspace/design)',
+    rationale:
+      'Graphic design is mostly text, shape and layout work. DOM gives correct text shaping, font fallbacks, accessibility and selectable content for free, and CSS already implements the layout semantics a design canvas needs. Raster/vector rendering is added per-export, not as the editing surface.',
+  },
+  entry: { route: '/studios/design', label: 'Open Design Studio' },
+  learningSlugs: ['canvas-and-units', 'choose-the-right-size', 'safe-areas-and-bleed'],
+  consumesFrom: [],
+  definitionVersion: 1,
+};
+
+export const PHOTO_STUDIO: StudioDefinition = {
+  id: createStudioId('photo'),
+  slug: createStudioSlug('photo'),
+  name: 'Photo Studio',
+  tagline: 'Adjust, retouch, mask and composite photographs.',
+  purpose:
+    'Photo Studio will handle tonal and colour adjustment, non-destructive edit stacks, selections, masks, healing and multi-image compositing. It needs a GPU compositor and a large-image pipeline, so it is scheduled after the shared document, history and asset foundations are proven by Design Studio.',
+  icon: 'aperture',
+  accent: 'ember',
+  availability: 'planned',
+  maturityNote: 'Not started. The document model and history layer already anticipate it.',
+  produces: [
+    'Corrected and colour-graded photographs',
+    'Retouched portraits and product shots',
+    'Background removals and cut-outs',
+    'Multi-layer composites',
+  ],
+  documentTypes: [documentType('photo.image')],
+  capabilities: [
+    {
+      id: 'adjust.stack',
+      label: 'Non-destructive adjustment stack',
+      status: 'planned',
+      detail: 'Exposure, contrast, curves, colour balance and sharpening that stay editable.',
+    },
+    {
+      id: 'select.mask',
+      label: 'Selections and masks',
+      status: 'planned',
+      detail: 'Brush, lasso and luminance/colour range selection with feathered masks.',
+    },
+    {
+      id: 'retouch.heal',
+      label: 'Retouching tools',
+      status: 'planned',
+      detail: 'Clone, heal and patch with sampled-source overlays.',
+    },
+    {
+      id: 'composite.layers',
+      label: 'Layer compositing',
+      status: 'planned',
+      detail: 'Blend modes, groups, opacity and layer masks across multiple images.',
+    },
+    {
+      id: 'metadata.exif',
+      label: 'EXIF-aware import',
+      status: 'planned',
+      detail: 'Read capture metadata, apply orientation, and keep provenance with the asset.',
+    },
+  ],
+  engine: {
+    renderer: 'WebGL2 compositor with a Canvas2D fallback for low-end devices',
+    pipeline:
+      'Image decoding (createImageBitmap), GPU shader passes, tiled caching for large files',
+    integrationPoint: 'src/studios/photo with an engine package under src/engines/raster',
+    rationale:
+      'Per-pixel editing needs the GPU; DOM cannot express blend maths or kernels at interactive rates. Keeping the engine behind the Forge Core document/history interfaces means photo work never depends on DOM-specific assumptions.',
+  },
+  entry: { route: null, label: 'Photo Studio' },
+  learningSlugs: ['what-adjustments-actually-do'],
+  consumesFrom: [DESIGN_STUDIO.id],
+  definitionVersion: 1,
+};
+
+export const VIDEO_STUDIO: StudioDefinition = {
+  id: createStudioId('video'),
+  slug: createStudioSlug('video'),
+  name: 'Video Studio',
+  tagline: 'Cut, arrange and export video with audio.',
+  purpose:
+    'Video Studio will be a timeline editor: importing clips, trimming, arranging tracks, adding titles, transitions and audio, then exporting. It depends on media decoding and encoding that the browser only exposes reliably through newer APIs, so its entry point comes after the raster foundation.',
+  icon: 'film',
+  accent: 'plum',
+  availability: 'planned',
+  maturityNote:
+    'Not started. Timeline data model and playback technology are still being evaluated.',
+  produces: [
+    'Short-form social edits',
+    'Promo and explainer cuts',
+    'Interview and talking-head edits',
+    'Simple multi-track mixes',
+  ],
+  documentTypes: [documentType('video.timeline')],
+  capabilities: [
+    {
+      id: 'timeline.multitrack',
+      label: 'Multi-track timeline',
+      status: 'planned',
+      detail: 'Video, audio, title and overlay tracks with trimming and ripple edits.',
+    },
+    {
+      id: 'media.import',
+      label: 'Media import and proxies',
+      status: 'planned',
+      detail: 'Import local files, generate lightweight proxies for smooth scrubbing.',
+    },
+    {
+      id: 'transitions',
+      label: 'Transitions and speed',
+      status: 'planned',
+      detail: 'Cross-dissolves, dips, speed ramps and hold frames.',
+    },
+    {
+      id: 'audio.mix',
+      label: 'Audio levels and fades',
+      status: 'planned',
+      detail: 'Per-clip gain, fades, ducking and a simple master bus.',
+    },
+    {
+      id: 'export.video',
+      label: 'Video export',
+      status: 'planned',
+      detail: 'MP4/WebM export via browser encoders where available, with a documented fallback.',
+    },
+  ],
+  engine: {
+    renderer: 'Timeline view (DOM) plus a decoded-frame preview surface',
+    pipeline:
+      'WebCodecs decode/encode where supported; demux/mux layer; frame-accurate scrub cache',
+    integrationPoint: 'src/studios/video with src/engines/media for decode/encode',
+    rationale:
+      'Video cannot share the raster engine: it is a time-based model with different caching, memory and determinism requirements. It shares only Forge Core concepts (documents, assets, history, export interface).',
+  },
+  entry: { route: null, label: 'Video Studio' },
+  learningSlugs: ['timeline-basics'],
+  consumesFrom: [PHOTO_STUDIO.id, DESIGN_STUDIO.id],
+  definitionVersion: 1,
+};
+
+export const MOTION_STUDIO: StudioDefinition = {
+  id: createStudioId('motion'),
+  slug: createStudioSlug('motion'),
+  name: 'Motion Studio',
+  tagline: 'Keyframes, animation and motion graphics.',
+  purpose:
+    'Motion Studio will animate the same visual vocabulary as Design Studio: shapes, text and imported artwork placed on a timeline with keyframes, easing and expressions. Because it evaluates a scene graph at a given time, it can share the vector rendering path and stay deterministic for export.',
+  icon: 'keyframe',
+  accent: 'teal',
+  availability: 'planned',
+  maturityNote: 'Not started. Depends on the vector scene model from the Illustration work.',
+  produces: [
+    'Animated titles and lower thirds',
+    'Logo reveals and stingers',
+    'Social motion posts',
+    'Explainer sequences assembled from scenes',
+  ],
+  documentTypes: [documentType('motion.scene')],
+  capabilities: [
+    {
+      id: 'keyframes',
+      label: 'Keyframes with easing',
+      status: 'planned',
+      detail: 'Animate any property with linear, eased and stepped interpolation.',
+    },
+    {
+      id: 'graph.editor',
+      label: 'Value graph editor',
+      status: 'planned',
+      detail: 'Fine-tune timing by dragging curves instead of typing easing values.',
+    },
+    {
+      id: 'scene.vector',
+      label: 'Vector scene composition',
+      status: 'planned',
+      detail: 'Shapes, paths and text shared with the Illustration Studio model.',
+    },
+    {
+      id: 'expressions',
+      label: 'Expressions and modifiers',
+      status: 'exploratory',
+      detail: 'Reusable motion logic; syntax and sandboxing are unresolved.',
+    },
+    {
+      id: 'export.frames',
+      label: 'Frame-accurate export',
+      status: 'planned',
+      detail: 'Deterministic frame rendering to video or image sequences.',
+    },
+  ],
+  engine: {
+    renderer: 'SVG/Canvas2D scene view with a deterministic evaluator',
+    pipeline:
+      'Pure-function scene evaluation at time t; the same evaluator drives preview and export',
+    integrationPoint: 'src/studios/motion with src/engines/vector shared with Illustration Studio',
+    rationale:
+      'Motion graphics are usually vector and text driven, so a resolution-independent evaluator gives crisper output and easier export than a raster-first engine. Determinism (same input → same frame) is a hard requirement for trustworthy export.',
+  },
+  entry: { route: null, label: 'Motion Studio' },
+  learningSlugs: ['keyframes-explained'],
+  consumesFrom: [DESIGN_STUDIO.id, PHOTO_STUDIO.id],
+  definitionVersion: 1,
+};
+
+export const ILLUSTRATION_STUDIO: StudioDefinition = {
+  id: createStudioId('illustration'),
+  slug: createStudioSlug('illustration'),
+  name: 'Illustration Studio',
+  tagline: 'Vector drawing, paths and illustration.',
+  purpose:
+    'Illustration Studio will cover bezier drawing, shape building, strokes and fills, and asset-friendly SVG output. Its path model is the piece Motion Studio reuses for animated vector graphics, which is why the two disciplines are scheduled to share one vector engine.',
+  icon: 'pen',
+  accent: 'violet',
+  availability: 'planned',
+  maturityNote: 'Not started. Path model and boolean operations are still being designed.',
+  produces: [
+    'Icons and pictograms',
+    'Logos and marks',
+    'Character and spot illustrations',
+    'SVG assets for the web',
+  ],
+  documentTypes: [documentType('illustration.artboard')],
+  capabilities: [
+    {
+      id: 'paths.drawing',
+      label: 'Bezier path drawing',
+      status: 'planned',
+      detail: 'Pen, curve and corner tools with precise handle control.',
+    },
+    {
+      id: 'shapes.boolean',
+      label: 'Shape building and booleans',
+      status: 'planned',
+      detail: 'Union, subtract, intersect and pathfinder-style combination.',
+    },
+    {
+      id: 'strokes.fills',
+      label: 'Strokes, fills and gradients',
+      status: 'planned',
+      detail: 'Pressure, variable width, dashes and gradient fills.',
+    },
+    {
+      id: 'svg.output',
+      label: 'Clean SVG output',
+      status: 'planned',
+      detail: 'Readable, optimised markup suitable for production websites.',
+    },
+    {
+      id: 'trace.exploratory',
+      label: 'Auto-trace',
+      status: 'exploratory',
+      detail: 'Converting bitmap art to paths; quality and tooling are unresolved.',
+    },
+  ],
+  engine: {
+    renderer: 'SVG view layer over a framework-free path model',
+    pipeline: 'Path/geometry kernel shared with Motion Studio; boolean ops and hit-testing in core',
+    integrationPoint: 'src/studios/illustration with src/engines/vector',
+    rationale:
+      'A vector document is a geometry problem, not a pixel problem. Keeping the model independent of SVG lets the same artboard be exported as SVG, rendered to canvas for animation, or rasterised for print.',
+  },
+  entry: { route: null, label: 'Illustration Studio' },
+  learningSlugs: ['vector-versus-raster'],
+  consumesFrom: [DESIGN_STUDIO.id],
+  definitionVersion: 1,
+};
+
+export const THREE_D_STUDIO: StudioDefinition = {
+  id: createStudioId('three-d'),
+  slug: createStudioSlug('three-d'),
+  name: '3D Studio',
+  tagline: 'Exploratory: modelling, materials and lighting.',
+  purpose:
+    '3D is listed as exploratory on purpose. A credible 3D workspace is a large commitment — scene graph, PBR materials, lighting, cameras and a rendering budget — and choosing to embed an existing engine versus writing one changes the platform’s dependency profile. The decision will be made against concrete user needs, not added for completeness.',
+  icon: 'cube',
+  accent: 'slate',
+  availability: 'exploratory',
+  maturityNote:
+    'No implementation, no committed technology. Listed so the interface boundaries stay honest.',
+  produces: [
+    'Product and packaging mock-ups (aspirational)',
+    'Simple animated 3D scenes (aspirational)',
+    '3D assets for the asset catalogue (aspirational)',
+  ],
+  documentTypes: [documentType('three.scene')],
+  capabilities: [
+    {
+      id: 'scene.graph',
+      label: 'Scene graph with cameras and lights',
+      status: 'planned',
+      detail: 'Meshes, materials, PBR lighting and multiple cameras.',
+    },
+    {
+      id: 'materials.pbr',
+      label: 'Physically based materials',
+      status: 'planned',
+      detail: 'Metalness/roughness workflow with texture maps.',
+    },
+    {
+      id: 'integrate.engine',
+      label: 'Engine decision',
+      status: 'exploratory',
+      detail:
+        'Embed a mature WebGL/WebGPU engine, or build a focused renderer. Both are on the table.',
+    },
+    {
+      id: 'export.gltf',
+      label: 'glTF export',
+      status: 'planned',
+      detail: 'Interchange with other 3D tools.',
+    },
+  ],
+  engine: {
+    renderer: 'Undecided: WebGL2/WebGPU via an embedded engine or a purpose-built renderer',
+    pipeline: 'Undecided; must not be allowed to constrain the 2D engines',
+    integrationPoint: 'src/studios/three-d (only if the exploratory work justifies it)',
+    rationale:
+      '3D has fundamentally different evaluation, memory and tooling needs from 2D. The platform records the boundary now so no existing studio is forced to become a 3D host later.',
+  },
+  entry: { route: null, label: '3D Studio' },
+  learningSlugs: [],
+  consumesFrom: [],
+  definitionVersion: 1,
+};
+
+export const STUDIO_DEFINITIONS: readonly StudioDefinition[] = [
+  DESIGN_STUDIO,
+  PHOTO_STUDIO,
+  VIDEO_STUDIO,
+  MOTION_STUDIO,
+  ILLUSTRATION_STUDIO,
+  THREE_D_STUDIO,
+] as const;

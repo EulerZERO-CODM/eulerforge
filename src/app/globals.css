@@ -1,0 +1,280 @@
+@import 'tailwindcss';
+
+/*
+ * Euler's Forge design tokens.
+ *
+ * Direction: dark graphite foundations, one warm accent, hairline borders, restrained surfaces.
+ * Colours are authored in OKLCH for perceptually even steps; every foreground/background pairing
+ * used in the interface is checked for contrast in `src/components/ui/contrast.test.ts`.
+ *
+ * Tokens are the single source of truth: components never hard-code a hex value
+ * (docs/DECISIONS.md -> ADR-0014).
+ */
+
+@theme {
+  /* ---------------------------------------------------------------- *
+   * Graphite scale — surfaces, borders and text
+   * ---------------------------------------------------------------- */
+  --color-ink-1000: oklch(12% 0.008 265);
+  --color-ink-950: oklch(15.5% 0.009 265);
+  --color-ink-900: oklch(18.5% 0.01 265);
+  --color-ink-850: oklch(21% 0.011 265);
+  --color-ink-800: oklch(24.5% 0.012 265);
+  --color-ink-700: oklch(31% 0.013 265);
+  --color-ink-600: oklch(40% 0.014 265);
+  --color-ink-500: oklch(52% 0.014 265);
+  --color-ink-400: oklch(64% 0.012 265);
+  --color-ink-300: oklch(74% 0.01 265);
+  --color-ink-200: oklch(84% 0.008 265);
+  --color-ink-100: oklch(93% 0.005 265);
+  --color-ink-50: oklch(97% 0.003 265);
+
+  /* Warm accent ("forge ember") — used sparingly for primary actions and focus. */
+  --color-ember-300: oklch(82% 0.09 55);
+  --color-ember-400: oklch(76% 0.13 52);
+  --color-ember-500: oklch(70% 0.16 47);
+  --color-ember-600: oklch(62% 0.16 42);
+  --color-ember-700: oklch(52% 0.14 40);
+
+  /* Secondary accent ("arc blue") — links, informational states, selected rows. */
+  --color-arc-300: oklch(82% 0.07 250);
+  --color-arc-400: oklch(74% 0.11 252);
+  --color-arc-500: oklch(66% 0.14 254);
+  --color-arc-600: oklch(56% 0.15 256);
+  --color-arc-700: oklch(46% 0.13 258);
+
+  /* Status colours */
+  --color-mint-400: oklch(78% 0.13 165);
+  --color-mint-600: oklch(58% 0.11 165);
+  --color-amber-400: oklch(82% 0.13 80);
+  --color-amber-600: oklch(66% 0.13 70);
+  --color-rose-400: oklch(72% 0.15 20);
+  --color-rose-600: oklch(58% 0.16 22);
+  --color-violet-400: oklch(74% 0.12 300);
+  --color-violet-600: oklch(56% 0.13 300);
+
+  /* Studio accent families */
+  --color-cobalt-400: oklch(74% 0.11 258);
+  --color-cobalt-600: oklch(56% 0.14 262);
+  --color-plum-400: oklch(74% 0.12 330);
+  --color-plum-600: oklch(54% 0.14 332);
+  --color-teal-400: oklch(78% 0.1 190);
+  --color-teal-600: oklch(56% 0.09 192);
+
+  /* ---------------------------------------------------------------- *
+   * Semantic aliases — what components actually use
+   * ---------------------------------------------------------------- */
+  --color-canvas: var(--color-ink-1000);
+  --color-surface: var(--color-ink-950);
+  --color-surface-raised: var(--color-ink-900);
+  --color-surface-overlay: var(--color-ink-850);
+  --color-surface-sunken: oklch(11% 0.008 265);
+  --color-line: oklch(26% 0.012 265);
+  --color-line-strong: oklch(34% 0.013 265);
+  --color-line-subtle: oklch(21% 0.01 265);
+
+  --color-fg: var(--color-ink-100);
+  --color-fg-muted: var(--color-ink-300);
+  --color-fg-subtle: var(--color-ink-400);
+  --color-fg-inverse: var(--color-ink-1000);
+
+  --color-accent: var(--color-ember-500);
+  --color-accent-hover: var(--color-ember-400);
+  --color-accent-quiet: oklch(30% 0.06 45);
+  --color-focus: var(--color-arc-400);
+
+  /* ---------------------------------------------------------------- *
+   * Typography
+   * ---------------------------------------------------------------- */
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif;
+  --font-mono:
+    ui-monospace, 'SFMono-Regular', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-2xs--letter-spacing: 0.04em;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.125rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.4rem;
+  --text-md: 0.9375rem;
+  --text-md--line-height: 1.5rem;
+  --text-lg: 1.0625rem;
+  --text-lg--line-height: 1.6rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 1.9rem;
+  --text-2xl--letter-spacing: -0.01em;
+  --text-3xl: 1.875rem;
+  --text-3xl--line-height: 2.25rem;
+  --text-3xl--letter-spacing: -0.015em;
+  --text-4xl: 2.375rem;
+  --text-4xl--line-height: 2.7rem;
+  --text-4xl--letter-spacing: -0.02em;
+
+  /* ---------------------------------------------------------------- *
+   * Shape and elevation
+   * ---------------------------------------------------------------- */
+  --radius-xs: 0.1875rem;
+  --radius-sm: 0.3125rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  --shadow-panel: 0 1px 0 0 oklch(100% 0 0 / 0.03) inset, 0 8px 24px -12px oklch(0% 0 0 / 0.7);
+  --shadow-overlay: 0 24px 60px -24px oklch(0% 0 0 / 0.85);
+  --shadow-focus: 0 0 0 2px var(--color-canvas), 0 0 0 4px var(--color-focus);
+
+  /* Spacing rhythm is the Tailwind default 4px scale; only two additions are needed. */
+  --spacing-4_5: 1.125rem;
+
+  --animate-fade-in: fade-in 140ms ease-out;
+  --animate-scale-in: scale-in 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-slide-in: slide-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-toast-in: toast-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Base layer
+ * ------------------------------------------------------------------ */
+
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
+
+  html {
+    color-scheme: dark;
+    -webkit-text-size-adjust: 100%;
+    scrollbar-color: var(--color-ink-700) transparent;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* One visible focus treatment everywhere: a two-ring outline that works on any surface. */
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: oklch(70% 0.16 47 / 0.32);
+  }
+
+  /* Numeric data (canvas sizes, DPI, revisions) is tabular so columns align. */
+  .forge-numeric {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.8125rem;
+    letter-spacing: -0.01em;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* User preference override (Settings → Motion) */
+[data-motion='reduce'] *,
+[data-motion='reduce'] *::before,
+[data-motion='reduce'] *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
+
+/* ------------------------------------------------------------------ *
+ * Component-level utilities
+ * ------------------------------------------------------------------ */
+
+@layer utilities {
+  /* Thin custom scrollbars for panels and menus. */
+  .forge-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-ink-700) transparent;
+  }
+
+  .forge-scroll::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .forge-scroll::-webkit-scrollbar-thumb {
+    background-color: var(--color-ink-700);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+
+  /* Faint technical grid used behind the document stage. */
+  .forge-grid-backdrop {
+    background-image:
+      linear-gradient(to right, oklch(100% 0 0 / 0.035) 1px, transparent 1px),
+      linear-gradient(to bottom, oklch(100% 0 0 / 0.035) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  .forge-text-balance {
+    text-wrap: balance;
+  }
+}

@@ -1,0 +1,568 @@
+/**
+ * Phased roadmap as typed data.
+ *
+ * docs/ROADMAP.md is the prose version of this file; the in-app `/roadmap` page renders it. Keeping
+ * it typed means statuses cannot silently drift and completion criteria are always shown next to the
+ * thing they measure (ADR-0012).
+ */
+
+export type RoadmapPhaseStatus = 'complete' | 'in-progress' | 'planned' | 'exploratory';
+export type RoadmapItemStatus = 'done' | 'in-progress' | 'planned' | 'exploratory';
+
+export const ROADMAP_STATUS_LABELS: Readonly<Record<RoadmapItemStatus, string>> = {
+  done: 'Done',
+  'in-progress': 'In progress',
+  planned: 'Planned',
+  exploratory: 'Exploratory',
+};
+
+export type RoadmapItem = {
+  readonly id: string;
+  readonly title: string;
+  readonly description: string;
+  readonly status: RoadmapItemStatus;
+  /** Ids of items that must land first. */
+  readonly dependsOn: readonly string[];
+  /** How we will know it is finished — measurable, not aspirational. */
+  readonly completionCriteria: readonly string[];
+  /** Links into the capability ledger in ./status.ts. */
+  readonly capabilityIds: readonly string[];
+};
+
+export type RoadmapPhase = {
+  readonly id: string;
+  readonly name: string;
+  readonly summary: string;
+  readonly status: RoadmapPhaseStatus;
+  readonly items: readonly RoadmapItem[];
+  readonly exitCriteria: readonly string[];
+};
+
+export const ROADMAP: readonly RoadmapPhase[] = [
+  {
+    id: 'phase-1',
+    name: 'Phase 1 — Foundation and platform shell',
+    summary:
+      'Engineering foundation, Forge Core domain model, studio registry, learning layer, asset ecosystem boundaries and a usable browser shell.',
+    status: 'complete',
+    items: [
+      {
+        id: 'p1.core',
+        title: 'Forge Core document model',
+        description:
+          'Immutable documents, Zod validation, unit conversion, geometry, schema versioning and migrations.',
+        status: 'done',
+        dependsOn: [],
+        completionCriteria: [
+          'Invalid documents cannot be constructed through the factory',
+          'A v0 document migrates to the current schema and validates',
+        ],
+        capabilityIds: ['core.document-model', 'core.migrations', 'core.unit-conversion'],
+      },
+      {
+        id: 'p1.history',
+        title: 'History and undo/redo integration point',
+        description:
+          'A framework-free history stack that the workspace drives for every document change.',
+        status: 'done',
+        dependsOn: ['p1.core'],
+        completionCriteria: [
+          'Undo and redo restore exact prior states',
+          'Depth is bounded and label metadata survives',
+        ],
+        capabilityIds: ['core.history'],
+      },
+      {
+        id: 'p1.studios',
+        title: 'Studio registry and discovery',
+        description:
+          'Six studios declared as data with honest availability, engine boundaries and capability statuses.',
+        status: 'done',
+        dependsOn: [],
+        completionCriteria: [
+          'Registering an invalid studio produces a reported issue',
+          'CI fails if a studio claims availability without an entry route',
+        ],
+        capabilityIds: ['studios.registry'],
+      },
+      {
+        id: 'p1.shell',
+        title: 'Application shell and starter flows',
+        description:
+          'Navigation, home dashboard, creation flow, project library, studio discovery, assets, learning hub, settings, command palette.',
+        status: 'done',
+        dependsOn: ['p1.core', 'p1.studios'],
+        completionCriteria: [
+          'Every primary navigation target renders a real screen',
+          'Creating a project from a preset produces a persisted, validated document',
+          'A save is never claimed when storage is a session-only fallback',
+        ],
+        capabilityIds: [
+          'shell.navigation',
+          'shell.command-palette',
+          'shell.project-library',
+          'platform.storage-durability',
+          'studios.design',
+        ],
+      },
+      {
+        id: 'p1.learning',
+        title: 'Learning layer',
+        description:
+          'Typed lessons, concepts, tool explanations and guided exercises with local progress.',
+        status: 'done',
+        dependsOn: [],
+        completionCriteria: [
+          'Content integrity checks pass',
+          'Lesson exercise steps map to real, reachable routes',
+        ],
+        capabilityIds: ['learn.hub', 'learn.progress'],
+      },
+      {
+        id: 'p1.assets',
+        title: 'Asset catalogue boundary',
+        description:
+          'Paginated query model, licence and provenance metadata, sample adapter and explicit notices.',
+        status: 'done',
+        dependsOn: [],
+        completionCriteria: [
+          'Query results paginate and facet correctly',
+          'Sample content is labelled as sample everywhere it appears',
+        ],
+        capabilityIds: ['assets.catalogue'],
+      },
+      {
+        id: 'p1.platform',
+        title: 'Quality gates',
+        description:
+          'Strict TypeScript, type-aware linting, formatting, unit and component tests, production build, CI workflow.',
+        status: 'done',
+        dependsOn: [],
+        completionCriteria: [
+          'npm run verify passes locally and in CI',
+          'No test is skipped to make the pipeline green',
+        ],
+        capabilityIds: ['platform.tooling', 'platform.env-validation'],
+      },
+    ],
+    exitCriteria: [
+      'A new user can create, configure, persist and export a project without hitting a dead end',
+      'No interface claims a capability that is not implemented',
+      'Every studio in the registry resolves to a real screen, implemented or explicitly pending',
+    ],
+  },
+  {
+    id: 'phase-2',
+    name: 'Phase 2 — Design Studio editing',
+    summary:
+      'Direct manipulation on the artboard: a layer model, text and shape tools, selection and transform, and raster export.',
+    status: 'planned',
+    items: [
+      {
+        id: 'p2.layers',
+        title: 'Layer model and scene tree',
+        description:
+          'Documents gain an ordered scene tree of layers (text, shape, image placeholder) with selection state that is not persisted as history noise.',
+        status: 'planned',
+        dependsOn: ['p1.core', 'p1.history'],
+        completionCriteria: [
+          'Layer operations are commands with labels and undo',
+          'A document with layers still validates against the schema and migrates forward',
+        ],
+        capabilityIds: ['studios.design'],
+      },
+      {
+        id: 'p2.text',
+        title: 'Text tool with typography controls',
+        description:
+          'Font family stack, size, weight, line height, tracking, alignment and colour.',
+        status: 'planned',
+        dependsOn: ['p2.layers'],
+        completionCriteria: [
+          'Text renders at correct position and wraps inside its box',
+          'Typography settings round-trip through the project file',
+        ],
+        capabilityIds: [],
+      },
+      {
+        id: 'p2.transform',
+        title: 'Selection, move, resize and snapping',
+        description: 'Direct manipulation with snapping to guides, grid and sibling edges.',
+        status: 'planned',
+        dependsOn: ['p2.layers'],
+        completionCriteria: [
+          'Snapping is deterministic and can be disabled',
+          'Every transform is one undoable step',
+        ],
+        capabilityIds: ['studios.design'],
+      },
+      {
+        id: 'p2.raster-export',
+        title: 'Raster export pipeline',
+        description: 'PNG/JPEG export via an offscreen renderer, with scale and quality options.',
+        status: 'planned',
+        dependsOn: ['p2.layers'],
+        completionCriteria: [
+          'Exported pixels match the on-screen composition within tolerance',
+          'Export is blocked with an explanation when unsupported elements exist',
+        ],
+        capabilityIds: ['core.rendering'],
+      },
+      {
+        id: 'p2.asset-placement',
+        title: 'Asset placement',
+        description:
+          'Drag sample graphics and palettes into a document with attribution preserved.',
+        status: 'planned',
+        dependsOn: ['p2.layers', 'p1.assets'],
+        completionCriteria: [
+          'Placed assets record their licence in the document',
+          'Unverified-provenance assets warn before use',
+        ],
+        capabilityIds: ['assets.usable-files'],
+      },
+    ],
+    exitCriteria: [
+      'A user can produce a real social post or thumbnail inside the app and export it',
+      'Editing a 30-layer document stays responsive on a mid-range laptop',
+      'Undo/redo covers every editing action with meaningful labels',
+    ],
+  },
+  {
+    id: 'phase-3',
+    name: 'Phase 3 — Vector engine and Illustration Studio',
+    summary: 'A shared path model, bezier editing, boolean operations and SVG export.',
+    status: 'planned',
+    items: [
+      {
+        id: 'p3.path-model',
+        title: 'Path and geometry kernel',
+        description:
+          'Framework-free path representation, hit-testing, transforms and boolean operations.',
+        status: 'planned',
+        dependsOn: ['p1.core'],
+        completionCriteria: [
+          'Boolean results are topologically valid',
+          'Kernel has no DOM dependency and is fully unit tested',
+        ],
+        capabilityIds: [],
+      },
+      {
+        id: 'p3.svg-view',
+        title: 'SVG view layer and export',
+        description: 'Render the path model to SVG and export production-quality files.',
+        status: 'planned',
+        dependsOn: ['p3.path-model'],
+        completionCriteria: [
+          'Round trip: draw → export SVG → re-import matches geometry within tolerance',
+        ],
+        capabilityIds: [],
+      },
+      {
+        id: 'p3.illustration',
+        title: 'Illustration Studio workspace',
+        description: 'Pen, node editing, shape building and stroke controls on the shared kernel.',
+        status: 'planned',
+        dependsOn: ['p3.svg-view'],
+        completionCriteria: [
+          'A user can draw and export an icon set',
+          'Studio flips to `available` in the registry with a working entry point',
+        ],
+        capabilityIds: ['studios.photo-video-motion-illustration'],
+      },
+    ],
+    exitCriteria: [
+      'Vector documents and design documents can share artwork both ways',
+      'SVG output is smaller and cleaner than a naive export',
+    ],
+  },
+  {
+    id: 'phase-4',
+    name: 'Phase 4 — Raster engine and Photo Studio',
+    summary: 'GPU compositing, an adjustment stack, selections, masks and retouching.',
+    status: 'planned',
+    items: [
+      {
+        id: 'p4.raster-engine',
+        title: 'GPU raster engine',
+        description:
+          'WebGL2 pipeline for image decoding, tiling and shader-based adjustments with a Canvas2D fallback.',
+        status: 'planned',
+        dependsOn: ['p1.core', 'p1.history'],
+        completionCriteria: [
+          'Adjustments evaluate in under 16 ms at 12 MP on reference hardware',
+          'Fallback path produces equivalent output within tolerance',
+        ],
+        capabilityIds: [],
+      },
+      {
+        id: 'p4.adjustments',
+        title: 'Non-destructive adjustment stack',
+        description: 'Ordered adjustments with reordering, bypass and per-step masks.',
+        status: 'planned',
+        dependsOn: ['p4.raster-engine'],
+        completionCriteria: [
+          'Reordering changes the result predictably',
+          'Stack serialises into the document model',
+        ],
+        capabilityIds: [],
+      },
+      {
+        id: 'p4.selection-mask',
+        title: 'Selections, masks and retouching',
+        description: 'Brush, lasso and range selections; feathered masks; clone and heal tools.',
+        status: 'planned',
+        dependsOn: ['p4.adjustments'],
+        completionCriteria: [
+          'Selections survive document reload',
+          'Mask edges show no visible banding at 100% zoom',
+        ],
+        capabilityIds: [],
+      },
+      {
+        id: 'p4.photo-studio',
+        title: 'Photo Studio workspace',
+        description: 'Import, develop and export photographs with the raster engine.',
+        status: 'planned',
+        dependsOn: ['p4.selection-mask'],
+        completionCriteria: [
+          'A RAW-free JPEG workflow is possible end to end',
+          'Studio flips to `available` with a working entry point',
+        ],
+        capabilityIds: ['studios.photo-video-motion-illustration'],
+      },
+    ],
+    exitCriteria: [
+      'Large images open and remain interactive without exhausting browser memory',
+      'Every adjustment is non-destructive and reloadable',
+    ],
+  },
+  {
+    id: 'phase-5',
+    name: 'Phase 5 — Motion Studio',
+    summary: 'Deterministic scene evaluation, keyframes, easing and frame-accurate export.',
+    status: 'planned',
+    items: [
+      {
+        id: 'p5.evaluator',
+        title: 'Deterministic scene evaluator',
+        description: 'Pure evaluation of a scene graph at time t, shared by preview and export.',
+        status: 'planned',
+        dependsOn: ['p3.path-model'],
+        completionCriteria: [
+          'The same time value produces byte-identical geometry in preview and export',
+        ],
+        capabilityIds: [],
+      },
+      {
+        id: 'p5.keyframes',
+        title: 'Keyframes, interpolation and graph editor',
+        description: 'Per-property keyframes with easing profiles and a curve editor.',
+        status: 'planned',
+        dependsOn: ['p5.evaluator'],
+        completionCriteria: [
+          'Interpolation types are unit tested against known values',
+          'Keyframe edits are undoable commands',
+        ],
+        capabilityIds: [],
+      },
+      {
+        id: 'p5.motion-studio',
+        title: 'Motion Studio workspace',
+        description: 'Timeline, property panel, playback controls and export.',
+        status: 'planned',
+        dependsOn: ['p5.keyframes'],
+        completionCriteria: [
+          'A title animation can be produced and exported',
+          'Studio flips to `available` with a working entry point',
+        ],
+        capabilityIds: ['studios.photo-video-motion-illustration'],
+      },
+    ],
+    exitCriteria: [
+      'Preview and export agree frame for frame',
+      'Studio is usable without reading documentation',
+    ],
+  },
+  {
+    id: 'phase-6',
+    name: 'Phase 6 — Video Studio',
+    summary:
+      'Media import, timeline editing, audio and encoding, built on browser media APIs where they exist.',
+    status: 'planned',
+    items: [
+      {
+        id: 'p6.media-pipeline',
+        title: 'Media decoding and proxy pipeline',
+        description:
+          'Import local files, decode with WebCodecs where available, generate scrub-friendly proxies.',
+        status: 'planned',
+        dependsOn: ['p1.core', 'p4.raster-engine'],
+        completionCriteria: [
+          'Feature detection downgrades explicitly rather than failing silently',
+          'Proxy generation keeps scrubbing above 24 fps',
+        ],
+        capabilityIds: [],
+      },
+      {
+        id: 'p6.timeline',
+        title: 'Timeline model and editing operations',
+        description: 'Tracks, clips, trimming, ripple/overwrite edits and undo integration.',
+        status: 'planned',
+        dependsOn: ['p6.media-pipeline'],
+        completionCriteria: [
+          'Editing operations are commands with labels',
+          'Timeline serialises into the document model',
+        ],
+        capabilityIds: [],
+      },
+      {
+        id: 'p6.video-studio',
+        title: 'Video Studio workspace and export',
+        description: 'Playback, audio mixing, transitions and MP4/WebM export.',
+        status: 'planned',
+        dependsOn: ['p6.timeline'],
+        completionCriteria: [
+          'A short edit exports and plays back correctly',
+          'Export failure states are explained, not silent',
+        ],
+        capabilityIds: ['studios.photo-video-motion-illustration'],
+      },
+    ],
+    exitCriteria: [
+      'A three-minute edit can be assembled and exported in-browser',
+      'Audio and video stay in sync throughout',
+    ],
+  },
+  {
+    id: 'phase-7',
+    name: 'Phase 7 — Persistence, accounts and collaboration',
+    summary:
+      'Optional cloud storage, sign-in, sharing and team features behind the existing repository boundary.',
+    status: 'planned',
+    items: [
+      {
+        id: 'p7.persistence',
+        title: 'Remote document repository',
+        description:
+          'A server-backed implementation of the document repository with optimistic concurrency on `revision`.',
+        status: 'planned',
+        dependsOn: ['p1.core', 'p1.shell'],
+        completionCriteria: [
+          'Conflict detection is tested with two clients',
+          'Local-only mode still works with no account',
+        ],
+        capabilityIds: ['shell.cloud-persistence'],
+      },
+      {
+        id: 'p7.accounts',
+        title: 'Authentication and account settings',
+        description: 'Sign-in, profile and session handling.',
+        status: 'planned',
+        dependsOn: ['p7.persistence'],
+        completionCriteria: [
+          'No secret reaches the client bundle',
+          'Account deletion removes server data',
+        ],
+        capabilityIds: ['platform.auth-billing'],
+      },
+      {
+        id: 'p7.remote-catalogue',
+        title: 'Remote asset catalogue',
+        description:
+          'Hosted, paginated catalogue with real licensed assets and provenance records.',
+        status: 'planned',
+        dependsOn: ['p7.persistence'],
+        completionCriteria: [
+          'Catalogue paging works against a server',
+          'Every record exposes licence and provenance before use',
+        ],
+        capabilityIds: ['assets.remote-catalogue'],
+      },
+    ],
+    exitCriteria: [
+      'Browser-first usage remains fully functional without an account',
+      'Data ownership and deletion are explicit in the interface',
+    ],
+  },
+  {
+    id: 'exploratory',
+    name: 'Exploratory — not committed',
+    summary:
+      'Ideas worth investigating, recorded so they do not accidentally shape Phase 1 architecture.',
+    status: 'exploratory',
+    items: [
+      {
+        id: 'x.three-d',
+        title: '3D Studio',
+        description:
+          'Modelling, PBR materials and lighting — embedded engine or purpose-built renderer, undecided.',
+        status: 'exploratory',
+        dependsOn: ['p5.evaluator'],
+        completionCriteria: [
+          'A technology decision is recorded as an ADR with measured evidence',
+          'No 2D engine is forced to host 3D',
+        ],
+        capabilityIds: ['studios.three-d'],
+      },
+      {
+        id: 'x.desktop',
+        title: 'Desktop application shell',
+        description:
+          'Tauri-style packaging that reuses the web codebase for file-system and native performance access.',
+        status: 'exploratory',
+        dependsOn: ['p3.path-model', 'p4.raster-engine'],
+        completionCriteria: [
+          'The renderer and core are proven to be DOM-agnostic first',
+          'Packaging does not fork the codebase',
+        ],
+        capabilityIds: [],
+      },
+      {
+        id: 'x.plugins',
+        title: 'Studio plugin API',
+        description: 'Third-party studios registering through the studio registry boundary.',
+        status: 'exploratory',
+        dependsOn: ['p2.layers', 'p3.path-model'],
+        completionCriteria: ['Sandboxing and capability limits are designed before any public API'],
+        capabilityIds: [],
+      },
+      {
+        id: 'x.tutor',
+        title: 'Adaptive learning',
+        description:
+          'Responding to what a learner actually struggles with, using their own document as the example.',
+        status: 'exploratory',
+        dependsOn: ['p2.layers', 'p1.learning'],
+        completionCriteria: [
+          'Privacy review completed',
+          'Quality evaluation exists; no confidently wrong explanations',
+        ],
+        capabilityIds: ['learn.adaptive-tutor'],
+      },
+    ],
+    exitCriteria: [
+      'Nothing in this phase constrains the committed phases',
+      'Each item graduates only with a recorded decision and measured evidence',
+    ],
+  },
+] as const;
+
+export function roadmapCounts(): Readonly<Record<RoadmapItemStatus, number>> {
+  const counts: Record<RoadmapItemStatus, number> = {
+    done: 0,
+    'in-progress': 0,
+    planned: 0,
+    exploratory: 0,
+  };
+  for (const phase of ROADMAP) for (const item of phase.items) counts[item.status] += 1;
+  return counts;
+}
+
+export function findRoadmapItem(id: string): readonly [RoadmapPhase, RoadmapItem] | undefined {
+  for (const phase of ROADMAP) {
+    const item = phase.items.find((candidate) => candidate.id === id);
+    if (item) return [phase, item];
+  }
+  return undefined;
+}
