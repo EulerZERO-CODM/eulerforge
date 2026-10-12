@@ -165,6 +165,13 @@ durable, so `createBrowserStorage()` returns the backend *and* its durability (`
    is `server-render` and the state layer reports the status as *undetermined*: no warning is
    rendered, because the browser would immediately contradict it on hydration. The DOM-environment
    tests assert silence for that case.
+   Claims are modelled with three phases rather than one boolean. `isVolatile()` answers only "is
+   storage refusing writes?", and a two-way test on it made an uninspected browser take the
+   persistent branch — the sidebar footer asserted that projects were stored before anything had
+   checked. `storagePhase()` now returns `persistent | volatile | undetermined`, wording lives in the
+   single `STORAGE_PHASE_CLAIMS` record (`volatile` must state what is lost and when; `undetermined`
+   must assert nothing), and every surface that makes a claim switches on the phase exhaustively, so
+   a new phase fails to compile until it is given wording.
 3. **The fallback must keep working.** Removing it would break server rendering, so it stays; what
    changed is that it is now labelled. Failures that do happen (quota, a refused write) stay visible
    on the save indicator and offer a retry that re-persists the exact revision the user sees.

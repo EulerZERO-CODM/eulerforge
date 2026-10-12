@@ -78,7 +78,11 @@ the workspace wires to a "Try saving again" action.
 
 `ForgeServices` also carries `storageStatus` (`src/state/storage-status.ts`), the durability
 vocabulary the interface uses: components read it rather than importing persistence, which is what
-keeps the "stored in this browser" claim honest when the browser has refused storage.
+keeps the "stored in this browser" claim honest when the browser has refused storage. That module
+exposes `storagePhase()` (`persistent | volatile | undetermined`), the `STORAGE_PHASE_CLAIMS` record
+of approved wording, and `storageBadge()`. Any surface that states something about storage switches
+on the phase exhaustively — a boolean "is it volatile?" is not enough, because "not volatile" is not
+"durable".
 
 `ForgeProvider` is the composition root. It constructs the service graph once per tab; components
 read it with hooks and never build repositories or catalogues themselves.

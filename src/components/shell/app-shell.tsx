@@ -5,7 +5,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import { env } from '../../config/env';
 import { useForgeServices } from '../../state/forge-provider';
-import { isVolatile } from '../../state/storage-status';
+import { storageClaim, storagePhase, type ForgeStorageStatus } from '../../state/storage-status';
 import { useDocumentLibrary } from '../../state/hooks';
 import { TooltipProvider } from '../ui/tooltip';
 import { ToastViewport } from '../ui/toast-viewport';
@@ -83,17 +83,42 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
   );
 }
 
+/**
+ * The sidebar's storage claim.
+ *
+ * Kept as an exhaustive switch over the storage phase rather than a boolean test, because the
+ * two-way form had a real defect: an uninspected browser is neither volatile nor persistent, so
+ * "not volatile" quietly rendered the persistent claim and the shell asserted that projects were
+ * stored before anything had checked. Adding a phase now fails to compile until it is handled here.
+ */
+function storageClaimElement(status: ForgeStorageStatus): ReactNode {
+  const phase = storagePhase(status);
+  const claim = storageClaim(status);
+
+  switch (phase) {
+    case 'persistent':
+      return claim;
+    case 'volatile':
+      // Amber, matching the save indicator and the banner: this is a warning, not a neutral note.
+      return <span className="text-amber-400">{claim}</span>;
+    case 'undetermined':
+      return claim;
+    default: {
+      // Unreachable while every phase is handled; a new phase must be given wording deliberately.
+      const exhaustive: never = phase;
+      return exhaustive;
+    }
+  }
+}
+
 function ShellFooter() {
   const { storageStatus } = useForgeServices();
-  const volatile = isVolatile(storageStatus);
 
   return (
     <div className="border-line-subtle text-2xs text-fg-subtle mt-4 space-y-1 border-t pt-3">
       <p className="forge-numeric">v0.1.0 · {env.environment}</p>
       <p>
-        {volatile
-          ? 'Nothing is being written to this device: projects live in memory for this tab only.'
-          : 'Projects are stored in this browser only.'}{' '}
+        {storageClaimElement(storageStatus)}{' '}
         <Link
           href="/learn/how-your-projects-are-stored"
           className="hover:text-fg-muted underline decoration-1 underline-offset-2"

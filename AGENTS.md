@@ -25,7 +25,8 @@ never weaken a check to make something pass.
    links. If a capability is not built, mark it `planned` and say so (ADR-0010).
 2. **Never present a fallback as durable.** If browser storage is unavailable, the app keeps working
    in memory but every surface must say so — no "Saved" indicator, badge or copy without checking
-   `storageStatus` (ADR-0006). Equally, a zoom level must render the geometry it claims: do not cap a
+   `storageStatus`, and no two-way `isVolatile()` test on copy that makes a *claim*: an uninspected
+   browser is undetermined, not durable (ADR-0006). Equally, a zoom level must render the geometry it claims: do not cap a
    canvas with CSS and leave the control offering it (ADR-0015).
 3. **Do not weaken the type system.** No `any`, no non-null assertions to silence the compiler, no
    `@ts-expect-error` without a comment explaining the upstream bug, no disabling strict flags. Prefer

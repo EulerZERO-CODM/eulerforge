@@ -102,7 +102,73 @@ export function volatileStorageStatus(detail: string | null = null): ForgeStorag
   return restrictedStatus(detail);
 }
 
-/** True when the interface must tell the user that nothing is written to the device. */
+/**
+ * An undetermined status: what a server render produces, before the browser has been inspected.
+ * Components must treat it as "nothing is known yet", never as "storage works".
+ */
+export function undeterminedStorageStatus(): ForgeStorageStatus {
+  return undeterminedStatus();
+}
+
+/**
+ * The three states the interface must distinguish.
+ *
+ * `isVolatile()` answers one question ("is storage refusing writes?"), which is not enough for copy
+ * that makes a *claim* about durability: with only that helper, "not volatile" reads as "persistent"
+ * and an uninspected browser ends up being described as if it were storing projects. A claim has
+ * three honest outcomes, so the state is modelled with three values and rendered exhaustively.
+ */
+export type StoragePhase = 'persistent' | 'volatile' | 'undetermined';
+
+/**
+ * Classifies a status for user-facing copy.
+ *
+ * `determined: false` wins over the durability flag: while the browser has not been inspected, the
+ * honest answer is "not known yet", even if a backend has been constructed for server rendering.
+ */
+export function storagePhase(status: ForgeStorageStatus): StoragePhase {
+  if (!status.determined) return 'undetermined';
+  return status.durability;
+}
+
+/**
+ * The single source of truth for what each phase may claim.
+ *
+ * Wording rules: `persistent` may say where projects are stored; `volatile` must say they are only
+ * in memory and what loses them; `undetermined` must claim nothing about storage at all.
+ */
+export const STORAGE_PHASE_CLAIMS: Readonly<Record<StoragePhase, string>> = {
+  persistent: 'Projects are stored in this browser only.',
+  volatile: 'Projects are only in memory and will be lost when this page reloads.',
+  undetermined: 'Checking storage…',
+};
+
+/** The claim for a status. Never says more than the phase supports. */
+export function storageClaim(status: ForgeStorageStatus): string {
+  return STORAGE_PHASE_CLAIMS[storagePhase(status)];
+}
+
+/**
+ * Short badge text for a status, plus whether it deserves a warning tone.
+ *
+ * Derived from the phase so a surface cannot describe an uninspected browser as storing projects,
+ * and cannot flag an unknown state as a failure either.
+ */
+export function storageBadge(status: ForgeStorageStatus): {
+  readonly label: string;
+  readonly warning: boolean;
+} {
+  switch (storagePhase(status)) {
+    case 'persistent':
+      return { label: 'Local to this device', warning: false };
+    case 'volatile':
+      return { label: 'In memory only', warning: true };
+    case 'undetermined':
+      return { label: 'Storage not checked', warning: false };
+  }
+}
+
+/** True when the interface must warn that nothing is being written to the device. */
 export function isVolatile(status: ForgeStorageStatus): boolean {
-  return status.durability === 'volatile' && status.determined;
+  return storagePhase(status) === 'volatile';
 }

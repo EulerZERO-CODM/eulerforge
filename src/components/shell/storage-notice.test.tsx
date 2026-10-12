@@ -5,7 +5,12 @@ import { AppShell } from './app-shell';
 import { StorageNotice } from './storage-notice';
 import { ForgeProvider } from '../../state/forge-provider';
 import { createTestServices } from '../../testing/forge-services';
-import { persistentStorageStatus, volatileStorageStatus } from '../../state/storage-status';
+import {
+  persistentStorageStatus,
+  storagePhase,
+  undeterminedStorageStatus,
+  volatileStorageStatus,
+} from '../../state/storage-status';
 import { isRoutable } from '../../testing/routes';
 import { resolve } from 'node:path';
 
@@ -61,11 +66,7 @@ describe('StorageNotice', () => {
 
   it('stays silent during server rendering, where the browser has not been asked yet', () => {
     render(
-      <ForgeProvider
-        services={createTestServices({
-          storageStatus: { ...volatileStorageStatus(), determined: false, cause: 'server-render' },
-        })}
-      >
+      <ForgeProvider services={createTestServices({ storageStatus: undeterminedStorageStatus() })}>
         <StorageNotice />
       </ForgeProvider>,
     );
@@ -96,7 +97,10 @@ describe('StorageNotice', () => {
       </ForgeProvider>,
     );
 
-    expect(screen.getByText(/Nothing is being written to this device/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/only in memory and will be lost when this page reloads/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/stored in this browser/i)).not.toBeInTheDocument();
     unmount();
 
     render(
@@ -108,5 +112,92 @@ describe('StorageNotice', () => {
     );
 
     expect(screen.getByText(/Projects are stored in this browser only/i)).toBeInTheDocument();
+    expect(screen.queryByText(/only in memory/i)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Undetermined storage — the state a server render produces, before the browser has been inspected.
+ *
+ * The defect these tests pin down: the footer branched two ways on "is storage refusing writes?", so
+ * an uninspected browser took the persistent branch and the shell claimed projects were stored before
+ * anything had checked. "Not volatile" is not the same as "durable".
+ */
+describe('undetermined storage', () => {
+  function renderFooter(status = undeterminedStorageStatus()) {
+    return render(
+      <ForgeProvider services={createTestServices({ storageStatus: status })}>
+        <AppShell>
+          <p>Screen content</p>
+        </AppShell>
+      </ForgeProvider>,
+    );
+  }
+
+  it('shows neutral wording instead of a durability claim', () => {
+    renderFooter();
+
+    expect(screen.getByText(/checking storage/i)).toBeInTheDocument();
+  });
+
+  it('does not claim projects are stored anywhere', () => {
+    renderFooter();
+
+    expect(screen.queryByText(/stored in this browser/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/saved/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/local to this device/i)).not.toBeInTheDocument();
+    // Nor the opposite claim: nothing has failed yet, so it must not read as an error either.
+    expect(screen.queryByText(/only in memory/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/not being saved/i)).not.toBeInTheDocument();
+  });
+
+  it('still offers the explanation link, so the wording is not a dead end', () => {
+    renderFooter();
+
+    const link = screen.getByRole('link', { name: /how storage works/i });
+    expect(isRoutable(appDir, link.getAttribute('href') ?? '')).toBe(true);
+  });
+
+  it('keeps the banner hidden until the browser has been checked', () => {
+    renderFooter();
+
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+  });
+
+  it('switches to the persistent claim once the browser has been checked', () => {
+    const { unmount } = renderFooter();
+    expect(screen.queryByText(/stored in this browser/i)).not.toBeInTheDocument();
+    unmount();
+
+    renderFooter(persistentStorageStatus());
+    expect(screen.getByText(/Projects are stored in this browser only/i)).toBeInTheDocument();
+    expect(screen.queryByText(/checking storage/i)).not.toBeInTheDocument();
+  });
+
+  it('reaches exactly one claim in each of the three states', () => {
+    const states: readonly {
+      readonly status: ReturnType<typeof persistentStorageStatus>;
+      readonly pattern: RegExp;
+    }[] = [
+      { status: persistentStorageStatus(), pattern: /stored in this browser only/i },
+      { status: volatileStorageStatus(), pattern: /only in memory and will be lost/i },
+      { status: undeterminedStorageStatus(), pattern: /checking storage/i },
+    ];
+
+    for (const status of states) {
+      const { unmount } = renderFooter(status.status);
+
+      // Exactly one of the three claims is on screen...
+      const present = states.filter((candidate) => screen.queryByText(candidate.pattern) !== null);
+      expect(
+        present.map((candidate) => candidate.pattern.source),
+        storagePhase(status.status),
+      ).toEqual([status.pattern.source]);
+
+      // ...and it is the one this status supports, never another phase's wording.
+      expect(screen.getByText(status.pattern)).toBeInTheDocument();
+
+      unmount();
+    }
   });
 });

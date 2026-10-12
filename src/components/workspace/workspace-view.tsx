@@ -14,6 +14,7 @@ import { PageHeader } from '../ui/section';
 import { EmptyState, ErrorState, InlineNote, SkeletonCard } from '../ui/states';
 import { useForgeServices } from '../../state/forge-provider';
 import { useDocumentSession } from '../../state/hooks';
+import { storageBadge } from '../../state/storage-status';
 import type { DocumentPatch } from '../../state/document-session';
 import { ContextHelp } from './context-help';
 import { DocumentAside } from './document-aside';
@@ -31,6 +32,7 @@ import type { WorkspaceApi } from './workspace-api';
 export function WorkspaceView({ documentId }: { readonly documentId: string }) {
   const router = useRouter();
   const { documents, toasts, storageStatus } = useForgeServices();
+  const badge = storageBadge(storageStatus);
   const { session, state, library } = useDocumentSession(documentId);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -156,13 +158,8 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
             <span aria-hidden>·</span>
             <span className="forge-numeric">revision {doc.revision}</span>
             <span aria-hidden>·</span>
-            <Badge tone={storageStatus.durability === 'volatile' ? 'warning' : 'neutral'}>
-              {storageStatus.durability === 'volatile'
-                ? storageStatus.determined
-                  ? 'In memory only'
-                  : 'Storage not checked'
-                : 'Local to this device'}
-            </Badge>
+            {/* Three states, three labels: see `storageBadge()` in the state layer. */}
+            <Badge tone={badge.warning ? 'warning' : 'neutral'}>{badge.label}</Badge>
           </>
         }
         actions={

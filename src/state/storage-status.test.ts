@@ -5,7 +5,12 @@ import {
   describeStorageBackend,
   isVolatile,
   persistentStorageStatus,
+  storageBadge,
+  storageClaim,
+  storagePhase,
+  undeterminedStorageStatus,
   volatileStorageStatus,
+  STORAGE_PHASE_CLAIMS,
   VOLATILE_STORAGE_LABEL,
   VOLATILE_STORAGE_NOTICE,
   PERSISTENT_STORAGE_LABEL,
@@ -73,5 +78,62 @@ describe('storage status', () => {
   it('describes persistent storage for adapters that know they are durable', () => {
     expect(persistentStorageStatus().durability).toBe('persistent');
     expect(isVolatile(persistentStorageStatus())).toBe(false);
+  });
+});
+
+/**
+ * Phase classification and the claims built on it.
+ *
+ * These exist because "is storage refusing writes?" is not the same question as "may we say projects
+ * are stored?". A two-way test made an uninspected browser fall through to the persistent wording.
+ */
+describe('storage phase and claims', () => {
+  it('classifies the three states the interface distinguishes', () => {
+    expect(storagePhase(persistentStorageStatus())).toBe('persistent');
+    expect(storagePhase(volatileStorageStatus())).toBe('volatile');
+    expect(storagePhase(undeterminedStorageStatus())).toBe('undetermined');
+  });
+
+  it('treats an uninspected browser as undetermined even if a backend exists', () => {
+    // The server-render status carries `durability: 'volatile'` because the fallback is in use, but
+    // nothing has failed, so the phase must not be reported as volatile either.
+    const status = undeterminedStorageStatus();
+
+    expect(status.durability).toBe('volatile');
+    expect(status.determined).toBe(false);
+    expect(storagePhase(status)).toBe('undetermined');
+    expect(isVolatile(status)).toBe(false);
+  });
+
+  it('gives each phase exactly one claim, and never claims durability without evidence', () => {
+    expect(storageClaim(persistentStorageStatus())).toBe(STORAGE_PHASE_CLAIMS.persistent);
+    expect(storageClaim(volatileStorageStatus())).toBe(STORAGE_PHASE_CLAIMS.volatile);
+    expect(storageClaim(undeterminedStorageStatus())).toBe(STORAGE_PHASE_CLAIMS.undetermined);
+
+    // The undetermined claim asserts nothing about where projects are.
+    expect(STORAGE_PHASE_CLAIMS.undetermined).not.toMatch(/stored|saved|memory/i);
+    expect(STORAGE_PHASE_CLAIMS.undetermined).toMatch(/checking/i);
+  });
+
+  it('labels a badge for each phase without overstating any of them', () => {
+    expect(storageBadge(persistentStorageStatus())).toEqual({
+      label: 'Local to this device',
+      warning: false,
+    });
+    expect(storageBadge(volatileStorageStatus())).toEqual({
+      label: 'In memory only',
+      warning: true,
+    });
+    // Undetermined must not read as durable, and must not read as a failure either.
+    expect(storageBadge(undeterminedStorageStatus())).toEqual({
+      label: 'Storage not checked',
+      warning: false,
+    });
+  });
+
+  it('states what volatile storage loses and when', () => {
+    expect(STORAGE_PHASE_CLAIMS.volatile).toMatch(/only in memory/i);
+    expect(STORAGE_PHASE_CLAIMS.volatile).toMatch(/lost/i);
+    expect(STORAGE_PHASE_CLAIMS.volatile).toMatch(/reload/i);
   });
 });
