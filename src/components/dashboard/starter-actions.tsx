@@ -3,6 +3,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 
 import { getCanvasPreset } from '../../core/documents/presets';
+import { getLayoutStarter } from '../../core/documents/starters';
 import { aspectRatioLabel } from '../../core/documents/geometry';
 import { cn } from '../../lib/cn';
 
@@ -25,7 +26,8 @@ type StarterAction = {
  */
 export function StarterActions() {
   const square = getCanvasPreset('social.square');
-  const thumbnail = getCanvasPreset('video.thumbnail');
+  const starter = getLayoutStarter('subject-title');
+  const starterPreset = starter ? getCanvasPreset(starter.presetId) : undefined;
 
   const actions: readonly StarterAction[] = [
     {
@@ -41,15 +43,16 @@ export function StarterActions() {
       icon: <PenLine aria-hidden className="size-4" />,
     },
     {
-      id: 'template',
-      title: 'Begin from a starter layout',
+      id: 'starter',
+      title: 'Begin from a layout starter',
       description:
-        'Start from a documented layout shape instead of an empty page, with guides already set.',
-      detail: thumbnail
-        ? `${thumbnail.label}: subject area, title block and badge, at ${aspectRatioLabel(thumbnail.size)}.`
-        : 'Starter layouts for social, video and print.',
-      href: '/create?preset=video.thumbnail&starter=layout',
-      cta: 'Use a starter layout',
+        'Start with the canvas and the guides an arrangement needs, instead of an empty page.',
+      detail:
+        starter && starterPreset
+          ? `${starter.label} — ${starter.regions.map((region) => region.label.toLowerCase()).join(', ')} at ${aspectRatioLabel(starterPreset.size)}. You place the artwork.`
+          : 'Documented starting arrangements for social, video and print.',
+      href: `/create?starter=subject-title`,
+      cta: 'Use a layout starter',
       icon: <LayoutTemplate aria-hidden className="size-4" />,
     },
     {

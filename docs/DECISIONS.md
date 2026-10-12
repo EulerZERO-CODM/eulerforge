@@ -72,6 +72,12 @@ reach users.
 - Next.js `typedRoutes` is **off**. It depends on files generated into `.next/`, which makes
   `tsc --noEmit` order-dependent. Route integrity is enforced instead by tests that resolve every
   navigation target against the real `src/app` tree (`src/testing/routes.ts`).
+- `.next/dev/types` is excluded from the type-check project. Next 16's *development* codegen emits a
+  route validator that imports `AppRouteHandlerRoutes` and `NextRequest` unconditionally, which trips
+  `noUnusedLocals` in a project that has no route handlers; the production build emits a variant that
+  does not. Excluding the dev-only directory keeps `npm run typecheck` deterministic whether or not a
+  dev server is running, without weakening any rule. `next build` still type-checks the generated
+  production types.
 
 **Reasoning.** The gates exist to catch real regressions (a dead link, a floating promise, an
 unhandled storage failure), not to be a style contest.

@@ -44,7 +44,7 @@ npm start
 | Command                 | What it does                                                        |
 | ----------------------- | ------------------------------------------------------------------- |
 | `npm run dev`           | Development server on port 3000                                     |
-| `npm run build`         | Production build (type-checks and statically renders every page)    |
+| `npm run build`         | Production build: type-checks and prerenders every static page      |
 | `npm start`             | Serves the production build                                         |
 | `npm run lint`          | ESLint (flat config, type-aware rules over `src/**`)                |
 | `npm run lint:fix`      | ESLint with autofix                                                 |
@@ -57,7 +57,7 @@ npm start
 | `npm run verify`        | Format check → lint → typecheck → tests → production build          |
 | `npm run clean`         | Removes `.next`, `out` and `coverage`                               |
 
-`npm run verify` is exactly what CI runs (`.github/workflows/ci.yml`).
+`.github/workflows/ci.yml` runs the same gates as separate steps (so a failure names the gate) plus a coverage report, on Node 22.x and 24.x.
 
 ## What is actually implemented
 
@@ -71,6 +71,9 @@ verifies it. A summary:
   with a v0 → v1 migration path, unit conversion (px/mm/in), canvas geometry and 13 canvas presets.
 - Local project storage in `localStorage` behind a promise-based repository boundary, with corrupt
   record handling, quota errors, a skipped-record report and device-local learning progress.
+- Layout starters: three documented starting arrangements that preselect a canvas and the guides
+  describing their regions — the interface is explicit that the user places the artwork, because
+  nothing renders a layout yet.
 - Undo/redo history, a command registry powering Cmd/Ctrl + K, and a typed platform event bus.
 - Studio registry: six disciplines as data, validated at startup, with availability flags that the
   navigation, discovery pages and roadmap all read from.

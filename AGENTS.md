@@ -12,6 +12,9 @@ npm run verify         # format:check → lint → typecheck → test → build 
 npm run dev            # development server
 ```
 
+`npm run typecheck` is expected to pass with or without a dev server running (`.next/dev/types` is
+excluded from the type-check project for that reason — see ADR-0003).
+
 Run `npm run verify` before proposing a change. Never claim a command passed without running it, and
 never weaken a check to make something pass.
 

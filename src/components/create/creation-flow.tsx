@@ -9,6 +9,7 @@ import { SAMPLE_ASSETS } from '../../core/assets/data';
 import { DEFAULT_GUIDES } from '../../core/documents/factories';
 import { aspectRatioLabel, megapixelLabel } from '../../core/documents/geometry';
 import { CANVAS_PRESETS, getCanvasPreset } from '../../core/documents/presets';
+import { getLayoutStarter } from '../../core/documents/starters';
 import {
   CANVAS_PRESET_CATEGORY_LABELS,
   type Canvas,
@@ -56,7 +57,14 @@ export function CreationFlow() {
   const defaults = useCreationDefaults();
 
   const requestedPreset = searchParams.get('preset');
-  const initialPreset = requestedPreset ? getCanvasPreset(requestedPreset) : undefined;
+  const layoutStarter = getLayoutStarter(searchParams.get('starter'));
+  // A starter documents its own canvas, so it wins over a bare `?preset=`; an explicit `?preset=`
+  // still wins over the starter so a shared link can override the arrangement's default size.
+  const initialPreset = requestedPreset
+    ? getCanvasPreset(requestedPreset)
+    : layoutStarter
+      ? getCanvasPreset(layoutStarter.presetId)
+      : undefined;
 
   const [step, setStep] = useState<StepId>('studio');
   const [studioId, setStudioId] = useState<string>(
@@ -86,9 +94,15 @@ export function CreationFlow() {
         },
   );
   const [guides, setGuides] = useState<GuideSettings>(
-    preferences.getState().preferences.defaultGuides,
+    layoutStarter ? layoutStarter.guides : preferences.getState().preferences.defaultGuides,
   );
-  const [title, setTitle] = useState(initialPreset ? `${initialPreset.label} project` : '');
+  const [title, setTitle] = useState(
+    layoutStarter
+      ? layoutStarter.titleSuggestion
+      : initialPreset
+        ? `${initialPreset.label} project`
+        : '',
+  );
   const [summary, setSummary] = useState('');
   const [tags, setTags] = useState('');
   const [paletteId, setPaletteId] = useState<string | null>(null);
@@ -188,6 +202,15 @@ export function CreationFlow() {
             );
           })}
         </ol>
+
+        {layoutStarter ? (
+          <InlineNote tone="info" title={`Layout starter: ${layoutStarter.label}`}>
+            <p>
+              {layoutStarter.description} Its canvas and guides are already selected below — change
+              anything you like. The starter arranges guides; you place the artwork.
+            </p>
+          </InlineNote>
+        ) : null}
 
         {step === 'studio' ? (
           <section aria-labelledby="step-studio" className="space-y-3">
@@ -562,6 +585,29 @@ export function CreationFlow() {
                 ]}
               />
             </Panel>
+
+            {layoutStarter ? (
+              <Panel className="space-y-3 p-4">
+                <div>
+                  <h3 className="text-fg text-sm font-semibold">
+                    Starter layout: {layoutStarter.label}
+                  </h3>
+                  <p className="text-fg-muted mt-0.5 text-xs">{layoutStarter.description}</p>
+                </div>
+                <dl className="space-y-2">
+                  {layoutStarter.regions.map((region) => (
+                    <div key={region.label} className="border-line border-l pl-3">
+                      <dt className="text-fg text-xs font-medium">{region.label}</dt>
+                      <dd className="text-fg-muted text-xs">{region.guidance}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="text-2xs text-fg-subtle">
+                  The starter sets the canvas and these guides. You draw into the regions yourself —
+                  this build has no automatic layout engine.
+                </p>
+              </Panel>
+            ) : null}
 
             {!canSubmit ? (
               <InlineNote
