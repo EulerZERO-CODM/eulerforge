@@ -414,3 +414,76 @@ browser.
 `sizing={{ kind: 'fluid' }}`, so the two meanings of "preview" never blur. Any future zoom mode (a
 zoom-to-selection, a percentage between the fixed levels) is added to the core function with tests
 rather than to the component's CSS.
+
+## ADR-0016 — One render plan and one painter serve both the artboard and export
+
+**Status:** Accepted
+
+**Context.** Phase 2 needed real drawing. The tempting shortcut is to let the editor be a DOM/SVG
+surface and hand export to a canvas library, or to let each of them interpret the document its own
+way. Both approaches drift: text wraps one way on screen and another in the file, stacking order
+differs, and "what you see is what you export" becomes a claim nobody can test. Pulling in a large
+graphics dependency would also have added a second geometry model to keep in sync.
+
+**Decision.**
+
+- The renderer is **Canvas 2D**, and the scene is described once as a **render plan**
+  (`src/core/render/plan.ts`): an ordered list of paint operations (background, rect, ellipse, text,
+  image) plus the issues found while planning. `src/core/render/paint.ts` draws that plan into any
+  object matching `PainterContext` (`globalAlpha`, `fillStyle`, `font`, the shape and image calls).
+- The **live artboard** and the **offscreen export** both build a plan from the same document and
+  paint it through the same code; they differ only in the transform they apply first (viewport zoom
+  versus output scale) and in which canvas implements `PainterContext`. The browser adapter is
+  `render/browser-canvas.ts`; tests use recording and real-canvas implementations.
+- **Text layout, wrapping, alignment and measurement live in the core** (`render/text-layout.ts`,
+  `render/measure.ts`) behind an injected `MeasureFactory`. Fonts are system stacks resolved per
+  platform, so nothing is downloaded and no webfont can fail at paint time.
+- **Guides, safe areas and selection handles stay DOM overlays.** They are interface, not artwork:
+  keeping them in the DOM preserves accessibility, keyboard focus and crisp hairlines at any zoom,
+  while keeping them out of the canvas guarantees they cannot leak into an export.
+- Raster output is produced offscreen at document size × scale, and `export/raster.ts` returns a
+  `Blob` plus width, height and byte size. Nothing in `src/core/**` touches `URL.createObjectURL` or
+  an `<a>` element; that lives in the single `export/download.ts` adapter.
+- Cost: no SVG export, no vector paths, and large documents are rasterised rather than
+  incrementally redrawn. Those are roadmap items (Phase 3 owns the path model), not gaps hidden in
+  this decision.
+
+**Consequences.** An export cannot silently disagree with the artboard: both consume
+`buildRenderPlan`, and the raster tests assert on real pixels through `@napi-rs/canvas`. A layer type
+that the renderer does not understand produces a **blocking render issue**, so export refuses by
+name instead of emitting an empty file. Because the plan is data, it is also the place to add future
+outputs (SVG, PDF) without touching the editor.
+
+## ADR-0017 — No interaction is drag-only, and transient state never enters the document
+
+**Status:** Accepted
+
+**Context.** Direct manipulation invites two well-known shortcuts: features that only exist inside a
+drag gesture, and interaction state (selection, hover, in-flight drags) written into the saved
+document because it was convenient to keep it in the same object. The first makes the editor
+unusable without a pointing device; the second makes history noisy, exports unpredictable and files
+impossible to compare. Both are expensive to undo later, so Phase 2 fixed the rules up front.
+
+**Decision.**
+
+- **Every pointer action has a keyboard path.** Selection moves with Arrow keys (Shift extends),
+  `Home`/`End` jump to the edges, layers move with the arrow keys, resize is reachable from the
+  inspector's numeric fields, and reorder, duplicate, hide, rename and delete are buttons in the
+  layer tree with accessible names. The artboard itself is a labelled, focusable region.
+- **Transient state lives outside the document.** Selection, snapping toggles, guide visibility, the
+  marquee, an in-flight drag and the zoom level live in component state or `src/core/editor`, never
+  in `ForgeDocument`. They are therefore never persisted, never exported and never history entries —
+  the history list shows edits, not clicks.
+- **A gesture commits once.** Pointer moves preview locally; the release resolves the gesture
+  (`resolveGesture`) into a patch and commits it with one label. A gesture that changed nothing
+  resolves to `unchanged` and produces no commit and no history entry, and cancelling leaves the
+  document exactly as it was.
+- **Interaction state is not selectable by accident.** The artboard stops the default drag/text
+  selection behaviour, and pointer capture is released on both pointer-up and pointer-cancel so a
+  lost pointer cannot leave the editor stuck in a gesture.
+
+**Consequences.** Accessibility is a property of the architecture rather than a follow-up task, and
+undo history stays meaningful: one drag, one entry, with a label that names what moved. The cost is
+duplication — each pointer affordance needs a keyboard equivalent — and the test suite covers both
+paths (`document-stage.test.tsx` for the keyboard surface, `gesture.test.ts` for the pointer maths)
+so they cannot drift apart. Anything that can only be done by dragging is treated as a bug.

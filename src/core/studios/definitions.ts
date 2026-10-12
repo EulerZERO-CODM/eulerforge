@@ -19,12 +19,12 @@ export const DESIGN_STUDIO: StudioDefinition = {
   name: 'Design Studio',
   tagline: 'Posters, thumbnails, banners, social posts and slides.',
   purpose:
-    'Design Studio is the layout discipline: fixed-size artboards where type, shapes and imagery are arranged on a grid. It is the first studio with a working workspace in Euler’s Forge, because canvas setup, units, guides and export readiness are foundations every other studio reuses.',
+    'Design Studio is the layout discipline: fixed-size artboards where type, shapes and imagery are arranged on a grid. It is the first studio with a working workspace in Euler’s Forge: canvas setup, units and guides, an editable layer scene, and PNG/JPEG export that runs through the same renderer as the artboard.',
   icon: 'layout',
   accent: 'cobalt',
   availability: 'available',
   maturityNote:
-    'Document setup, units, guides, palette, local project library and project-file export are implemented. Drawing tools, text and image layers arrive in Phase 2.',
+    'Document setup, units, guides, palette, a text/rectangle/ellipse/graphic layer stack, selection with move and resize, snapping, undo/redo, the local project library, .forge.json export and PNG/JPEG export are implemented. Not implemented: multiple artboards per document, per-run text styling, custom font uploads, templates and brand kits, and vector (SVG/PDF) export.',
   produces: [
     'Social posts and stories',
     'Video thumbnails and channel art',
@@ -68,14 +68,23 @@ export const DESIGN_STUDIO: StudioDefinition = {
     {
       id: 'tools.selection',
       label: 'Selection, move and transform tools',
-      status: 'planned',
-      detail: 'Direct manipulation on the artboard, with snapping to guides and objects.',
+      status: 'available',
+      detail:
+        'Select on the artboard or in the layer tree, then move and resize with visible handles, toggles for snapping and keyboard equivalents for every pointer action.',
     },
     {
       id: 'layers.text',
-      label: 'Text and shape layers',
+      label: 'Text, shape and graphic layers',
+      status: 'available',
+      detail:
+        'An ordered layer stack with text (font stack, size, weight, line height, tracking, alignment, colour), rectangles, ellipses and placed catalogue graphics that render, save and reload.',
+    },
+    {
+      id: 'layers.styles',
+      label: 'Reusable text and object styles',
       status: 'planned',
-      detail: 'A layer stack with typography controls, alignment and reusable styles.',
+      detail:
+        'Named styles that several layers share, so a change propagates instead of being repeated.',
     },
     {
       id: 'assets.brand-kits',
@@ -85,20 +94,34 @@ export const DESIGN_STUDIO: StudioDefinition = {
     },
     {
       id: 'export.raster',
-      label: 'Raster and vector export',
+      label: 'Raster export (PNG and JPEG)',
+      status: 'available',
+      detail:
+        'Export at the document’s pixel size times a chosen scale (0.5x to 4x), with PNG transparency preserved and an explicit flatten colour for JPEG.',
+    },
+    {
+      id: 'export.vector',
+      label: 'Vector export (SVG and PDF)',
       status: 'planned',
-      detail: 'PNG, JPEG, PDF and SVG output once the raster/vector renderers exist.',
+      detail:
+        'Real SVG and PDF writers on top of a path model; the format list says so until then.',
     },
   ],
   engine: {
-    renderer: 'DOM + CSS layout surface with SVG guide overlays',
+    renderer:
+      'Canvas 2D artboard with DOM overlays for selection, handles and guides, plus an offscreen canvas for export (ADR-0016)',
     pipeline: 'Shared document model, unit conversion and geometry from Forge Core',
     integrationPoint: 'src/studios/design (presentation surface: src/components/workspace/design)',
     rationale:
       'Graphic design is mostly text, shape and layout work. DOM gives correct text shaping, font fallbacks, accessibility and selectable content for free, and CSS already implements the layout semantics a design canvas needs. Raster/vector rendering is added per-export, not as the editing surface.',
   },
   entry: { route: '/studios/design', label: 'Open Design Studio' },
-  learningSlugs: ['canvas-and-units', 'choose-the-right-size', 'safe-areas-and-bleed'],
+  learningSlugs: [
+    'canvas-and-units',
+    'choose-the-right-size',
+    'safe-areas-and-bleed',
+    'export-readiness',
+  ],
   consumesFrom: [],
   definitionVersion: 1,
 };

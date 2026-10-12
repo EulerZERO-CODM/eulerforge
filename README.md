@@ -6,21 +6,25 @@ Euler's Forge is a browser-first creative platform: one place to make design, ph
 and illustration work, with the learning material built into the same environment instead of
 scattered across tutorials.
 
-This repository contains **Phase 1: the engineering foundation and the platform shell**. What that
-means in plain terms:
+This repository contains **Phase 1: the engineering foundation and the platform shell**, plus a
+working **Phase 2: Design Studio editing** surface. In plain terms:
 
 - A working, tested, type-checked application shell: navigation, home, project library, creation
   flow, studio discovery, learning hub, asset catalogue, settings, roadmap and a capability ledger.
-- **Design Studio** opens into a real workspace for *document setup*: canvas, units, guides, working
-  palette, project metadata, undo/redo, export readiness and a downloadable `.forge.json` project
-  file. There are **no drawing tools yet** — the workspace says so on screen.
+- **Design Studio** is an editor, not a mockup: canvas setup (units, presets, guides, palette,
+  metadata), an ordered layer scene of **text, rectangle, ellipse and placed graphic** layers,
+  selection from the artboard or the layer tree, move and resize with visible handles, snapping to
+  guides, grid lines and sibling edges, inspectable typography and shape settings, undo/redo with
+  labels, local-first saving, and a real **PNG or JPEG export** rendered from the same scene as the
+  artboard. `.forge.json` project files round-trip the whole document, layers included.
 - Studio **definitions** exist for Photo, Video, Motion, Illustration and 3D, each with honest
   availability flags, planned capabilities and the engine boundary it will plug into. None of them
   pretends to be usable.
 
-Nothing in this repository claims cloud sync, accounts, collaboration, rendering or AI features. The
-places those will live are marked as interfaces, planned items, or unavailable — never as working
-buttons.
+Nothing in this repository claims cloud sync, accounts, collaboration, vector export, video or AI
+features. The places those will live are marked as interfaces, planned items, or unavailable — never
+as working buttons. Where a capability is browser-only (a download, a real canvas raster) it is
+described as covered by a manual checklist rather than by a passing test.
 
 ## Quick start
 
@@ -144,15 +148,20 @@ Rules that keep this maintainable:
   refuses to become.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — layers, data flow, extension conventions.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — implemented / planned / exploratory, with exit criteria.
-- [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision records (ADR-0001 … ADR-0014).
+- [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision records (ADR-0001 … ADR-0017).
 - [`AGENTS.md`](AGENTS.md) — conventions for humans and coding agents working in this repository.
 
 ## Status and limitations
 
-Phase 1 is a foundation, not a product: one discipline has a usable setup workspace, no studio can
-yet create artwork, and everything is stored in one browser profile on one device. The roadmap is
-explicit about the order in which that changes, and each entry in it has measurable completion
-criteria.
+One discipline — Design Studio — can create real artwork end to end: shapes, text and placed
+graphics, edited on the artboard, saved locally, reopened, and exported as PNG or JPEG. Everything
+is stored in one browser profile on one device, so exporting a project file is the only backup.
+
+What is not implemented, and is labelled as such in the interface: multiple artboards per document,
+per-run text styling, custom fonts, reusable styles, templates and brand kits, vector (SVG/PDF)
+output, WebP and video, and every other studio. Pointer capture, the browser's own canvas output and
+file downloads have no automated browser runner in this repository — `docs/ROADMAP.md` carries the
+manual checklist for those, and roadmap items that depend on them stay `partial` rather than `done`.
 
 ## Licence
 

@@ -7,12 +7,16 @@ it; when the two disagree, the code and the ledger win, and that is a bug in thi
 
 Status vocabulary, used consistently everywhere:
 
-| Status         | Meaning                                                                        |
-| -------------- | ------------------------------------------------------------------------------ |
-| `done`         | Finished, with evidence recorded in the capability ledger.                      |
-| `in-progress`  | Actively being built; the UI may show a partial surface.                        |
-| `planned`      | Designed and scheduled, not started.                                            |
-| `exploratory`  | A real possibility under evaluation; no commitment to a technology or a date.   |
+| Status         | Meaning                                                                             |
+| -------------- | ----------------------------------------------------------------------------------- |
+| `done`         | Finished, and every item carries evidence that exists in the repository.             |
+| `partial`      | Working, with a specific gap named — never used to mean "probably fine".             |
+| `in-progress`  | Actively being built; the UI may show a partial surface.                             |
+| `planned`      | Designed and scheduled, not started.                                                 |
+| `exploratory`  | A real possibility under evaluation; no commitment to a technology or a date.        |
+
+Every item marked `done` lists its evidence in `roadmap.ts`, and the test suite fails if a named
+test file does not exist. A phase is only `complete` when all of its items are.
 
 ## Implemented — Phase 1 (complete)
 
@@ -26,23 +30,48 @@ capability ledger rendering the truth about the build.
 | History and undo/redo integration   | Labelled linear history wired into the workspace                                     |
 | Studio registry and discovery       | Six disciplines as data, validated at startup                                        |
 | Application shell and starter flows | Navigation, home, creation flow, project library, workspace, settings, ledger         |
-| Learning layer                      | 12 concepts, 4 tool explanations, 10 lessons with guided exercises                    |
+| Learning layer                      | 12 concepts, 6 tool explanations, 10 lessons with guided exercises                    |
 | Asset catalogue boundary            | Provenance/licence model, query engine, labelled sample content                       |
 | Quality gates                       | Strict TypeScript, type-aware ESLint, Prettier, Vitest, production build, CI workflow |
 
-## Planned
+## Phase 2 — Design Studio editing (`in-progress`)
 
-### Phase 2 — Design Studio editing
+Depends on the Phase 1 document model and history. Exit criteria: a user can produce a real social
+post or thumbnail inside the app and export it; a 30-layer document stays responsive on a mid-range
+laptop; undo/redo covers every editing action with meaningful labels.
 
-- Layer model and scene tree.
-- Text tool with typography controls.
-- Selection, move, resize and snapping.
-- Raster export pipeline (which unblocks PNG/JPEG/WebP/PDF in the export panel).
-- Asset placement from the catalogue into a document.
+| Item                                | Status     | What it delivered                                                                                              |
+| ----------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------- |
+| Layer model and scene tree          | `done`     | Ordered text/rectangle/ellipse/graphic layers, stable ids, schema validation, v1 → v2 migration, commands with undo |
+| Text tool with typography controls  | `done`     | Font stack, size, weight, line height, tracking, alignment, colour; wrapping inside the layer's box              |
+| Selection, move, resize and snapping| `done`     | Selection from the artboard and the tree, visible handles, snapping to guides/grid/siblings, one commit per gesture |
+| Raster export pipeline              | `partial`  | PNG and JPEG at the document's pixel size times a scale, transparency preserved, JPEG flattened onto a stated colour. Gap: pixel-for-pixel comparison with a real browser canvas has no automated runner here |
+| Asset placement                     | `done`     | Ten repository-authored graphics placeable as image layers with licence, author and provenance recorded in the document; metadata-only records stay labelled reference-only |
 
-*Depends on:* Phase 1 document model and history. *Completion criteria* are listed per item in
-`roadmap.ts` — for example, the raster pipeline is complete when a document exports to PNG at its
-declared pixel size and the exported file matches the canvas geometry within one pixel.
+Not part of this phase, and not claimed anywhere: multiple artboards per document, per-run text
+styling, custom font uploads, reusable styles, templates and brand kits, vector (SVG/PDF) export.
+
+### Manual browser checklist for Phase 2
+
+The repository has no automated browser runner. These steps were written to be run by hand, and they
+are listed rather than assumed; anything they cover stays out of the "tested" column until someone
+does:
+
+1. Open a project, add a rectangle, an ellipse and a text layer; drag each one and confirm the
+   artboard updates while dragging and that the history panel gains exactly one entry per drag.
+2. Resize a layer from each of the eight handles and confirm the opposite edge stays put (or moves
+   symmetrically with Alt held), and that snapping can be toggled off from the toolbar.
+3. Press Escape mid-drag and confirm the document is unchanged and no history entry appears.
+4. Edit the text content and typography in the inspector; confirm the text rewraps inside its box
+   and stays inside the frame at 25%, 100% and 200% zoom.
+5. Place a graphic from the catalogue, confirm the attribution row appears in the document
+   inspector, save, reload the page and confirm the graphic and its attribution come back.
+6. Export PNG with transparency at 2x and JPEG at 1x; open both files and confirm the pixel
+   dimensions are canvas size × scale, the stacking matches the artboard and the JPEG is flattened.
+7. Reload with the image file removed from `public/forge-assets/` and confirm the export refuses
+   with a named cause instead of producing a blank file.
+
+## Planned after Phase 2
 
 ### Phase 3 — Vector engine and Illustration Studio
 

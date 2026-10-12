@@ -259,6 +259,106 @@ export const TOOL_EXPLANATIONS: readonly ToolExplanation[] = [
     studioIds: ['design'],
   },
   {
+    id: toolId('tool.layers-and-selection'),
+    toolLabel: 'Layers, selection and transforms',
+    summary: 'The layer stack, and moving or resizing what you select.',
+    whatItDoes:
+      'A document holds an ordered stack of text, rectangle, ellipse and graphic layers. You can select a layer on the artboard or in the layer tree, move or resize it with the visible handles, and reorder, rename, hide, lock, duplicate or delete it — each action being one labelled step in the history.',
+    whyUseIt:
+      'The stack order is the document: whichever layer is higher up paints over the ones below it. Working through the tree as well as the artboard is how you keep a busy layout understandable a week later.',
+    settings: [
+      {
+        name: 'Selection',
+        whatItDoes:
+          'Click a layer to select it, Shift-click to add another, or drag on empty artboard space to marquee-select several at once.',
+        whyItMatters:
+          'Transform actions apply to the whole selection, so a wrong selection moves the wrong things.',
+        typicalValues:
+          'One layer at a time for fine positioning; several for aligning or nudging a group.',
+        advancedAlternative:
+          'Illustration-style tools add groups, isolation mode and lock-all-others to keep large selections manageable.',
+      },
+      {
+        name: 'Snapping',
+        whatItDoes:
+          'Nudges a move or resize onto nearby guides, grid lines and sibling edges or centres.',
+        whyItMatters:
+          'Snapping is what makes a layout look deliberate: edges that line up exactly, rather than almost.',
+        typicalValues:
+          'On while placing elements against the safe area, grid or each other; off when you want a position that is deliberately off-grid.',
+        advancedAlternative:
+          'Design tools add configurable snap zones, spacing hints and alignment objects; those are later work here.',
+      },
+      {
+        name: 'Transient previews',
+        whatItDoes:
+          'During a drag the artboard shows the provisional result; releasing commits it once.',
+        whyItMatters:
+          'One drag produces one undo step, so history stays readable instead of recording every pointer movement.',
+        typicalValues: 'Press Escape or cancel to abandon a drag and leave the document untouched.',
+        advancedAlternative:
+          'History panels in mature tools add branching, snapshots and per-layer history.',
+      },
+    ],
+    whenAdvancedIsAppropriate: [
+      'When a layout is built from a grid and you want every element snapped to it.',
+      'When a poster is assembled from many pieces and stacking order is how you compose them.',
+      'When you need to reproduce a placement exactly and would rather snap than eyeball it.',
+    ],
+    relatedConceptIds: [conceptId('canvas'), conceptId('aspect-ratio')],
+    relatedLessonSlugs: ['your-first-project'],
+    studioIds: ['design'],
+  },
+  {
+    id: toolId('tool.text-and-typography'),
+    toolLabel: 'Text and typography',
+    summary: 'Text layers and the controls that decide how they look.',
+    whatItDoes:
+      'Draws text inside its own box, wrapping to that box width and aligning left, centre or right. The inspector sets the font stack, size, weight, line height, letter spacing and colour.',
+    whyUseIt:
+      'Text carried most of the meaning in the pieces this studio is built for, and typography settings are what make it readable and consistent rather than merely present.',
+    settings: [
+      {
+        name: 'Font stack',
+        whatItDoes:
+          'Chooses a system font stack — sans, serif or mono — rather than a named webfont.',
+        whyItMatters:
+          'A stack that exists on the reader’s machine always resolves, so a design cannot break because a font failed to download.',
+        typicalValues:
+          'Sans for interfaces and social work, serif for editorial, mono for technical labels.',
+        advancedAlternative:
+          'Self-hosted fonts with a licence record would allow brand typography; that needs an asset pipeline this build does not have.',
+      },
+      {
+        name: 'Size, weight and line height',
+        whatItDoes:
+          'Sets the size in pixels, the weight from the available list, and the line box as a multiple of the size.',
+        whyItMatters:
+          'Line height controls the page texture: too tight and paragraphs turn into blocks, too loose and they fall apart.',
+        typicalValues: '1.2 for headings, 1.4 to 1.6 for body text.',
+        advancedAlternative:
+          'Optical sizing and per-run styling are features of dedicated typesetting tools.',
+      },
+      {
+        name: 'Tracking and alignment',
+        whatItDoes:
+          'Adjusts the gap between letters and decides which edge of the box the text hugs.',
+        whyItMatters:
+          'Loose tracking helps small caps and labels; alignment is how text lines up with everything around it.',
+        typicalValues:
+          'Zero tracking for body copy, tight negative tracking for large display type.',
+        advancedAlternative: 'Kerning pairs and OpenType features require a shaping engine.',
+      },
+    ],
+    whenAdvancedIsAppropriate: [
+      'When text has to stay legible at a small size on a busy background — check the contrast you can see, not the one you assumed.',
+      'When a heading and body text must share a typographic scale rather than being sized by eye.',
+    ],
+    relatedConceptIds: [conceptId('canvas')],
+    relatedLessonSlugs: ['your-first-project', 'export-readiness'],
+    studioIds: ['design'],
+  },
+  {
     id: toolId('tool.export-readiness'),
     toolLabel: 'Export readiness check',
     summary: 'Validates a document against the requirements of the format you chose.',
@@ -483,7 +583,7 @@ export const LESSONS: readonly Lesson[] = [
       {
         type: 'roadmapNote',
         title: 'What is not built yet',
-        body: 'Artboard duplication, layout reflow and batch export of multiple sizes do not exist in this build. The roadmap lists multi-artboard documents as a Phase 2 item.',
+        body: 'Multi-artboard documents, layout reflow and batch export of several sizes do not exist in this build. One document holds one artboard, and export writes one image per run.',
       },
     ],
     relatedLessonSlugs: ['canvas-and-units', 'your-first-project'],
@@ -1061,7 +1161,7 @@ export const LESSONS: readonly Lesson[] = [
         type: 'callout',
         tone: 'note',
         title: 'What is genuinely available to export today',
-        body: 'One format is implemented: the .forge.json project file, which contains the document definition. PNG, JPEG, PDF, SVG and video formats are listed in the UI as planned so you can see the intended shape of the pipeline — but no rasteriser exists in this build, and the interface says so rather than producing an empty file.',
+        body: 'PNG and JPEG are implemented, and so is the .forge.json project file, which contains the document definition rather than any pixels. PNG keeps transparency; JPEG has no alpha channel, so it is flattened onto a stated background colour. SVG, PDF, WebP and video stay listed as planned in the UI: they are not implemented, and the interface says so rather than producing an empty file.',
       },
       {
         type: 'checklist',
@@ -1115,7 +1215,7 @@ export const LESSONS: readonly Lesson[] = [
         type: 'prose',
         heading: 'What you will produce',
         body: [
-          'A configured design document for a real placement, with guides, a palette and an exported project file. No prior editing experience is assumed, and nothing in this walkthrough depends on tools that do not exist yet.',
+          'A design document for a real placement: shapes and text built on the artboard, a palette applied, the layout saved, reopened and exported as an image or a project file. No prior editing experience is assumed, and nothing here depends on tools that do not exist yet.',
         ],
       },
       {

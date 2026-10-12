@@ -1,10 +1,10 @@
 /**
  * Layout starters.
  *
- * A starter is a documented *starting arrangement*, not a rendered template: Phase 1 cannot place
- * text or shapes on a canvas yet, so promising a finished layout would be a lie. What a starter can
- * honestly do is choose the canvas, name the project, and set the guides that describe where the
- * layout's regions belong — which is exactly what the workspace then shows on the stage.
+ * A starter is a documented *starting arrangement*, and deliberately not a rendered template: it
+ * sets the canvas, the project name and the guides that describe where the layout's regions belong.
+ * It inserts no layers, so it cannot promise artwork it did not create — what it says is exactly
+ * what the workspace then shows on the stage.
  *
  * Each starter therefore records the regions its guides describe, so the interface can explain the
  * intent instead of implying that artwork already exists.
