@@ -102,10 +102,16 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     id: 'core.rendering',
     area: 'core',
     label: 'Rasterisation / rendering pipeline',
-    description: 'Turning a document into pixels.',
-    status: 'planned',
-    verification: [],
-    gap: 'No renderer exists. PNG, JPEG, PDF and SVG export are therefore blocked in the interface, not silently broken.',
+    description:
+      'One render plan and one painter turn a document into pixels, used by the live artboard and by offscreen PNG/JPEG export alike (ADR-0016).',
+    status: 'implemented',
+    verification: [
+      'src/core/render/text-layout.test.ts',
+      'src/core/render/plan.test.ts',
+      'src/core/render/paint.test.ts',
+      'src/core/export/raster.test.ts (real pixels through @napi-rs/canvas)',
+    ],
+    gap: 'SVG, PDF, WebP and video output are still planned; the format registry keeps them labelled as such.',
   },
   {
     id: 'shell.navigation',
@@ -212,10 +218,16 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     id: 'assets.usable-files',
     area: 'assets',
     label: 'Assets that can be placed in a document',
-    description: 'Applying an asset to a canvas, and asset files with real content.',
-    status: 'planned',
-    verification: [],
-    gap: 'Records currently carry descriptions and metadata only. Placement depends on the design tools in Phase 2.',
+    description:
+      'Ten repository-authored SVG graphics and textures ship with the build and can be placed as image layers; placement records licence, author and provenance in the document, and metadata-only records are labelled as reference-only.',
+    status: 'implemented',
+    verification: [
+      'src/core/assets/catalog.test.ts',
+      'src/core/editor/commands.test.ts',
+      'src/components/workspace/graphic-picker.test.tsx',
+      'src/components/workspace/workspace-editor.test.tsx',
+    ],
+    gap: 'The catalogue is a bundled sample, not a library: templates, fonts, components and palettes remain reference records.',
   },
   {
     id: 'studios.registry',
@@ -231,14 +243,16 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     area: 'studios',
     label: 'Design Studio workspace',
     description:
-      'Document setup, guides, units, palette, metadata, history/undo, export readiness, project file download and a stage that renders the document geometry at a real zoom. No drawing tools.',
+      'Document setup, guides, units, palette, metadata, history/undo and export readiness, plus a real editor: add text, rectangles, ellipses and catalogue graphics, select and transform them on the artboard, edit typography and shape settings, and export PNG or JPEG.',
     status: 'partial',
     verification: [
+      'src/components/workspace/workspace-editor.test.tsx',
       'src/components/workspace/document-aside.test.tsx',
       'src/components/workspace/document-stage.test.tsx',
-      'Manual check: change canvas size, undo, redo, export',
+      'src/core/editor/commands.test.ts',
+      'src/core/editor/gesture.test.ts',
     ],
-    gap: 'Selection, text, shape and image tools are not implemented; the workspace says so and links to the roadmap.',
+    gap: 'Pointer capture, canvas rasterisation and file download have no automated browser runner in this repository: they are covered by the manual checklist in docs/ROADMAP.md, not by a passing test.',
   },
   {
     id: 'studios.photo-video-motion-illustration',

@@ -87,9 +87,12 @@ describe('capability ledger', () => {
     expect(getCapability('core.not-a-capability')).toBeUndefined();
   });
 
-  it('names the workspace panels honestly: the Design Studio entry is partial, not done', () => {
+  it('names the workspace panels honestly: the Design Studio entry stays partial until a browser run', () => {
     const design = PLATFORM_CAPABILITIES.find((capability) => capability.id === 'studios.design');
     expect(design?.status).toBe('partial');
-    expect(design?.description).toMatch(/no drawing tools/i);
+    // The editing tools exist and are described as existing...
+    expect(design?.description).toMatch(/artboard/i);
+    // ...and the gap names what a jsdom suite cannot cover rather than staying silent.
+    expect(design?.gap).toMatch(/manual checklist/i);
   });
 });

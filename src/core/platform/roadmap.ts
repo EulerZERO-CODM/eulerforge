@@ -7,10 +7,15 @@
  */
 
 export type RoadmapPhaseStatus = 'complete' | 'in-progress' | 'planned' | 'exploratory';
-export type RoadmapItemStatus = 'done' | 'in-progress' | 'planned' | 'exploratory';
+/**
+ * `partial` exists so a genuinely half-finished item does not have to choose between overclaiming
+ * (`done`) and underclaiming (`planned`). Its `gap` says what is missing.
+ */
+export type RoadmapItemStatus = 'done' | 'partial' | 'in-progress' | 'planned' | 'exploratory';
 
 export const ROADMAP_STATUS_LABELS: Readonly<Record<RoadmapItemStatus, string>> = {
   done: 'Done',
+  partial: 'Partially done',
   'in-progress': 'In progress',
   planned: 'Planned',
   exploratory: 'Exploratory',
@@ -25,6 +30,13 @@ export type RoadmapItem = {
   readonly dependsOn: readonly string[];
   /** How we will know it is finished — measurable, not aspirational. */
   readonly completionCriteria: readonly string[];
+  /**
+   * What actually demonstrates the claim: test files, or an explicit manual step.
+   * Required for `done`; the test suite checks that every named file exists.
+   */
+  readonly evidence?: readonly string[];
+  /** What is still missing, for `partial` and `in-progress` items. */
+  readonly gap?: string;
   /** Links into the capability ledger in ./status.ts. */
   readonly capabilityIds: readonly string[];
 };
@@ -57,6 +69,13 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Invalid documents cannot be constructed through the factory',
           'A v0 document migrates to the current schema and validates',
         ],
+        evidence: [
+          'src/core/documents/schema.test.ts',
+          'src/core/documents/factories.test.ts',
+          'src/core/documents/migrations.test.ts',
+          'src/core/documents/units.test.ts',
+          'src/core/documents/geometry.test.ts',
+        ],
         capabilityIds: ['core.document-model', 'core.migrations', 'core.unit-conversion'],
       },
       {
@@ -70,6 +89,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Undo and redo restore exact prior states',
           'Depth is bounded and label metadata survives',
         ],
+        evidence: ['src/core/history/history.test.ts'],
         capabilityIds: ['core.history'],
       },
       {
@@ -83,6 +103,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Registering an invalid studio produces a reported issue',
           'CI fails if a studio claims availability without an entry route',
         ],
+        evidence: ['src/core/studios/registry.test.ts', 'src/core/studios/definitions.test.ts'],
         capabilityIds: ['studios.registry'],
       },
       {
@@ -96,6 +117,11 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Every primary navigation target renders a real screen',
           'Creating a project from a preset produces a persisted, validated document',
           'A save is never claimed when storage is a session-only fallback',
+        ],
+        evidence: [
+          'src/components/shell/app-shell.test.tsx',
+          'src/components/shell/command-palette.test.tsx',
+          'src/components/shell/storage-notice.test.tsx',
         ],
         capabilityIds: [
           'shell.navigation',
@@ -116,6 +142,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Content integrity checks pass',
           'Lesson exercise steps map to real, reachable routes',
         ],
+        evidence: ['src/core/learning/query.test.ts'],
         capabilityIds: ['learn.hub', 'learn.progress'],
       },
       {
@@ -129,6 +156,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Query results paginate and facet correctly',
           'Sample content is labelled as sample everywhere it appears',
         ],
+        evidence: ['src/core/assets/catalog.test.ts', 'src/core/assets/query.test.ts'],
         capabilityIds: ['assets.catalogue'],
       },
       {
@@ -141,6 +169,9 @@ export const ROADMAP: readonly RoadmapPhase[] = [
         completionCriteria: [
           'npm run verify passes locally and in CI',
           'No test is skipped to make the pipeline green',
+        ],
+        evidence: [
+          'Manual check: npm run verify (tsc, eslint, prettier, vitest, build) and a green CI run on Node 22 and 24',
         ],
         capabilityIds: ['platform.tooling', 'platform.env-validation'],
       },
@@ -156,18 +187,24 @@ export const ROADMAP: readonly RoadmapPhase[] = [
     name: 'Phase 2 — Design Studio editing',
     summary:
       'Direct manipulation on the artboard: a layer model, text and shape tools, selection and transform, and raster export.',
-    status: 'planned',
+    status: 'in-progress',
     items: [
       {
         id: 'p2.layers',
         title: 'Layer model and scene tree',
         description:
-          'Documents gain an ordered scene tree of layers (text, shape, image placeholder) with selection state that is not persisted as history noise.',
-        status: 'planned',
+          'Documents carry an ordered scene of text, rectangle, ellipse and image layers, each with a stable id, geometry, appearance and settings. Selection and other transient interaction state never reach the document or the history labels.',
+        status: 'done',
         dependsOn: ['p1.core', 'p1.history'],
         completionCriteria: [
           'Layer operations are commands with labels and undo',
           'A document with layers still validates against the schema and migrates forward',
+        ],
+        evidence: [
+          'src/core/documents/layer-operations.test.ts (add, update, duplicate, delete, reorder, stable z-order)',
+          'src/core/documents/migrations.test.ts (v0 to v1 to v2, v1 to v2 gains an empty scene)',
+          'src/core/documents/layer-persistence.test.ts (layers survive JSON, .forge.json and reload)',
+          'src/components/workspace/workspace-editor.test.tsx (selection is not persisted)',
         ],
         capabilityIds: ['studios.design'],
       },
@@ -175,49 +212,75 @@ export const ROADMAP: readonly RoadmapPhase[] = [
         id: 'p2.text',
         title: 'Text tool with typography controls',
         description:
-          'Font family stack, size, weight, line height, tracking, alignment and colour.',
-        status: 'planned',
+          'Font family stack, size, weight, line height, tracking, alignment and colour, edited from the selection inspector and laid out by the shared renderer.',
+        status: 'done',
         dependsOn: ['p2.layers'],
         completionCriteria: [
           'Text renders at correct position and wraps inside its box',
           'Typography settings round-trip through the project file',
+        ],
+        evidence: [
+          'src/core/render/text-layout.test.ts (wrapping, alignment, truncation reporting)',
+          'src/core/export/raster.test.ts (text painted at its frame position in real pixels)',
+          'src/core/documents/layer-persistence.test.ts (newlines and alignment survive the project file)',
+          'src/core/documents/validation.test.ts (typography ranges rejected with field messages)',
         ],
         capabilityIds: [],
       },
       {
         id: 'p2.transform',
         title: 'Selection, move, resize and snapping',
-        description: 'Direct manipulation with snapping to guides, grid and sibling edges.',
-        status: 'planned',
+        description:
+          'Direct manipulation with snapping to guides, grid lines and sibling edges. A gesture previews live and commits once, in document coordinates, independent of zoom.',
+        status: 'done',
         dependsOn: ['p2.layers'],
         completionCriteria: [
           'Snapping is deterministic and can be disabled',
           'Every transform is one undoable step',
+        ],
+        evidence: [
+          'src/core/editor/gesture.test.ts (move, resize, snapping on and off, cancellation)',
+          'src/core/documents/scene-geometry.test.ts (hit-testing, resize anchors, snap targets)',
+          'src/components/workspace/workspace-editor.test.tsx (one history entry per drag)',
+          'src/components/workspace/document-stage.test.tsx (keyboard equivalents for every pointer action)',
         ],
         capabilityIds: ['studios.design'],
       },
       {
         id: 'p2.raster-export',
         title: 'Raster export pipeline',
-        description: 'PNG/JPEG export via an offscreen renderer, with scale and quality options.',
-        status: 'planned',
+        description:
+          'PNG and JPEG export through the same render plan and painter as the live artboard, at the document size times a chosen scale, with JPEG quality and an explicit background for alpha.',
+        status: 'partial',
         dependsOn: ['p2.layers'],
         completionCriteria: [
           'Exported pixels match the on-screen composition within tolerance',
           'Export is blocked with an explanation when unsupported elements exist',
         ],
+        evidence: [
+          'src/core/export/raster.test.ts (dimensions per scale, stacking order, transparency, JPEG background, failures)',
+          'src/core/render/plan.test.ts (blocking versus advisory render issues)',
+          'src/components/workspace/document-aside.test.tsx (the panel refuses formats it cannot write)',
+        ],
+        gap: 'Pixel-for-pixel comparison against a real browser canvas cannot run here: the suite rasterises with @napi-rs/canvas and the browser path is a manual checklist item, not a passing test.',
         capabilityIds: ['core.rendering'],
       },
       {
         id: 'p2.asset-placement',
         title: 'Asset placement',
         description:
-          'Drag sample graphics and palettes into a document with attribution preserved.',
-        status: 'planned',
+          'Repository-authored graphics and sample palettes are applied to a document with attribution preserved. Placement works from the catalogue and from the editor, by click as well as drag; metadata-only records stay clearly labelled as reference-only.',
+        status: 'done',
         dependsOn: ['p2.layers', 'p1.assets'],
         completionCriteria: [
           'Placed assets record their licence in the document',
           'Unverified-provenance assets warn before use',
+        ],
+        evidence: [
+          'src/core/editor/commands.test.ts (place, palette with attribution, unverified warning)',
+          'src/components/workspace/graphic-picker.test.tsx (click-to-place, reference-only records, warnings)',
+          'src/components/workspace/workspace-editor.test.tsx (placed graphic renders, saves and reloads)',
+          'src/core/export/raster.test.ts (a placed graphic reaches exported pixels)',
         ],
         capabilityIds: ['assets.usable-files'],
       },
@@ -549,8 +612,10 @@ export const ROADMAP: readonly RoadmapPhase[] = [
 ] as const;
 
 export function roadmapCounts(): Readonly<Record<RoadmapItemStatus, number>> {
+  // Every key is initialised: an unlisted status would otherwise silently produce NaN.
   const counts: Record<RoadmapItemStatus, number> = {
     done: 0,
+    partial: 0,
     'in-progress': 0,
     planned: 0,
     exploratory: 0,
