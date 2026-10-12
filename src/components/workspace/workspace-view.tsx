@@ -44,6 +44,9 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
   const { session, state, library } = useDocumentSession(documentId);
   const [deleteOpen, setDeleteOpen] = useState(false);
   // Selection is transient interaction state: it is never persisted and never enters history.
+  // Transient interaction state, deliberately scoped to this screen (ADR-0017): it is not written
+  // into the document, not persisted and not a history entry. Selection and the two view toggles
+  // are the whole of it — anything that changes the document goes through the session below.
   const [selection, setSelection] = useState<Selection>(EMPTY_SELECTION);
   const [snapping, setSnapping] = useState(true);
   const [showGuides, setShowGuides] = useState(true);

@@ -73,7 +73,7 @@ type Marquee = { readonly from: Point; readonly to: Point };
  * Draws the real document with the same renderer the export pipeline uses, and turns pointer input
  * into selection, movement and resizing. The scene is painted into a `<canvas>`; the selection,
  * the resize handles and the marquee are DOM elements on top, so every one of them is focusable,
- * labelled and operable from the keyboard (ADR-0018).
+ * labelled and operable from the keyboard (ADR-0017).
  *
  * During a drag the canvas paints a *preview* scene and no history entry exists. Exactly one commit
  * is produced when the pointer is released — or none at all if the gesture is cancelled.

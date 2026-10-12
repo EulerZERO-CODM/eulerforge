@@ -22,6 +22,7 @@ import {
   toPixels,
 } from '../../core/documents/units';
 import { validateCanvas, validateGuides, validateTitle } from '../../core/documents/validation';
+import { applyPaletteCommand } from '../../core/editor/commands';
 import { Button } from '../ui/button';
 import { SwatchRow } from '../ui/controls';
 import { Field, Input, Select, SwitchField, Textarea } from '../ui/field';
@@ -485,7 +486,9 @@ function PaletteSection({ api }: { readonly api: WorkspaceApi }) {
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    void api.commit(`Apply ${asset.name} palette`, { palette: colors });
+                    // The command normalises, bounds and labels the palette; the same one the
+                    // catalogue's palette records would use.
+                    void api.run(applyPaletteCommand(colors, asset.name));
                   }}
                 >
                   Use

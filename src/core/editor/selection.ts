@@ -2,7 +2,7 @@
  * Selection state.
  *
  * Selection is transient: it lives in the interface, never in the document and never in history
- * (ADR-0015). These helpers therefore take a scene and a selection and return plain values — they
+ * (ADR-0017). These helpers therefore take a scene and a selection and return plain values — they
  * have no place to store anything, which is the point.
  */
 
