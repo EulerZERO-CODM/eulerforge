@@ -78,6 +78,8 @@ describe('forgeDocumentSchema', () => {
     canvas: DEFAULT_CANVAS,
     guides: DEFAULT_GUIDES,
     palette: ['#ff8a3d'],
+    scene: { layers: [] },
+    attribution: [],
     metadata: { authorLabel: '', tags: [], notes: '' },
     status: 'draft',
     revision: 1,

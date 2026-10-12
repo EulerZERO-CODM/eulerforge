@@ -8,6 +8,7 @@
 
 import type { Branded } from '../types/brand';
 import { type PartialProps, type Undefinable } from '../types/optional';
+import type { AttributionRecord, Scene } from './layer-types';
 import type { LengthUnit } from './units';
 
 export type DocumentId = Branded<string, 'DocumentId'>;
@@ -68,6 +69,11 @@ export type DocumentMetadata = {
  *
  * `schemaVersion` drives the migration chain in `./migrations.ts`; `revision` is a monotonic
  * counter used for optimistic-concurrency checks once a remote adapter exists.
+ *
+ * `scene` holds the ordered layers that make up the artwork, and `attribution` records the licence
+ * and provenance of every catalogue graphic that has been placed. Both are part of the document,
+ * so they survive save, reload, `.forge.json` round-trip and undo. Selection, hover and in-progress
+ * drags are *not* here: transient interaction state never enters a document (ADR-0015).
  */
 export type ForgeDocument = {
   readonly id: DocumentId;
@@ -80,6 +86,10 @@ export type ForgeDocument = {
   readonly guides: GuideSettings;
   /** Brand colours captured when the document was created; empty means "not decided yet". */
   readonly palette: readonly string[];
+  /** Ordered layers, index 0 painted first (bottom of the stack). */
+  readonly scene: Scene;
+  /** Licence/provenance records for catalogue graphics placed in this document. */
+  readonly attribution: readonly AttributionRecord[];
   readonly metadata: DocumentMetadata;
   readonly status: DocumentStatus;
   readonly revision: number;
@@ -98,6 +108,8 @@ export type CreateDocumentInput = {
   readonly guides?: PartialProps<GuideSettings> | undefined;
   readonly palette?: Undefinable<readonly string[]>;
   readonly tags?: Undefinable<readonly string[]>;
+  /** Startup artwork, used by starters that seed a real layer stack. Omit for an empty artboard. */
+  readonly scene?: Undefinable<Scene>;
 };
 
 export type CanvasPresetCategory = 'social' | 'video' | 'web' | 'print' | 'presentation' | 'custom';

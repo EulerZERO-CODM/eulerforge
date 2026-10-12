@@ -105,9 +105,98 @@ describe('migrateDocument', () => {
   });
 });
 
+/**
+ * A version-1 record as Phase 1 wrote it: canvas, guides, palette and metadata, with no scene and
+ * no attribution. It is the shape a real saved project has in `localStorage` today.
+ */
+const versionOneRecord = {
+  id: 'doc-v1',
+  schemaVersion: 1,
+  studioId: 'design',
+  documentTypeId: 'design.canvas',
+  title: 'Saved in Phase 1',
+  summary: '',
+  canvas: {
+    width: 1080,
+    height: 1080,
+    unit: 'px',
+    dpi: 96,
+    background: '#0f1115',
+    transparent: false,
+  },
+  guides: { safeMarginMm: 8, bleedMm: 0, showGrid: false, gridMm: 10, showCentreLines: true },
+  palette: ['#ff8a3d'],
+  metadata: { authorLabel: 'Studio', tags: ['launch'], notes: 'keep me' },
+  status: 'draft',
+  revision: 4,
+  createdAt: '2025-12-01T10:00:00.000Z',
+  updatedAt: '2025-12-02T10:00:00.000Z',
+};
+
+describe('migrateDocument — v1 to v2', () => {
+  it('opens an existing saved project with an empty scene instead of inventing artwork', () => {
+    const result = migrateDocument(versionOneRecord);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.schemaVersion).toBe(2);
+    expect(result.value.scene).toEqual({ layers: [] });
+    expect(result.value.attribution).toEqual([]);
+  });
+
+  it('preserves every field a v1 document already had', () => {
+    const result = migrateDocument(versionOneRecord);
+    if (!result.ok) throw new Error('v1 record should migrate');
+
+    expect(result.value).toMatchObject({
+      id: 'doc-v1',
+      title: 'Saved in Phase 1',
+      palette: ['#ff8a3d'],
+      status: 'draft',
+      revision: 4,
+      createdAt: '2025-12-01T10:00:00.000Z',
+      updatedAt: '2025-12-02T10:00:00.000Z',
+    });
+    expect(result.value.metadata).toEqual({
+      authorLabel: 'Studio',
+      tags: ['launch'],
+      notes: 'keep me',
+    });
+    expect(result.value.canvas.width).toBe(1080);
+  });
+
+  it('runs v0 records through both steps in order', () => {
+    const result = migrateDocument(legacyRecord);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.schemaVersion).toBe(2);
+    expect(result.value.scene.layers).toEqual([]);
+    expect(result.value.canvas.width).toBe(1240);
+  });
+
+  it('keeps layer data that is already present rather than discarding it', () => {
+    const withLayers = {
+      ...versionOneRecord,
+      scene: { layers: [{ id: 'lyr-1', type: 'rect' }] },
+    };
+    const result = migrateDocument(withLayers);
+    // The partial layer fails schema validation: migrating must not paper over broken layer data.
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('storage-corrupt');
+  });
+
+  it('rejects a document from a newer schema instead of dropping its scene', () => {
+    const result = migrateDocument({ ...versionOneRecord, schemaVersion: 3 });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('unsupported');
+  });
+});
+
 describe('pendingMigrations', () => {
   it('lists the steps a version still has to pass through', () => {
-    expect(pendingMigrations(0)).toHaveLength(1);
+    expect(pendingMigrations(0)).toHaveLength(2);
+    expect(pendingMigrations(1)).toHaveLength(1);
     expect(pendingMigrations(CURRENT_SCHEMA_VERSION)).toHaveLength(0);
   });
 });

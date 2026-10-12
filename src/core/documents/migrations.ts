@@ -10,11 +10,12 @@
  */
 
 import { err, forgeError, ok, type Result } from '../result';
+import { freezeDocument } from './freeze';
 import { formatIssues, forgeDocumentSchema } from './schema';
 import type { ForgeDocument } from './types';
 import { SCREEN_DPI } from './units';
 
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 export type Migration = {
   readonly from: number;
@@ -77,7 +78,34 @@ const migrateV0ToV1: Migration = {
   }),
 };
 
-export const MIGRATIONS: readonly Migration[] = [migrateV0ToV1];
+/**
+ * v1 → v2: documents gained an ordered layer scene and asset attribution records.
+ *
+ * An existing document had no artwork at all, so the honest result is an empty scene — not a
+ * fabricated placeholder layer. Attribution starts empty for the same reason. Any layer data that
+ * is already present (for example a file written by a development build of v2) is preserved rather
+ * than discarded, so migrating is never lossy.
+ */
+const migrateV1ToV2: Migration = {
+  from: 1,
+  to: 2,
+  description: 'Added the ordered layer scene and the asset attribution ledger.',
+  migrate: (raw) => {
+    const existingScene = asRecord(raw.scene);
+    const existingLayers = existingScene?.layers;
+
+    return {
+      ...raw,
+      schemaVersion: 2,
+      scene: {
+        layers: Array.isArray(existingLayers) ? existingLayers : [],
+      },
+      attribution: Array.isArray(raw.attribution) ? raw.attribution : [],
+    };
+  },
+};
+
+export const MIGRATIONS: readonly Migration[] = [migrateV0ToV1, migrateV1ToV2];
 
 export function readSchemaVersion(raw: unknown): number | undefined {
   const record = asRecord(raw);
@@ -131,7 +159,7 @@ export function migrateDocument(raw: unknown): Result<ForgeDocument> {
     );
   }
 
-  return ok(Object.freeze(parsed.data));
+  return ok(freezeDocument(parsed.data));
 }
 
 /** Migration steps that a record at `version` will pass through, for user-facing diagnostics. */

@@ -42,6 +42,80 @@ export type Rect = {
   readonly height: number;
 };
 
+export type Point = {
+  readonly x: number;
+  readonly y: number;
+};
+
+export function createRect(x: number, y: number, width: number, height: number): Rect {
+  return { x, y, width, height };
+}
+
+/** True when the point lies inside the rectangle; edges count as inside. */
+export function rectContainsPoint(rect: Rect, point: Point, toleranceInset = 0): boolean {
+  const inset = Math.max(0, toleranceInset);
+  return (
+    point.x >= rect.x + inset &&
+    point.x <= rect.x + rect.width - inset &&
+    point.y >= rect.y + inset &&
+    point.y <= rect.y + rect.height - inset
+  );
+}
+
+/** True when two rectangles overlap. Touching edges count as an overlap so adjacent layers snap. */
+export function rectsIntersect(a: Rect, b: Rect): boolean {
+  return !(
+    a.x + a.width < b.x ||
+    b.x + b.width < a.x ||
+    a.y + a.height < b.y ||
+    b.y + b.height < a.y
+  );
+}
+
+/** Smallest rectangle covering every input; `undefined` for an empty list. */
+export function unionRects(rects: readonly Rect[]): Rect | undefined {
+  const first = rects[0];
+  if (!first) return undefined;
+  let minX = first.x;
+  let minY = first.y;
+  let maxX = first.x + first.width;
+  let maxY = first.y + first.height;
+  for (const rect of rects.slice(1)) {
+    minX = Math.min(minX, rect.x);
+    minY = Math.min(minY, rect.y);
+    maxX = Math.max(maxX, rect.x + rect.width);
+    maxY = Math.max(maxY, rect.y + rect.height);
+  }
+  return createRect(minX, minY, maxX - minX, maxY - minY);
+}
+
+/** Moves a rectangle without resizing it. */
+export function translateRect(rect: Rect, deltaX: number, deltaY: number): Rect {
+  return createRect(rect.x + deltaX, rect.y + deltaY, rect.width, rect.height);
+}
+
+/** Rounds every edge, keeping the rectangle non-degenerate. */
+export function roundRect(rect: Rect, minimumSize = 1): Rect {
+  const width = Math.max(minimumSize, Math.round(rect.width));
+  const height = Math.max(minimumSize, Math.round(rect.height));
+  return createRect(Math.round(rect.x), Math.round(rect.y), width, height);
+}
+
+/** The four corners plus edge midpoints, in a fixed order used by the resize handles. */
+export function rectCorners(rect: Rect): readonly Point[] {
+  return [
+    { x: rect.x, y: rect.y },
+    { x: rect.x + rect.width, y: rect.y },
+    { x: rect.x + rect.width, y: rect.y + rect.height },
+    { x: rect.x, y: rect.y + rect.height },
+  ];
+}
+
+/** Horizontal and vertical centre lines of a rectangle, used by centre-alignment snapping. */
+export function rectCentre(rect: Rect): Point {
+  return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+}
+
 /** Inset rectangle described by a uniform margin. */
 export function insetRect(size: Size, marginPx: number): Rect {
   const margin = Math.max(0, Math.min(marginPx, Math.min(size.width, size.height) / 2));
