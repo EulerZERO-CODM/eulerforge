@@ -10,17 +10,19 @@ import {
   deleteLayer,
   deleteLayers,
   duplicateLayer,
+  duplicateLayers,
   findAttribution,
   moveLayerTo,
   renameLayer,
   reorderLayer,
+  reorderLayers,
   scenesEqual,
   setLayerVisibility,
   updateLayer,
   updateLayerSettings,
   validateTextSettings,
 } from './layer-operations';
-import { MAX_LAYERS } from './layer-types';
+import { MAX_LAYERS, type Scene } from './layer-types';
 import { createRect } from './geometry';
 import {
   attributionRecord,
@@ -404,5 +406,107 @@ describe('immutability', () => {
     expect(Object.isFrozen(updated.value)).toBe(true);
     expect(Object.isFrozen(updated.value.layers)).toBe(true);
     expect(Object.isFrozen(updated.value.layers[0])).toBe(true);
+  });
+});
+
+describe('batch layer operations', () => {
+  const one = rectLayer('lyr-1', { x: 0, y: 0, width: 10, height: 10, name: 'One' });
+  const two = rectLayer('lyr-2', { x: 20, y: 0, width: 10, height: 10, name: 'Two' });
+  const three = rectLayer('lyr-3', { x: 40, y: 0, width: 10, height: 10, name: 'Three' });
+  const four = rectLayer('lyr-4', { x: 60, y: 0, width: 10, height: 10, name: 'Four' });
+  const scene = sceneOf(one, two, three, four);
+  const names = (next: Scene) => next.layers.map((layer) => layer.name);
+
+  it('duplicates several layers in place, keeping the selection order', () => {
+    const result = duplicateLayers(scene, [one.id, three.id], {
+      generateId: sequentialLayerIds('lyr-dup'),
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(names(result.value.scene)).toEqual([
+      'One',
+      'One copy',
+      'Two',
+      'Three',
+      'Three copy',
+      'Four',
+    ]);
+    expect(result.value.layers.map((layer) => layer.name)).toEqual(['One copy', 'Three copy']);
+    expect(new Set(result.value.scene.layers.map((layer) => String(layer.id))).size).toBe(6);
+  });
+
+  it('fills the gap in the id space so duplicates cannot collide with each other', () => {
+    // A generator that repeats itself must be rejected, not silently accepted.
+    const colliding = duplicateLayers(scene, [one.id, two.id], { generateId: () => 'lyr-same' });
+    expect(colliding.ok).toBe(false);
+
+    // A generator that repeats once still succeeds, because the loop retries against the growing list.
+    let n = 0;
+    const flaky = duplicateLayers(scene, [one.id, two.id], {
+      generateId: () => {
+        n += 1;
+        return n === 2 ? 'lyr-first' : `lyr-gen-${String(n)}`;
+      },
+    });
+    expect(flaky.ok).toBe(true);
+    if (flaky.ok) {
+      expect(new Set(flaky.value.scene.layers.map((layer) => String(layer.id))).size).toBe(
+        flaky.value.scene.layers.length,
+      );
+    }
+  });
+
+  it('refuses a batch that would exceed the layer limit', () => {
+    const full = sceneOf(
+      ...Array.from({ length: MAX_LAYERS }, (_, index) => rectLayer(`lyr-full-${String(index)}`)),
+    );
+    const result = duplicateLayers(full, ['lyr-full-0']);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toMatch(/at most 200 layers/);
+  });
+
+  it('reports a missing selection rather than returning an unchanged scene', () => {
+    const result = duplicateLayers(scene, ['lyr-missing']);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('not-found');
+    expect(reorderLayers(scene, [], 'front').ok).toBe(false);
+  });
+
+  it('moves a multi-layer block forward and backward without crossing itself', () => {
+    const forward = reorderLayers(scene, [one.id, two.id], 'forward');
+    expect(forward.ok).toBe(true);
+    if (forward.ok) expect(names(forward.value)).toEqual(['Three', 'One', 'Two', 'Four']);
+
+    const backward = reorderLayers(scene, [two.id, three.id], 'backward');
+    expect(backward.ok).toBe(true);
+    if (backward.ok) expect(names(backward.value)).toEqual(['Two', 'Three', 'One', 'Four']);
+
+    // A block already at the top stays put instead of cycling.
+    const pinned = reorderLayers(scene, [three.id, four.id], 'forward');
+    if (pinned.ok) expect(names(pinned.value)).toEqual(['One', 'Two', 'Three', 'Four']);
+  });
+
+  it('moves a multi-layer block to the front and to the back in order', () => {
+    const front = reorderLayers(scene, [one.id, three.id], 'front');
+    if (front.ok) expect(names(front.value)).toEqual(['Two', 'Four', 'One', 'Three']);
+
+    const back = reorderLayers(scene, [two.id, four.id], 'back');
+    if (back.ok) expect(names(back.value)).toEqual(['Two', 'Four', 'One', 'Three']);
+
+    // Selecting everything is already solved: nothing moves and nothing is lost.
+    const all = reorderLayers(
+      scene,
+      scene.layers.map((layer) => layer.id),
+      'front',
+    );
+    if (all.ok) expect(names(all.value)).toEqual(['One', 'Two', 'Three', 'Four']);
+  });
+
+  it('keeps the batch reorder and the single-layer reorder in agreement', () => {
+    const single = reorderLayer(scene, two.id, 'forward');
+    const batch = reorderLayers(scene, [two.id], 'forward');
+    expect(single.ok && batch.ok).toBe(true);
+    if (single.ok && batch.ok) expect(names(batch.value)).toEqual(names(single.value));
   });
 });

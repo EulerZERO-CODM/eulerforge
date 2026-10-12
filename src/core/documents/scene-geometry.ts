@@ -10,7 +10,7 @@
  */
 
 import { createRect, rectContainsPoint, type Point, type Rect } from './geometry';
-import type { Layer, Scene } from './layer-types';
+import type { Layer, LayerId, Scene } from './layer-types';
 import type { Size } from './types';
 
 /**
@@ -94,15 +94,25 @@ export function handleAtPoint(
 }
 
 /**
- * Picks the top-most visible, unlocked layer under a point.
+ * Picks the top-most visible layer under a point.
  *
  * Iterates the scene backwards because the last layer paints on top, matching compositing order
  * exactly — a shape drawn under a graphic must not steal the click.
+ *
+ * Locked layers are skipped by default, so a click falls through to whatever can actually be
+ * transformed. Pass `{ includeLocked: true }` to see what is *actually* on top instead: the artboard
+ * uses that to notice that the user clicked a locked layer rather than empty space, which is the
+ * difference between "nothing happens here" and "start a marquee and clear the selection".
  */
-export function hitTestScene(scene: Scene, point: Point): Layer | null {
+export function hitTestScene(
+  scene: Scene,
+  point: Point,
+  options: { readonly includeLocked?: boolean } = {},
+): Layer | null {
   for (let index = scene.layers.length - 1; index >= 0; index -= 1) {
     const layer = scene.layers[index];
-    if (!layer || !layer.visible || layer.locked) continue;
+    if (!layer || !layer.visible) continue;
+    if (layer.locked && options.includeLocked !== true) continue;
     if (layerContainsPoint(layer, point)) return layer;
   }
   return null;
@@ -250,6 +260,116 @@ export function resizeFrame(
   }
 
   return createRect(left, top, width, height);
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Group transforms                                                                                */
+/* ---------------------------------------------------------------------------------------------- */
+
+/** A frame a gesture can transform, identified so the result can be committed per layer. */
+export type TransformTarget = {
+  readonly id: LayerId;
+  readonly frame: Rect;
+};
+
+/**
+ * A uniform scale about a fixed point, applied to every frame inside a selection.
+ *
+ * A multi-layer resize cannot be a per-layer `resizeFrame` call: each layer has its own pinned
+ * edges, so resizing two layers independently would distort their relative arrangement. One scale
+ * about one origin keeps the group's internal spacing and proportions, which is what the visible
+ * bounding-box handles promise.
+ */
+export type GroupTransform = {
+  readonly scaleX: number;
+  readonly scaleY: number;
+  readonly origin: Point;
+};
+
+/** Kills floating-point dust so a clean drag produces clean numbers (301, not 301.00000000000006). */
+function clean(value: number): number {
+  return Math.round(value * 1e6) / 1e6;
+}
+
+/**
+ * The fixed point of a handle drag: the edge (or, from the centre, the midpoint) that does not move.
+ *
+ * For a vertical-only handle the horizontal scale is 1, so the horizontal origin is irrelevant to
+ * the result unless `preserveAspectRatio` re-centres the box - which the centre reproduces exactly.
+ */
+function fixedOrigin(start: Rect, handle: TransformHandle, fromCentre: boolean): Point {
+  const anchor = HANDLE_ANCHORS[handle];
+  if (fromCentre) {
+    return { x: start.x + start.width / 2, y: start.y + start.height / 2 };
+  }
+  return {
+    x:
+      anchor.x === 0 ? start.x + start.width : anchor.x === 1 ? start.x : start.x + start.width / 2,
+    y:
+      anchor.y === 0
+        ? start.y + start.height
+        : anchor.y === 1
+          ? start.y
+          : start.y + start.height / 2,
+  };
+}
+
+/** The scale a handle drag implies for the whole selection box. */
+export function groupTransformForHandle(
+  start: Rect,
+  handle: TransformHandle,
+  delta: Point,
+  options: TransformOptions = {},
+): GroupTransform {
+  const next = resizeFrame(start, handle, delta, options);
+  return {
+    scaleX: start.width === 0 ? 1 : next.width / start.width,
+    scaleY: start.height === 0 ? 1 : next.height / start.height,
+    origin: fixedOrigin(start, handle, options.resizeFromCentre === true),
+  };
+}
+
+/** Applies a group transform to one frame, with the same size clamps a single-layer resize uses. */
+export function applyGroupTransform(
+  frame: Rect,
+  transform: GroupTransform,
+  options: TransformOptions = {},
+): Rect {
+  const minSize = options.minSize ?? DEFAULT_MIN_SIZE;
+  const maxSize = options.maxSize ?? MAX_TRANSFORM_SIZE;
+  const { origin, scaleX, scaleY } = transform;
+  return createRect(
+    clean(origin.x + (frame.x - origin.x) * scaleX),
+    clean(origin.y + (frame.y - origin.y) * scaleY),
+    clean(Math.max(minSize, Math.min(maxSize, frame.width * scaleX))),
+    clean(Math.max(minSize, Math.min(maxSize, frame.height * scaleY))),
+  );
+}
+
+/** Applies one group transform to every target, preserving relative arrangement and order. */
+export function transformTargets(
+  targets: readonly TransformTarget[],
+  transform: GroupTransform,
+  options: TransformOptions = {},
+): readonly TransformTarget[] {
+  return targets.map((target) => ({
+    id: target.id,
+    frame: applyGroupTransform(target.frame, transform, options),
+  }));
+}
+
+/**
+ * A scale that maps one box onto another, about the source box's top-left corner.
+ *
+ * Used by the inspector, where a person types a width and height for the whole selection instead of
+ * dragging a handle: the same maths, so the two paths cannot disagree.
+ */
+export function groupTransformToFit(from: Rect, to: Rect): GroupTransform {
+  return {
+    scaleX: from.width === 0 ? 1 : to.width / from.width,
+    scaleY: from.height === 0 ? 1 : to.height / from.height,
+    origin: { x: from.x, y: from.y },
+  };
 }
 
 export const GRID_SNAP_DIVISIONS = [2, 3, 4, 6, 8, 12] as const;

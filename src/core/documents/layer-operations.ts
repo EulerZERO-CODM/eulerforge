@@ -409,36 +409,19 @@ function copyName(name: string): string {
  * Duplicates a layer directly above the original.
  *
  * The copy gets a fresh id and a distinct name; everything else is preserved so duplicating is a
- * faithful "make another one of these".
+ * faithful "make another one of these". Delegates to `duplicateLayers` so the single and batch paths
+ * cannot diverge.
  */
 export function duplicateLayer(
   scene: Scene,
   id: LayerId | string,
   options: CreateLayerOptions = {},
 ): Result<{ readonly scene: Scene; readonly layer: Layer }> {
-  if (scene.layers.length >= MAX_LAYERS) {
-    return err(
-      forgeError('unsupported', `This document already holds the maximum of ${MAX_LAYERS} layers.`),
-    );
-  }
-  const index = scene.layers.findIndex((layer) => layer.id === id);
-  const source = scene.layers[index];
-  if (index === -1 || !source) {
-    return err(forgeError('not-found', 'That layer is no longer in the document.'));
-  }
-
-  const generatedId = nextId(options, scene.layers);
-  if (!generatedId.ok) return err(generatedId.error);
-
-  const copy: Layer = freezeLayer({
-    ...source,
-    id: generatedId.value,
-    name: copyName(source.name),
-  });
-
-  const next = [...scene.layers];
-  next.splice(index + 1, 0, copy);
-  return ok({ scene: freezeScene(next), layer: copy });
+  const duplicated = duplicateLayers(scene, [id], options);
+  if (!duplicated.ok) return err(duplicated.error);
+  const layer = duplicated.value.layers[0];
+  if (!layer) return err(forgeError('not-found', 'That layer is no longer in the document.'));
+  return ok({ scene: duplicated.value.scene, layer });
 }
 
 export type ReorderTarget = 'front' | 'back' | 'forward' | 'backward';
@@ -449,32 +432,109 @@ export type ReorderTarget = 'front' | 'back' | 'forward' | 'backward';
  * `forward`/`backward` step one position; `front`/`back` go to the extremes. Moving past either end
  * is a no-op that succeeds, so a button bound to "bring forward" is safe to press repeatedly.
  */
+/** Moves one layer within the stack. Delegates to the batch operation: one code path, one meaning. */
 export function reorderLayer(
   scene: Scene,
   id: LayerId | string,
   target: ReorderTarget,
 ): Result<Scene> {
-  const index = scene.layers.findIndex((layer) => layer.id === id);
-  const layer = scene.layers[index];
-  if (index === -1 || !layer) {
+  return reorderLayers(scene, [id], target);
+}
+
+/**
+ * Duplicates several layers in one pass.
+ *
+ * Each copy is inserted directly above its own source, so the result keeps both the scene's order and
+ * the selection's relative order — duplicating three layers in a stack gives three copies sitting
+ * where their originals were, not three copies piled at the top. Ids are generated against the whole
+ * growing result, so duplicates can never collide with each other.
+ */
+export function duplicateLayers(
+  scene: Scene,
+  ids: readonly (LayerId | string)[],
+  options: CreateLayerOptions = {},
+): Result<{ readonly scene: Scene; readonly layers: readonly Layer[] }> {
+  const wanted = new Set(ids.map((id) => String(id)));
+  const selected = scene.layers.filter((layer) => wanted.has(String(layer.id)));
+  if (selected.length === 0) {
     return err(forgeError('not-found', 'That layer is no longer in the document.'));
   }
+  if (scene.layers.length + selected.length > MAX_LAYERS) {
+    return err(
+      forgeError(
+        'unsupported',
+        `This document can hold at most ${MAX_LAYERS} layers; duplicating these would exceed it.`,
+      ),
+    );
+  }
 
-  const last = scene.layers.length - 1;
-  const destination =
-    target === 'front'
-      ? last
-      : target === 'back'
-        ? 0
-        : target === 'forward'
-          ? Math.min(last, index + 1)
-          : Math.max(0, index - 1);
+  const next: Layer[] = [];
+  const copies: Layer[] = [];
+  for (const layer of scene.layers) {
+    next.push(layer);
+    if (!wanted.has(String(layer.id))) continue;
+    const generatedId = nextId(options, next);
+    if (!generatedId.ok) return err(generatedId.error);
+    const copy: Layer = freezeLayer({
+      ...layer,
+      id: generatedId.value,
+      name: copyName(layer.name),
+    });
+    next.push(copy);
+    copies.push(copy);
+  }
 
-  if (destination === index) return ok(scene);
+  return ok({ scene: freezeScene(next), layers: Object.freeze(copies) });
+}
 
-  const next = scene.layers.filter((candidate) => candidate.id !== id);
-  next.splice(destination, 0, layer);
-  return ok(freezeScene(next));
+/**
+ * Moves a whole selection within the stack, as one operation.
+ *
+ * `forward` and `backward` step the selected block past its unselected neighbours without letting
+ * selected layers cross each other, so the selection's internal order is preserved no matter how
+ * many times the button is pressed. `front` and `back` move the whole block to an extreme, again in
+ * order. Doing this per layer instead would let later moves undo earlier ones.
+ */
+export function reorderLayers(
+  scene: Scene,
+  ids: readonly (LayerId | string)[],
+  target: ReorderTarget,
+): Result<Scene> {
+  const wanted = new Set(ids.map((id) => String(id)));
+  const selected = scene.layers.filter((layer) => wanted.has(String(layer.id)));
+  if (selected.length === 0) {
+    return err(forgeError('not-found', 'That layer is no longer in the document.'));
+  }
+  if (selected.length === scene.layers.length) return ok(scene);
+
+  if (target === 'front' || target === 'back') {
+    const rest = scene.layers.filter((layer) => !wanted.has(String(layer.id)));
+    return ok(freezeScene(target === 'front' ? [...rest, ...selected] : [...selected, ...rest]));
+  }
+
+  const layers = [...scene.layers];
+  if (target === 'forward') {
+    // Top-most first, so a layer that has just moved up is not considered again.
+    for (let index = layers.length - 2; index >= 0; index -= 1) {
+      const layer = layers[index];
+      const above = layers[index + 1];
+      if (!layer || !above) continue;
+      if (!wanted.has(String(layer.id)) || wanted.has(String(above.id))) continue;
+      layers[index] = above;
+      layers[index + 1] = layer;
+    }
+  } else {
+    for (let index = 1; index < layers.length; index += 1) {
+      const layer = layers[index];
+      const below = layers[index - 1];
+      if (!layer || !below) continue;
+      if (!wanted.has(String(layer.id)) || wanted.has(String(below.id))) continue;
+      layers[index] = below;
+      layers[index - 1] = layer;
+    }
+  }
+
+  return ok(freezeScene(layers));
 }
 
 /**

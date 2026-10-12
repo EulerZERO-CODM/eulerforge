@@ -21,14 +21,22 @@ import {
   attributionForScene,
   defaultFrameFor,
   deleteLayers,
-  duplicateLayer,
+  duplicateLayers,
   moveLayerTo,
   renameLayer,
-  reorderLayer,
+  reorderLayers,
   updateLayer,
+  updateLayers,
   updateLayerSettings,
   type ReorderTarget,
 } from '../documents/layer-operations';
+import { unionRects } from '../documents/geometry';
+import {
+  groupTransformToFit,
+  transformTargets as applyTransform,
+  type GroupTransform,
+  type TransformTarget,
+} from '../documents/scene-geometry';
 import type {
   AttributionRecord,
   ImageSettings,
@@ -181,17 +189,40 @@ export function fitGraphicFrame(
   );
 }
 
+/**
+ * Duplicates the whole selection as one edit.
+ *
+ * The scene is rebuilt in a single pass, so every copy is placed against the document as it will
+ * exist — duplicating three layers cannot let the second copy overwrite the first, and the copies
+ * inherit the selection's relative order.
+ */
+export function duplicateLayersCommand(
+  document: ForgeDocument,
+  ids: readonly (LayerId | string)[],
+  generateId?: () => string,
+): Result<SceneCommand> {
+  const named = namesFor(document, ids);
+  if (named.length === 0) {
+    return err(forgeError('not-found', 'That layer is no longer in the document.'));
+  }
+
+  const duplicated = duplicateLayers(document.scene, ids, generateId ? { generateId } : {});
+  if (!duplicated.ok) return err(duplicated.error);
+
+  const label =
+    named.length === 1
+      ? `Duplicate “${named[0]?.replace(/ copy$/, '') ?? 'layer'}”`
+      : `Duplicate ${String(named.length)} layers`;
+  return ok({ label, patch: freezePatch({ scene: duplicated.value.scene }) });
+}
+
+/** Duplicates one layer. Delegates to the batch command so both paths stay identical. */
 export function duplicateLayerCommand(
   document: ForgeDocument,
   id: LayerId | string,
   generateId?: () => string,
 ): Result<SceneCommand> {
-  const duplicated = duplicateLayer(document.scene, id, generateId ? { generateId } : {});
-  if (!duplicated.ok) return err(duplicated.error);
-  return ok({
-    label: `Duplicate “${duplicated.value.layer.name.replace(/ copy$/, '')}”`,
-    patch: freezePatch({ scene: duplicated.value.scene }),
-  });
+  return duplicateLayersCommand(document, [id], generateId);
 }
 
 /* -------------------------------------------------------------------------------------------- */
@@ -223,27 +254,46 @@ export function deleteLayersCommand(
   });
 }
 
+const REORDER_VERBS: Readonly<Record<ReorderTarget, string>> = {
+  front: 'Bring to front',
+  back: 'Send to back',
+  forward: 'Bring forward',
+  backward: 'Send backward',
+};
+
+/**
+ * Reorders the whole selection as one edit.
+ *
+ * The stack is rebuilt once, so moving three layers forward cannot have the second move undo the
+ * first: the result is a single scene, and the selection keeps its internal order.
+ */
+export function reorderLayersCommand(
+  document: ForgeDocument,
+  ids: readonly (LayerId | string)[],
+  target: ReorderTarget,
+): Result<SceneCommand> {
+  const named = namesFor(document, ids);
+  if (named.length === 0) {
+    return err(forgeError('not-found', 'That layer is no longer in the document.'));
+  }
+
+  const reordered = reorderLayers(document.scene, ids, target);
+  if (!reordered.ok) return err(reordered.error);
+
+  const label =
+    named.length === 1
+      ? `${REORDER_VERBS[target]}: “${named[0] ?? 'layer'}”`
+      : `${REORDER_VERBS[target]}: ${String(named.length)} layers`;
+  return ok({ label, patch: freezePatch({ scene: reordered.value }) });
+}
+
+/** Reorders one layer. Delegates to the batch command so both paths stay identical. */
 export function reorderLayerCommand(
   document: ForgeDocument,
   id: LayerId | string,
   target: ReorderTarget,
 ): Result<SceneCommand> {
-  const layer = document.scene.layers.find((candidate) => String(candidate.id) === String(id));
-  if (!layer) return err(forgeError('not-found', 'That layer is no longer in the document.'));
-
-  const reordered = reorderLayer(document.scene, id, target);
-  if (!reordered.ok) return err(reordered.error);
-
-  const verbs: Record<ReorderTarget, string> = {
-    front: 'Bring to front',
-    back: 'Send to back',
-    forward: 'Bring forward',
-    backward: 'Send backward',
-  };
-  return ok({
-    label: `${verbs[target]}: “${layer.name}”`,
-    patch: freezePatch({ scene: reordered.value }),
-  });
+  return reorderLayersCommand(document, [id], target);
 }
 
 export function moveLayerToCommand(
@@ -264,6 +314,19 @@ export function moveLayerToCommand(
 /* -------------------------------------------------------------------------------------------- */
 /* Layer properties                                                                              */
 /* -------------------------------------------------------------------------------------------- */
+
+/**
+ * Names of the requested layers, in scene order.
+ *
+ * Read once from the *current* document, so a label always describes the layers the command was
+ * built from — never a mix of the document before and after an earlier command in a loop.
+ */
+function namesFor(document: ForgeDocument, ids: readonly (LayerId | string)[]): readonly string[] {
+  const wanted = new Set(ids.map((id) => String(id)));
+  return document.scene.layers
+    .filter((layer) => wanted.has(String(layer.id)))
+    .map((layer) => layer.name);
+}
 
 function named(
   document: ForgeDocument,
@@ -288,17 +351,98 @@ export function renameLayerCommand(
   });
 }
 
+/**
+ * Applies several layer patches as one edit: one scene, one patch, one history entry.
+ *
+ * Every multi-selection action funnels through here, which is what stops a loop of per-layer commands
+ * from each being built against the same stale document and overwriting its predecessor.
+ */
+function batchCommand(
+  document: ForgeDocument,
+  ids: readonly (LayerId | string)[],
+  patch: (scene: ForgeDocument['scene']) => Result<ForgeDocument['scene']>,
+  label: (names: readonly string[]) => string,
+): Result<SceneCommand> {
+  const names = namesFor(document, ids);
+  if (names.length === 0) {
+    return err(forgeError('not-found', 'That layer is no longer in the document.'));
+  }
+  const changed = patch(document.scene);
+  if (!changed.ok) return err(changed.error);
+  return ok({ label: label(names), patch: freezePatch({ scene: changed.value }) });
+}
+
+function batchSettingsCommand(
+  document: ForgeDocument,
+  ids: readonly (LayerId | string)[],
+  settings: Parameters<typeof updateLayers>[1][number]['patch'],
+  describeOne: (name: string) => string,
+  describeMany: (count: number) => string,
+): Result<SceneCommand> {
+  return batchCommand(
+    document,
+    ids,
+    (scene) =>
+      updateLayers(
+        scene,
+        ids.map((id) => ({ id, patch: settings })),
+      ),
+    (names) => (names.length === 1 ? describeOne(names[0] ?? 'layer') : describeMany(names.length)),
+  );
+}
+
+export function setLayersVisibilityCommand(
+  document: ForgeDocument,
+  ids: readonly (LayerId | string)[],
+  visible: boolean,
+): Result<SceneCommand> {
+  return batchSettingsCommand(
+    document,
+    ids,
+    { visible },
+    (name) => (visible ? `Show “${name}”` : `Hide “${name}”`),
+    (count) => (visible ? `Show ${String(count)} layers` : `Hide ${String(count)} layers`),
+  );
+}
+
+export function setLayersLockCommand(
+  document: ForgeDocument,
+  ids: readonly (LayerId | string)[],
+  locked: boolean,
+): Result<SceneCommand> {
+  return batchSettingsCommand(
+    document,
+    ids,
+    { locked },
+    (name) => (locked ? `Lock “${name}”` : `Unlock “${name}”`),
+    (count) => (locked ? `Lock ${String(count)} layers` : `Unlock ${String(count)} layers`),
+  );
+}
+
+export function setLayersOpacityCommand(
+  document: ForgeDocument,
+  ids: readonly (LayerId | string)[],
+  opacity: number,
+): Result<SceneCommand> {
+  if (!Number.isFinite(opacity)) {
+    return err(forgeError('validation-failed', 'Opacity must be a number between 0 and 100%.'));
+  }
+  const clamped = Math.max(0, Math.min(1, opacity));
+  return batchSettingsCommand(
+    document,
+    ids,
+    { opacity: clamped },
+    (name) => `Set “${name}” opacity to ${n(clamped * 100)}%`,
+    (count) => `Set opacity of ${String(count)} layers to ${n(clamped * 100)}%`,
+  );
+}
+
 export function setLayerVisibilityCommand(
   document: ForgeDocument,
   id: LayerId | string,
   visible: boolean,
 ): Result<SceneCommand> {
-  const named_ = named(document, id, (name) => (visible ? `Show “${name}”` : `Hide “${name}”`));
-  if (!named_.ok) return err(named_.error);
-
-  const changed = updateLayer(document.scene, id, { visible });
-  if (!changed.ok) return err(changed.error);
-  return ok({ label: named_.value, patch: freezePatch({ scene: changed.value }) });
+  return setLayersVisibilityCommand(document, [id], visible);
 }
 
 export function setLayerLockCommand(
@@ -306,12 +450,7 @@ export function setLayerLockCommand(
   id: LayerId | string,
   locked: boolean,
 ): Result<SceneCommand> {
-  const label = named(document, id, (name) => (locked ? `Lock “${name}”` : `Unlock “${name}”`));
-  if (!label.ok) return err(label.error);
-
-  const changed = updateLayer(document.scene, id, { locked });
-  if (!changed.ok) return err(changed.error);
-  return ok({ label: label.value, patch: freezePatch({ scene: changed.value }) });
+  return setLayersLockCommand(document, [id], locked);
 }
 
 export function setLayerOpacityCommand(
@@ -319,16 +458,7 @@ export function setLayerOpacityCommand(
   id: LayerId | string,
   opacity: number,
 ): Result<SceneCommand> {
-  const clamped = Math.max(0, Math.min(1, opacity));
-  const label = named(document, id, (name) => `Set “${name}” opacity to ${n(clamped * 100)}%`);
-  if (!label.ok) return err(label.error);
-  if (!Number.isFinite(opacity)) {
-    return err(forgeError('validation-failed', 'Opacity must be a number between 0 and 100%.'));
-  }
-
-  const changed = updateLayer(document.scene, id, { opacity: clamped });
-  if (!changed.ok) return err(changed.error);
-  return ok({ label: label.value, patch: freezePatch({ scene: changed.value }) });
+  return setLayersOpacityCommand(document, [id], opacity);
 }
 
 export function setLayerFrameCommand(
@@ -364,20 +494,140 @@ export function setLayerFramesCommand(
   if (frames.length === 0) {
     return err(forgeError('validation-failed', 'No layers were changed.', { retryable: false }));
   }
-  let scene = document.scene;
-  for (const entry of frames) {
-    const changed = updateLayer(scene, entry.id, {
-      frame: {
-        x: Math.round(entry.frame.x * 100) / 100,
-        y: Math.round(entry.frame.y * 100) / 100,
-        width: Math.max(1, Math.round(entry.frame.width * 100) / 100),
-        height: Math.max(1, Math.round(entry.frame.height * 100) / 100),
+  const changed = updateLayers(
+    document.scene,
+    frames.map((entry) => ({
+      id: entry.id,
+      patch: {
+        frame: {
+          x: Math.round(entry.frame.x * 100) / 100,
+          y: Math.round(entry.frame.y * 100) / 100,
+          width: Math.max(1, Math.round(entry.frame.width * 100) / 100),
+          height: Math.max(1, Math.round(entry.frame.height * 100) / 100),
+        },
       },
-    });
-    if (!changed.ok) return err(changed.error);
-    scene = changed.value;
+    })),
+  );
+  if (!changed.ok) return err(changed.error);
+  return ok({ label, patch: freezePatch({ scene: changed.value }) });
+}
+
+/**
+ * Sets the bounding box of a multi-layer selection from the inspector.
+ *
+ * The same maths a handle drag uses (`groupTransformToFit` + `applyGroupTransform`), so typing a
+ * width scales the group exactly as dragging its handle would, and the keyboard path is not a
+ * separate implementation that can quietly disagree with the pointer.
+ */
+export function setGroupBoundsCommand(
+  document: ForgeDocument,
+  ids: readonly (LayerId | string)[],
+  bounds: {
+    readonly x?: number;
+    readonly y?: number;
+    readonly width?: number;
+    readonly height?: number;
+  },
+  label?: string,
+): Result<SceneCommand> {
+  const targets = transformTargetsFor(document, ids);
+  if (targets.length === 0) {
+    // Say which of the two reasons applies: a selection of locked layers is a normal thing to
+    // reach, not a missing document.
+    const present = document.scene.layers.some((layer) =>
+      ids.some((id) => String(id) === String(layer.id)),
+    );
+    return err(
+      present
+        ? forgeError(
+            'validation-failed',
+            'Every selected layer is locked, so there is nothing to move or resize.',
+            { retryable: false },
+          )
+        : forgeError('not-found', 'That layer is no longer in the document.'),
+    );
   }
-  return ok({ label, patch: freezePatch({ scene }) });
+  const box = unionRects(targets.map((target) => target.frame));
+  if (!box) {
+    return err(forgeError('not-found', 'That layer is no longer in the document.'));
+  }
+
+  const width = bounds.width ?? box.width;
+  const height = bounds.height ?? box.height;
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width < 1 ||
+    height < 1 ||
+    (bounds.x !== undefined && !Number.isFinite(bounds.x)) ||
+    (bounds.y !== undefined && !Number.isFinite(bounds.y))
+  ) {
+    return err(
+      forgeError('validation-failed', 'Selection bounds must be positive whole numbers.', {
+        retryable: false,
+      }),
+    );
+  }
+
+  const transform: GroupTransform = groupTransformToFit(box, createRect(0, 0, width, height));
+  const scaledBounds = applyTransform(targets, transform);
+  const dx = (bounds.x ?? box.x) - box.x;
+  const dy = (bounds.y ?? box.y) - box.y;
+
+  const frames = scaledBounds.map((target) => ({
+    id: target.id,
+    frame: createRect(
+      target.frame.x + dx,
+      target.frame.y + dy,
+      target.frame.width,
+      target.frame.height,
+    ),
+  }));
+
+  const changed = updateLayers(
+    document.scene,
+    frames.map((entry) => ({ id: entry.id, patch: { frame: roundFrame(entry.frame) } })),
+  );
+  if (!changed.ok) return err(changed.error);
+
+  const name =
+    targets.length === 1
+      ? `“${targets[0]?.id === undefined ? 'layer' : layerName(document, targets[0].id)}”`
+      : `${String(targets.length)} layers`;
+  const moved = bounds.x !== undefined || bounds.y !== undefined;
+  const sizeChanged = bounds.width !== undefined || bounds.height !== undefined;
+  // The label says what actually happened, so history does not claim a resize the user never made.
+  const describe =
+    moved && !sizeChanged
+      ? `Move ${name}`
+      : sizeChanged && !moved
+        ? `Resize ${name}`
+        : `Set ${name} bounds to ${n(Math.round(width))} × ${n(Math.round(height))}`;
+  return ok({ label: label ?? describe, patch: freezePatch({ scene: changed.value }) });
+}
+
+function layerName(document: ForgeDocument, id: LayerId | string): string {
+  return document.scene.layers.find((layer) => String(layer.id) === String(id))?.name ?? 'layer';
+}
+
+/** Unlocked, existing layers of a selection, in scene order: what a group gesture can change. */
+function transformTargetsFor(
+  document: ForgeDocument,
+  ids: readonly (LayerId | string)[],
+): readonly TransformTarget[] {
+  const wanted = new Set(ids.map((id) => String(id)));
+  return document.scene.layers
+    .filter((layer) => wanted.has(String(layer.id)) && !layer.locked)
+    .map((layer) => ({ id: layer.id, frame: layer.frame }));
+}
+
+function roundFrame(frame: Rect): Rect {
+  return createRect(
+    Math.round(frame.x * 100) / 100,
+    Math.round(frame.y * 100) / 100,
+    Math.max(1, Math.round(frame.width * 100) / 100),
+    Math.max(1, Math.round(frame.height * 100) / 100),
+  );
 }
 
 export function setTextSettingsCommand(

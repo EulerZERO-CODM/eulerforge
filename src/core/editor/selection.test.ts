@@ -4,13 +4,19 @@ import {
   describeSelection,
   EMPTY_SELECTION,
   isSelected,
+  lockedSelectionIds,
   normaliseSelection,
   selectedLayers,
   selectionFrame,
   selectOnly,
   singleSelectedLayer,
   toggleSelection,
+  transformFrame,
+  transformTargets,
+  transformableLayers,
+  unionSelection,
 } from './selection';
+import { createRect } from '../documents/geometry';
 import {
   documentFixture,
   empty,
@@ -101,5 +107,66 @@ describe('selection', () => {
     // The document still validates, so nothing selection-shaped leaked into the model either.
     expect(forgeDocumentSchema.safeParse(populated).success).toBe(true);
     expect(empty().layers).toHaveLength(0);
+  });
+});
+
+describe('selection helpers for gestures', () => {
+  const lower = rectLayer('lyr-low', { x: 0, y: 0, width: 100, height: 100, name: 'Lower' });
+  const upper = rectLayer('lyr-up', { x: 200, y: 50, width: 100, height: 100, name: 'Upper' });
+  const locked = {
+    ...rectLayer('lyr-lock', { x: 400, y: 0, width: 100, height: 100 }),
+    locked: true,
+  };
+  const scene = sceneOf(lower, upper, locked);
+
+  it('unions an additive selection without reordering what was already selected', () => {
+    const existing = Object.freeze([upper.id]);
+    const union = unionSelection(existing, [lower.id, upper.id]);
+
+    expect(union.map(String)).toEqual([String(upper.id), String(lower.id)]);
+    // Adding nothing returns the very same value, so a marquee over empty space is a no-op.
+    expect(unionSelection(existing, [upper.id])).toBe(existing);
+    expect(unionSelection(EMPTY_SELECTION, [])).toEqual([]);
+  });
+
+  it('excludes locked layers from what a gesture can transform', () => {
+    const selection = [lower.id, upper.id, locked.id];
+    const targets = transformTargets(scene, selection);
+
+    expect(targets.map((target) => String(target.id))).toEqual([
+      String(lower.id),
+      String(upper.id),
+    ]);
+    expect(lockedSelectionIds(scene, selection).map(String)).toEqual([String(locked.id)]);
+    expect(transformableLayers(scene, selection).map((layer) => layer.name)).toEqual([
+      'Lower',
+      'Upper',
+    ]);
+  });
+
+  it('draws the transform box around the transformable part only', () => {
+    // The box a handle drag will change: 0,0 to 300,150 - the locked layer at x=400 is excluded.
+    expect(transformFrame(scene, [lower.id, upper.id, locked.id])).toEqual(
+      createRect(0, 0, 300, 150),
+    );
+    // Everything selected is still drawn as selected, so the user sees the locked layer is in play.
+    expect(selectionFrame(scene, [lower.id, upper.id, locked.id])).toEqual(
+      createRect(0, 0, 500, 150),
+    );
+  });
+
+  it('reports no transform box when every selected layer is locked', () => {
+    expect(transformFrame(scene, [locked.id])).toBeUndefined();
+    expect(transformTargets(scene, [locked.id])).toEqual([]);
+    // Selection itself is not lost: the layer is listed as selected and shown in the artboard box.
+    expect(selectionFrame(scene, [locked.id])).toEqual(locked.frame);
+  });
+
+  it('ignores ids that are no longer in the scene', () => {
+    const stale = Object.freeze([lower.id, layerId('lyr-gone')]);
+    expect(transformTargets(scene, stale).map((target) => String(target.id))).toEqual([
+      String(lower.id),
+    ]);
+    expect(lockedSelectionIds(scene, stale)).toEqual([]);
   });
 });

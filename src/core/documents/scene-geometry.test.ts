@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyGroupTransform,
   buildSnapTargets,
   computeSnap,
+  groupTransformForHandle,
+  groupTransformToFit,
+  MAX_TRANSFORM_SIZE,
+  transformTargets,
   handleAtPoint,
   handlePosition,
   hitTestScene,
@@ -334,5 +339,130 @@ describe('scene listing helpers', () => {
     const hit = layersInRect(scene, marquee).map((layer) => layer.id);
     expect(hit).toEqual(['lyr-bottom', 'lyr-middle', 'lyr-top']);
     expect(layersInRect(scene, createRect(900, 900, 10, 10))).toEqual([]);
+  });
+});
+
+describe('group transforms', () => {
+  /** Two different-sized layers, offset from each other: the case a naive per-layer resize breaks. */
+  const boxA = rectLayer('lyr-g-a', { x: 100, y: 100, width: 200, height: 100 });
+  const boxB = rectLayer('lyr-g-b', { x: 400, y: 250, width: 100, height: 50 });
+  const group = [
+    { id: boxA.id, frame: boxA.frame },
+    { id: boxB.id, frame: boxB.frame },
+  ];
+  const box = createRect(100, 100, 400, 200);
+
+  it('scales every layer about the pinned edge and keeps their relative arrangement', () => {
+    const transform = groupTransformForHandle(box, 'se', { x: 200, y: 100 });
+    const scaled = transformTargets(group, transform);
+
+    expect(transform.scaleX).toBe(1.5);
+    expect(transform.scaleY).toBe(1.5);
+    // The bottom-right drag grows everything away from the top-left corner.
+    expect(scaled[0]?.frame).toEqual(createRect(100, 100, 300, 150));
+    expect(scaled[1]?.frame).toEqual(createRect(550, 325, 150, 75));
+    // The group's own box is exactly what the drag asked for.
+    expect(applyGroupTransform(box, transform)).toEqual(createRect(100, 100, 600, 300));
+  });
+
+  it('pins the opposite edge when the left or top handle is dragged', () => {
+    const transform = groupTransformForHandle(box, 'w', { x: -100, y: 0 });
+    const scaled = transformTargets(group, transform);
+
+    expect(transform.scaleX).toBe(1.25);
+    expect(transform.scaleY).toBe(1);
+    // Right edges stay at 300 and 500; the group's right edge stays at 500.
+    expect(scaled[0]?.frame).toEqual(createRect(0, 100, 250, 100));
+    expect(scaled[1]?.frame).toEqual(createRect(375, 250, 125, 50));
+    expect(applyGroupTransform(box, transform)).toEqual(createRect(0, 100, 500, 200));
+  });
+
+  it('covers every handle: the box lands exactly where a single-layer resize would put it', () => {
+    const deltas = [
+      { x: 40, y: 30 },
+      { x: -25, y: -60 },
+      { x: 0, y: 80 },
+      { x: 120, y: 0 },
+    ];
+    for (const handle of TRANSFORM_HANDLES) {
+      for (const delta of deltas) {
+        const transform = groupTransformForHandle(box, handle, delta);
+        expect(applyGroupTransform(box, transform), `${handle} ${JSON.stringify(delta)}`).toEqual(
+          resizeFrame(box, handle, delta),
+        );
+      }
+    }
+  });
+
+  it('keeps every layer inside the transformed box, at the same relative position', () => {
+    for (const handle of TRANSFORM_HANDLES) {
+      const delta = { x: 60, y: 40 };
+      const transform = groupTransformForHandle(box, handle, delta);
+      const nextBox = applyGroupTransform(box, transform);
+      for (const target of transformTargets(group, transform)) {
+        const frame = target.frame;
+        expect(frame.x, `${handle} left`).toBeGreaterThanOrEqual(nextBox.x - 0.001);
+        expect(frame.y, `${handle} top`).toBeGreaterThanOrEqual(nextBox.y - 0.001);
+        expect(frame.x + frame.width, `${handle} right`).toBeLessThanOrEqual(
+          nextBox.x + nextBox.width + 0.001,
+        );
+        expect(frame.y + frame.height, `${handle} bottom`).toBeLessThanOrEqual(
+          nextBox.y + nextBox.height + 0.001,
+        );
+      }
+    }
+  });
+
+  it('clamps to the minimum size instead of inverting a layer', () => {
+    // Drag the right edge far past the left one: the box collapses to the minimum, not negative.
+    const transform = groupTransformForHandle(box, 'e', { x: -900, y: 0 });
+    const nextBox = applyGroupTransform(box, transform);
+    expect(nextBox.width).toBe(4);
+    for (const target of transformTargets(group, transform)) {
+      expect(target.frame.width).toBeGreaterThanOrEqual(4);
+      expect(target.frame.height).toBeGreaterThan(0);
+    }
+  });
+
+  it('never exceeds the maximum transform size', () => {
+    const transform = groupTransformForHandle(box, 'e', { x: 60_000, y: 0 });
+    expect(applyGroupTransform(box, transform).width).toBe(MAX_TRANSFORM_SIZE);
+  });
+
+  it('honours Shift (aspect ratio) and Alt (from the centre) on a group', () => {
+    const shift = groupTransformForHandle(
+      box,
+      'se',
+      { x: 100, y: 0 },
+      {
+        preserveAspectRatio: true,
+      },
+    );
+    const alt = groupTransformForHandle(box, 'se', { x: 100, y: 40 }, { resizeFromCentre: true });
+
+    // 400x200 at 2:1: 100px wider means 50px taller, anchored at the top-left.
+    expect(applyGroupTransform(box, shift)).toEqual(createRect(100, 100, 500, 250));
+    // From the centre both edges move, so a 100x40 drag grows the box by 200x80 about its centre.
+    expect(applyGroupTransform(box, alt)).toEqual(createRect(0, 60, 600, 280));
+    // Layers keep their relative position in both cases.
+    const altLayers = transformTargets(group, alt);
+    expect(altLayers[0]?.frame).toEqual(createRect(0, 60, 300, 140));
+    expect(altLayers[1]?.frame).toEqual(createRect(450, 270, 150, 70));
+  });
+
+  it('is deterministic: the same gesture resolves to the same frames every time', () => {
+    const first = transformTargets(group, groupTransformForHandle(box, 'nw', { x: -70, y: -30 }));
+    const second = transformTargets(group, groupTransformForHandle(box, 'nw', { x: -70, y: -30 }));
+    expect(second).toEqual(first);
+  });
+
+  it('groupTransformToFit maps one box onto another about its top-left corner', () => {
+    const transform = groupTransformToFit(box, createRect(100, 100, 200, 400));
+    expect(transform.scaleX).toBe(0.5);
+    expect(transform.scaleY).toBe(2);
+    expect(applyGroupTransform(box, transform)).toEqual(createRect(100, 100, 200, 400));
+    const scaled = transformTargets(group, transform);
+    expect(scaled[0]?.frame).toEqual(createRect(100, 100, 100, 200));
+    expect(scaled[1]?.frame).toEqual(createRect(250, 400, 50, 100));
   });
 });

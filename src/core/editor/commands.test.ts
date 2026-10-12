@@ -5,6 +5,12 @@ import {
   applyPaletteCommand,
   deleteLayersCommand,
   duplicateLayerCommand,
+  duplicateLayersCommand,
+  reorderLayersCommand,
+  setGroupBoundsCommand,
+  setLayersLockCommand,
+  setLayersOpacityCommand,
+  setLayersVisibilityCommand,
   fitGraphicFrame,
   moveLayerToCommand,
   placeAssetCommand,
@@ -421,5 +427,227 @@ describe('document-level commands', () => {
   it('refuses an invalid colour and a no-op change', () => {
     expect(setBackgroundCommand(doc, { color: 'black' }).ok).toBe(false);
     expect(setBackgroundCommand(doc, { transparent: doc.canvas.transparent }).ok).toBe(false);
+  });
+});
+
+describe('batch commands: one atomic edit for a whole selection', () => {
+  /**
+   * The regression these guard against: the inspector used to build one command per selected layer
+   * from the *same* document snapshot, run them in a loop, and let later patches overwrite earlier
+   * ones. Each batch command must therefore produce exactly one patch, computed against one scene,
+   * that touches every requested layer.
+   */
+  const bottom = rectLayer('lyr-b1', { x: 0, y: 0, width: 100, height: 100, name: 'Bottom' });
+  const middle = rectLayer('lyr-b2', { x: 120, y: 0, width: 100, height: 100, name: 'Middle' });
+  const top = textLayer('lyr-b3', { x: 240, y: 0, width: 100, height: 100, name: 'Top' });
+  const stack = sceneOf(bottom, middle, top);
+  const document = documentFixture({ scene: stack });
+  const ids = [String(bottom.id), String(middle.id), String(top.id)];
+
+  // `applyDocumentPatch` returns the next document directly: it is the store, not the command, that
+  // validates. Applying it here proves the patch is a real document change, not just an object.
+  const sceneOfPatch = (patch: { readonly scene?: unknown }) =>
+    applyDocumentPatch(document, patch as Parameters<typeof applyDocumentPatch>[1]).scene;
+
+  it('duplicates a multi-layer selection in one patch, in place and in order', () => {
+    const command = duplicateLayersCommand(document, ids, sequentialLayerIds('lyr-copy'));
+    expect(command.ok).toBe(true);
+    if (!command.ok) return;
+
+    const scene = sceneOfPatch(command.value.patch);
+
+    expect(scene.layers.map((layer) => layer.name)).toEqual([
+      'Bottom',
+      'Bottom copy',
+      'Middle',
+      'Middle copy',
+      'Top',
+      'Top copy',
+    ]);
+    // Ids stay unique, and the originals are untouched.
+    expect(new Set(scene.layers.map((layer) => String(layer.id))).size).toBe(6);
+    expect(command.value.label).toBe('Duplicate 3 layers');
+    // A copy inherits the original's geometry rather than being moved to the canvas centre.
+    expect(scene.layers[3]?.frame).toEqual(middle.frame);
+  });
+
+  it('fails loudly when ids cannot be made unique, instead of dropping a copy', () => {
+    // A generator stuck on one id would silently produce two layers with the same id if the batch
+    // operation ignored collisions.
+    const command = duplicateLayersCommand(document, ids, () => 'lyr-collide');
+    expect(command.ok).toBe(false);
+    if (!command.ok) expect(command.error.code).toBe('validation-failed');
+  });
+
+  it('brings a multi-layer selection forward without letting the layers cross each other', () => {
+    const command = reorderLayersCommand(
+      document,
+      [String(bottom.id), String(middle.id)],
+      'forward',
+    );
+    expect(command.ok).toBe(true);
+    if (!command.ok) return;
+
+    const scene = sceneOfPatch(command.value.patch);
+
+    // Both moved up one slot, still in their original relative order, and the unselected top layer
+    // stayed above them.
+    expect(scene.layers.map((layer) => layer.name)).toEqual(['Top', 'Bottom', 'Middle']);
+    expect(command.value.label).toBe('Bring forward: 2 layers');
+  });
+
+  it('sends a multi-layer selection to the back and to the front in one patch', () => {
+    const back = reorderLayersCommand(document, ids, 'back');
+    const front = reorderLayersCommand(document, ids, 'front');
+    expect(back.ok && front.ok).toBe(true);
+    if (!back.ok || !front.ok) return;
+
+    expect(sceneOfPatch(back.value.patch).layers.map((layer) => layer.name)).toEqual([
+      'Bottom',
+      'Middle',
+      'Top',
+    ]);
+    expect(sceneOfPatch(back.value.patch)).toEqual(stack);
+
+    expect(front.value.label).toBe('Bring to front: 3 layers');
+  });
+
+  it('sets visibility, lock and opacity across the whole selection atomically', () => {
+    const hidden = setLayersVisibilityCommand(document, ids, false);
+    const locked = setLayersLockCommand(document, ids, true);
+    const translucent = setLayersOpacityCommand(document, ids, 0.25);
+    expect(hidden.ok && locked.ok && translucent.ok).toBe(true);
+    if (!hidden.ok || !locked.ok || !translucent.ok) return;
+
+    const hiddenScene = sceneOfPatch(hidden.value.patch);
+    expect(hiddenScene.layers.every((layer) => !layer.visible)).toBe(true);
+    expect(hidden.value.label).toBe('Hide 3 layers');
+
+    const lockedScene = sceneOfPatch(locked.value.patch);
+    expect(lockedScene.layers.every((layer) => layer.locked)).toBe(true);
+
+    const translucentScene = sceneOfPatch(translucent.value.patch);
+    expect(translucentScene.layers.every((layer) => layer.opacity === 0.25)).toBe(true);
+    expect(translucent.value.label).toBe('Set opacity of 3 layers to 25%');
+  });
+
+  it('reports the same labels for a single layer as the single-layer commands', () => {
+    expect(setLayerVisibilityCommand(document, middle.id, false).ok).toBe(true);
+    expect(setLayerLockCommand(document, middle.id, true).ok).toBe(true);
+    expect(setLayerOpacityCommand(document, middle.id, 0.5).ok).toBe(true);
+    expect(duplicateLayerCommand(document, middle.id).ok).toBe(true);
+    expect(reorderLayerCommand(document, middle.id, 'forward').ok).toBe(true);
+    const single = setLayersVisibilityCommand(document, [middle.id], false);
+    expect(single.ok).toBe(true);
+    if (single.ok) expect(single.value.label).toBe('Hide “Middle”');
+    const singleLock = setLayersLockCommand(document, [middle.id], true);
+    const singleOpacity = setLayersOpacityCommand(document, [middle.id], 0.5);
+    if (singleLock.ok) expect(singleLock.value.label).toBe('Lock “Middle”');
+    if (singleOpacity.ok) expect(singleOpacity.value.label).toBe('Set “Middle” opacity to 50%');
+  });
+
+  it('leaves layers outside the selection untouched', () => {
+    const command = setLayersOpacityCommand(document, [String(middle.id)], 0.4);
+    expect(command.ok).toBe(true);
+    if (!command.ok) return;
+    const scene = sceneOfPatch(command.value.patch);
+
+    // The patch itself only rebuilds the layer it names; the others keep their object identity, so a
+    // batch edit cannot quietly rewrite the rest of the scene on its way through.
+    const patched = command.value.patch.scene;
+    expect(patched?.layers[0]).toBe(document.scene.layers[0]);
+    expect(patched?.layers[2]).toBe(document.scene.layers[2]);
+    expect(patched?.layers[1]).not.toBe(document.scene.layers[1]);
+
+    // And the document that results holds every layer's values unchanged apart from the edited one.
+    expect(scene.layers[0]).toEqual(bottom);
+    expect(scene.layers[2]).toEqual(top);
+    expect(scene.layers[1]?.opacity).toBe(0.4);
+  });
+
+  it('refuses a selection that is no longer in the document instead of creating an empty patch', () => {
+    expect(duplicateLayersCommand(document, ['lyr-gone']).ok).toBe(false);
+    expect(reorderLayersCommand(document, ['lyr-gone'], 'front').ok).toBe(false);
+    expect(setLayersVisibilityCommand(document, ['lyr-gone'], false).ok).toBe(false);
+    expect(setLayersLockCommand(document, ['lyr-gone'], true).ok).toBe(false);
+    expect(setLayersOpacityCommand(document, ['lyr-gone'], 0.5).ok).toBe(false);
+  });
+
+  it('rejects a non-finite opacity rather than writing NaN into the document', () => {
+    expect(setLayersOpacityCommand(document, ids, Number.NaN).ok).toBe(false);
+  });
+
+  it('keeps the document valid: every batch patch passes the schema', () => {
+    for (const command of [
+      duplicateLayersCommand(document, ids, sequentialLayerIds('lyr-valid')),
+      reorderLayersCommand(document, ids, 'forward'),
+      setLayersVisibilityCommand(document, ids, false),
+      setLayersLockCommand(document, ids, true),
+      setLayersOpacityCommand(document, ids, 0.5),
+    ]) {
+      expect(command.ok).toBe(true);
+      if (!command.ok) continue;
+      const applied = applyDocumentPatch(document, command.value.patch);
+      expect(forgeDocumentSchema.safeParse(applied).success).toBe(true);
+    }
+  });
+});
+
+describe('setGroupBoundsCommand', () => {
+  const left = rectLayer('lyr-gl', { x: 100, y: 100, width: 200, height: 100, name: 'Left' });
+  const right = rectLayer('lyr-gr', { x: 400, y: 250, width: 100, height: 50, name: 'Right' });
+  const document = documentFixture({ scene: sceneOf(left, right) });
+  const ids = [String(left.id), String(right.id)];
+
+  it('scales the whole selection exactly as dragging a handle would', () => {
+    const command = setGroupBoundsCommand(document, ids, { width: 600, height: 300 });
+    expect(command.ok).toBe(true);
+    if (!command.ok) return;
+
+    const applied = applyDocumentPatch(document, command.value.patch);
+
+    expect(applied.scene.layers[0]?.frame).toEqual(createRect(100, 100, 300, 150));
+    expect(applied.scene.layers[1]?.frame).toEqual(createRect(550, 325, 150, 75));
+    // A size-only edit is labelled as a resize, not as an opaque "set bounds" number.
+    expect(command.value.label).toBe('Resize 2 layers');
+  });
+
+  it('moves the selection as a group when only a position is given', () => {
+    const command = setGroupBoundsCommand(document, ids, { x: 0, y: 0 });
+    expect(command.ok).toBe(true);
+    if (!command.ok) return;
+    const applied = applyDocumentPatch(document, command.value.patch);
+
+    expect(applied.scene.layers[0]?.frame).toEqual(createRect(0, 0, 200, 100));
+    expect(applied.scene.layers[1]?.frame).toEqual(createRect(300, 150, 100, 50));
+  });
+
+  it('ignores locked layers and refuses a selection with nothing transformable', () => {
+    const locked = documentFixture({ scene: sceneOf({ ...left, locked: true }) });
+    const command = setGroupBoundsCommand(locked, [String(left.id)], { width: 400 });
+    expect(command.ok).toBe(false);
+    if (command.ok) return;
+    // A locked selection is a normal state, so it is refused for the right reason.
+    expect(command.error.code).toBe('validation-failed');
+    expect(command.error.message).toMatch(/locked/i);
+
+    const mixed = documentFixture({
+      scene: sceneOf(left, { ...right, locked: true }),
+    });
+    const mixedCommand = setGroupBoundsCommand(mixed, ids, { width: 600 });
+    expect(mixedCommand.ok).toBe(true);
+    if (!mixedCommand.ok) return;
+    const applied = applyDocumentPatch(mixed, mixedCommand.value.patch);
+    // Only `left` is transformable, so the box is `left`'s own frame: 200 wide scaled to 600.
+    expect(applied.scene.layers[0]?.frame).toEqual(createRect(100, 100, 600, 100));
+    // The locked layer is not touched at all.
+    expect(applied.scene.layers[1]?.frame).toEqual(right.frame);
+  });
+
+  it('rejects nonsense bounds instead of writing them into the document', () => {
+    expect(setGroupBoundsCommand(document, ids, { width: 0 }).ok).toBe(false);
+    expect(setGroupBoundsCommand(document, ids, { height: -10 }).ok).toBe(false);
+    expect(setGroupBoundsCommand(document, ids, { x: Number.NaN }).ok).toBe(false);
+    expect(setGroupBoundsCommand(document, ['lyr-gone'], { width: 100 }).ok).toBe(false);
   });
 });
