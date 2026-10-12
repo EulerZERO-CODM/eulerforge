@@ -1,0 +1,11 @@
+node_modules
+.next
+out
+coverage
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+.next/types
+next-env.d.ts
+*.md
+src/content/generated
