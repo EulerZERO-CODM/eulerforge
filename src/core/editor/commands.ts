@@ -121,7 +121,9 @@ export function placeAssetCommand(
         fit: 'contain',
       },
     },
-    generateId ? { generateId } : {},
+    // The layer carries the catalogue name, so the layer tree and every history label name the
+    // graphic a person chose instead of calling it "Graphic".
+    { name: record.name, ...(generateId ? { generateId } : {}) },
   );
   if (!added.ok) return err(added.error);
 

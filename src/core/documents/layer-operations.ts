@@ -29,13 +29,9 @@ import type {
   TextLayer,
   TextSettings,
 } from './layer-types';
-import {
-  MAX_ATTRIBUTION_RECORDS,
-  MAX_LAYERS,
-  MAX_LAYER_NAME_LENGTH,
-  MAX_TEXT_LENGTH,
-} from './layer-types';
+import { MAX_ATTRIBUTION_RECORDS, MAX_LAYERS, MAX_LAYER_NAME_LENGTH } from './layer-types';
 import { DEFAULT_LAYER_OPACITY, defaultNameFor, layerDefaultsFor } from './layer-defaults';
+import { validateLayer, validateTextSettings as textSettingsIssues } from './validation';
 
 export const EMPTY_SCENE: Scene = Object.freeze({ layers: Object.freeze([]) });
 
@@ -311,12 +307,37 @@ export function updateLayer(scene: Scene, id: LayerId | string, patch: LayerPatc
   }
 
   const merged = { ...existing, ...patch } as Layer;
+
+  // The layer is re-checked *after* the merge, so a patch can never leave the scene in a state the
+  // schema would refuse. A gesture that would do so (dragging a layer to an impossible coordinate)
+  // gets a normal error result and simply stops applying, rather than corrupting the document.
+  const issues = validateLayer(merged);
+  if (issues.length > 0) {
+    return err(
+      forgeError('validation-failed', issues[0]?.message ?? 'That change is not valid.', {
+        detail: issues
+          .slice(1)
+          .map((issue) => issue.message)
+          .join(' '),
+        retryable: false,
+      }),
+    );
+  }
+
   const next = [...scene.layers];
   next[index] = freezeLayer(merged);
   return ok(freezeScene(next));
 }
 
 /** Applies a type-specific nested patch (text settings, shape settings or image settings). */
+/**
+ * Applies a type-specific nested patch (text settings, shape settings or image settings).
+ *
+ * Settings that do not belong to the layer's type are an *error*, not something quietly dropped: an
+ * edit that reports success while changing nothing is exactly the kind of dishonesty this codebase
+ * refuses. The inspector is structured so a user cannot reach this path, and the guard stays as the
+ * safety net behind it.
+ */
 export function updateLayerSettings(
   scene: Scene,
   id: LayerId | string,
@@ -329,17 +350,33 @@ export function updateLayerSettings(
   const existing = scene.layers.find((layer) => layer.id === id);
   if (!existing) return err(forgeError('not-found', 'That layer is no longer in the document.'));
 
+  const mismatched =
+    (patch.text !== undefined && existing.type !== 'text') ||
+    (patch.image !== undefined && existing.type !== 'image') ||
+    (patch.shape !== undefined && existing.type !== 'rect' && existing.type !== 'ellipse');
+  if (mismatched) {
+    return err(
+      forgeError('validation-failed', 'That setting does not apply to this layer type.', {
+        detail: `Layer "${existing.name}" is a ${existing.type} layer.`,
+        retryable: false,
+      }),
+    );
+  }
+
   switch (existing.type) {
     case 'text':
-      if (!patch.text) return ok(scene);
-      return updateLayer(scene, id, { text: { ...existing.text, ...patch.text } });
+      return patch.text
+        ? updateLayer(scene, id, { text: { ...existing.text, ...patch.text } })
+        : ok(scene);
     case 'rect':
     case 'ellipse':
-      if (!patch.shape) return ok(scene);
-      return updateLayer(scene, id, { shape: { ...existing.shape, ...patch.shape } });
+      return patch.shape
+        ? updateLayer(scene, id, { shape: { ...existing.shape, ...patch.shape } })
+        : ok(scene);
     case 'image':
-      if (!patch.image) return ok(scene);
-      return updateLayer(scene, id, { image: { ...existing.image, ...patch.image } });
+      return patch.image
+        ? updateLayer(scene, id, { image: { ...existing.image, ...patch.image } })
+        : ok(scene);
   }
 }
 
@@ -507,29 +544,14 @@ export function topmostLayerAt(
   return undefined;
 }
 
-/** Validates a text patch before it reaches the document, with user-facing messages. */
+/**
+ * Validates a text patch before it reaches the document, with user-facing messages.
+ *
+ * The rules live in `validation.ts` so that the inspector, an export check and this guard cannot
+ * drift apart; this wrapper only projects them down to the message strings callers already show.
+ */
 export function validateTextSettings(text: TextSettings): readonly string[] {
-  const issues: string[] = [];
-  if (text.content.length > MAX_TEXT_LENGTH) {
-    issues.push(`Text is limited to ${MAX_TEXT_LENGTH.toLocaleString('en-US')} characters.`);
-  }
-  if (!Number.isFinite(text.fontSize) || text.fontSize < 4 || text.fontSize > 800) {
-    issues.push('Font size must be between 4 and 800 px.');
-  }
-  if (!Number.isFinite(text.lineHeight) || text.lineHeight < 0.5 || text.lineHeight > 4) {
-    issues.push('Line height must be between 0.5 and 4 times the font size.');
-  }
-  if (
-    !Number.isFinite(text.letterSpacing) ||
-    text.letterSpacing < -50 ||
-    text.letterSpacing > 200
-  ) {
-    issues.push('Letter spacing must be between -50 and 200 px.');
-  }
-  if (!/^#[0-9a-fA-F]{6}$/.test(text.color)) {
-    issues.push('Text colour must be a 6-digit hex value.');
-  }
-  return issues;
+  return textSettingsIssues(text).map((issue) => issue.message);
 }
 
 /** Adds an attribution record, de-duplicating by asset id and bounding the collection. */

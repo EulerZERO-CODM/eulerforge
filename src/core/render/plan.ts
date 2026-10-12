@@ -173,15 +173,8 @@ function opFor(layer: Layer, options: BuildPlanOptions, issues: RenderIssue[]): 
   switch (layer.type) {
     case 'rect':
     case 'ellipse': {
-      const op = {
-        kind: layer.type,
-        layerId: layer.id,
-        layerName: layer.name,
-        frame: layer.frame,
-        shape: layer.shape,
-        opacity: layer.opacity,
-      } as RectOp | EllipseOp;
-      if (op.shape.fill === null && op.shape.stroke === null) {
+      const shape = layer.shape;
+      if (shape.fill === null && shape.stroke === null) {
         issues.push({
           kind: 'empty-layer',
           layerId: layer.id,
@@ -190,7 +183,14 @@ function opFor(layer: Layer, options: BuildPlanOptions, issues: RenderIssue[]): 
           blocking: false,
         });
       }
-      return op;
+      const common = {
+        layerId: layer.id,
+        layerName: layer.name,
+        frame: layer.frame,
+        shape,
+        opacity: layer.opacity,
+      };
+      return layer.type === 'rect' ? { kind: 'rect', ...common } : { kind: 'ellipse', ...common };
     }
     case 'text': {
       const measure = options.measureFont(fontString(layer.text));
