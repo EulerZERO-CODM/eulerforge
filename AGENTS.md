@@ -23,21 +23,25 @@ never weaken a check to make something pass.
 1. **Nothing fake.** Every visible control either works, or is disabled/unavailable with the reason
    next to it. Do not add placeholder editors, fabricated analytics, fake success messages or dead
    links. If a capability is not built, mark it `planned` and say so (ADR-0010).
-2. **Do not weaken the type system.** No `any`, no non-null assertions to silence the compiler, no
+2. **Never present a fallback as durable.** If browser storage is unavailable, the app keeps working
+   in memory but every surface must say so — no "Saved" indicator, badge or copy without checking
+   `storageStatus` (ADR-0006). Equally, a zoom level must render the geometry it claims: do not cap a
+   canvas with CSS and leave the control offering it (ADR-0015).
+3. **Do not weaken the type system.** No `any`, no non-null assertions to silence the compiler, no
    `@ts-expect-error` without a comment explaining the upstream bug, no disabling strict flags. Prefer
    fixing the model: `exactOptionalPropertyTypes` usually means a conditional spread is missing.
-3. **Do not silence lint.** Fix the cause or add a narrow, commented disable. Blanket rule
+4. **Do not silence lint.** Fix the cause or add a narrow, commented disable. Blanket rule
    exclusions in `eslint.config.mjs` need a reason in the commit message.
-4. **Respect the layers.** `src/core/**` stays framework-free (no React, no DOM, no storage).
+5. **Respect the layers.** `src/core/**` stays framework-free (no React, no DOM, no storage).
    Components never import `src/core/persistence/**` — ESLint enforces it.
-5. **Documents are immutable.** Mutate through `applyDocumentPatch` / `DocumentSession.commit`, never
+6. **Documents are immutable.** Mutate through `applyDocumentPatch` / `DocumentSession.commit`, never
    in place.
-6. **Route integrity.** Every href a user can click must resolve to a page under `src/app`. Tests for
+7. **Route integrity.** Every href a user can click must resolve to a page under `src/app`. Tests for
    this live in `src/testing/routes.ts` and the shell/studios/learning suites; extend them rather than
    eyeballing.
-7. **Honesty in content.** Lessons and copy must not imply that unbuilt studios work. Planned studios
+8. **Honesty in content.** Lessons and copy must not imply that unbuilt studios work. Planned studios
    and formats are labelled. Sample assets stay labelled as samples (ADR-0008).
-8. **Accessibility is not optional.** Keyboard reachability, visible focus, labels on icon-only
+9. **Accessibility is not optional.** Keyboard reachability, visible focus, labels on icon-only
    controls, and `prefers-reduced-motion` support are part of done (ADR-0014).
 
 ## Style

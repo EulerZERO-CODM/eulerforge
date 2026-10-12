@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, Redo2, Undo2 } from 'lucide-react';
+import { ArrowLeft, CircleAlert, Redo2, Undo2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
@@ -11,7 +11,7 @@ import { Button } from '../ui/button';
 import { ConfirmDialog } from '../ui/dialog';
 import { IconButton } from '../ui/icon-button';
 import { PageHeader } from '../ui/section';
-import { EmptyState, ErrorState, SkeletonCard } from '../ui/states';
+import { EmptyState, ErrorState, InlineNote, SkeletonCard } from '../ui/states';
 import { useForgeServices } from '../../state/forge-provider';
 import { useDocumentSession } from '../../state/hooks';
 import type { DocumentPatch } from '../../state/document-session';
@@ -30,7 +30,7 @@ import type { WorkspaceApi } from './workspace-api';
  */
 export function WorkspaceView({ documentId }: { readonly documentId: string }) {
   const router = useRouter();
-  const { documents, toasts } = useForgeServices();
+  const { documents, toasts, storageStatus } = useForgeServices();
   const { session, state, library } = useDocumentSession(documentId);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -151,11 +151,18 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
               saving={state.saving}
               savedAt={state.lastSavedAt}
               error={state.lastError ? state.lastError.message : null}
+              storage={storageStatus}
             />
             <span aria-hidden>·</span>
             <span className="forge-numeric">revision {doc.revision}</span>
             <span aria-hidden>·</span>
-            <Badge tone="neutral">Local to this device</Badge>
+            <Badge tone={storageStatus.durability === 'volatile' ? 'warning' : 'neutral'}>
+              {storageStatus.durability === 'volatile'
+                ? storageStatus.determined
+                  ? 'In memory only'
+                  : 'Storage not checked'
+                : 'Local to this device'}
+            </Badge>
           </>
         }
         actions={
@@ -184,6 +191,43 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
           </>
         }
       />
+
+      {state.lastError ? (
+        <InlineNote
+          tone="danger"
+          icon={<CircleAlert aria-hidden />}
+          title="The last change was not saved"
+        >
+          <p>{state.lastError.message}</p>
+          {state.lastError.detail ? (
+            <p className="forge-numeric text-2xs">{state.lastError.detail}</p>
+          ) : null}
+          <p className="flex flex-wrap items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                // `session` is already narrowed by the not-found guard above.
+                void session.retrySave().then((result) => {
+                  if (result.ok) toasts.success('Saved', 'The pending change was written.');
+                });
+              }}
+            >
+              Try saving again
+            </Button>
+            {state.lastError.code === 'storage-quota-exceeded' ? (
+              <Link href="/projects" className="text-fg underline decoration-1 underline-offset-2">
+                Delete a project to free space
+              </Link>
+            ) : null}
+            {storageStatus.durability === 'volatile' && storageStatus.determined ? (
+              <Link href="/settings" className="text-fg underline decoration-1 underline-offset-2">
+                Check storage settings
+              </Link>
+            ) : null}
+          </p>
+        </InlineNote>
+      ) : null}
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_26rem]">
         <div className="min-w-0 space-y-5">

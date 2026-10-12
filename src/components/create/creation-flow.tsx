@@ -694,7 +694,7 @@ export function CreationFlow() {
             Live preview
           </h2>
           <div className="mt-3">
-            <DocumentPreview canvas={canvas} guides={guides} />
+            <DocumentPreview canvas={canvas} guides={guides} sizing={{ kind: 'fluid' }} />
           </div>
           <p className="text-fg-subtle mt-3 text-xs">
             This preview renders the document specification — background, safe area, bleed and grid

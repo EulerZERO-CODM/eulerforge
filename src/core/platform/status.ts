@@ -145,7 +145,7 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     area: 'shell',
     label: 'Local project library',
     description:
-      'Projects are created, listed, edited and deleted in this browser via a storage repository interface. Device-local only.',
+      'Projects are created, listed, edited and deleted in this browser via a storage repository interface. Device-local only, and when the browser refuses storage the library says so instead of pretending to save.',
     status: 'implemented',
     verification: [
       'src/core/persistence/document-repository.test.ts',
@@ -231,10 +231,11 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     area: 'studios',
     label: 'Design Studio workspace',
     description:
-      'Document setup, guides, units, palette, metadata, history/undo, export readiness and project file download. No drawing tools.',
+      'Document setup, guides, units, palette, metadata, history/undo, export readiness, project file download and a stage that renders the document geometry at a real zoom. No drawing tools.',
     status: 'partial',
     verification: [
       'src/components/workspace/document-aside.test.tsx',
+      'src/components/workspace/document-stage.test.tsx',
       'Manual check: change canvas size, undo, redo, export',
     ],
     gap: 'Selection, text, shape and image tools are not implemented; the workspace says so and links to the roadmap.',
@@ -267,6 +268,21 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     verification: [
       'npm run verify',
       'https://github.com/EulerZERO-CODM/eulerforge/actions (CI workflow .github/workflows/ci.yml)',
+    ],
+  },
+  {
+    id: 'platform.storage-durability',
+    area: 'platform',
+    label: 'Honest storage durability reporting',
+    description:
+      'The browser storage backend reports whether writes are persistent or session-only, the interface states which one is in use, and a save is only ever claimed when the write reaches the device. Server rendering is reported as undetermined rather than assumed.',
+    status: 'implemented',
+    verification: [
+      'src/core/persistence/storage.test.ts',
+      'src/core/persistence/storage.server-render.test.ts',
+      'src/state/storage-status.test.ts',
+      'src/components/workspace/save-state.test.tsx',
+      'src/components/shell/storage-notice.test.tsx',
     ],
   },
   {

@@ -154,6 +154,21 @@ implementation local now keeps the honesty simple.
 crashing the library. Nothing may imply sync until ADR-0006 is superseded by a record that covers
 authentication, conflict handling and data residency.
 
+**Durability reporting (added in the Phase 1 review pass).** The in-memory fallback is real but not
+durable, so `createBrowserStorage()` returns the backend *and* its durability (`persistent` or
+`volatile`) plus a cause. Three rules follow, and they are enforced by tests rather than by review:
+
+1. **Never claim a save that did not reach the device.** The workspace save indicator only says
+   "Saved" for a persistent backend. With a volatile backend it says the document is held in memory,
+   and the shell banner, the project library and the Settings storage row all say the same thing.
+2. **Server rendering claims nothing.** On the server there is no `window` to inspect, so the cause
+   is `server-render` and the state layer reports the status as *undetermined*: no warning is
+   rendered, because the browser would immediately contradict it on hydration. The DOM-environment
+   tests assert silence for that case.
+3. **The fallback must keep working.** Removing it would break server rendering, so it stays; what
+   changed is that it is now labelled. Failures that do happen (quota, a refused write) stay visible
+   on the save indicator and offer a retry that re-persists the exact revision the user sees.
+
 ---
 
 ## ADR-0007 — Explicit stores + `useSyncExternalStore` instead of a state library
@@ -348,3 +363,47 @@ mandatory at the type level is the kind of constraint that survives contributor 
 behavioural parts (focus order and roles where practical). A performance budget will get concrete
 numbers when a renderer exists to measure; inventing thresholds for an app with no canvas would be
 theatre.
+
+---
+
+## ADR-0015 — Canvas zoom is geometry, and 100% means one document pixel per CSS pixel
+
+**Status:** Accepted
+
+**Context.** The workspace stage renders a document's specification (background, safe area, bleed,
+grid, centre lines). Its first implementation offered Fit/25/50/100/200% while the canvas box was
+sized by CSS maximum-width rules, including a portrait-specific `min(100%, 14rem)`. The control
+therefore promised zoom levels the layout silently overrode: 200% on a vertical document rendered
+exactly the same box as 100%.
+
+**Decision.** Zoom is computed, not styled:
+
+- `src/core/documents/zoom.ts` resolves a setting plus the measured viewport into an exact CSS-pixel
+  box, a percentage for display, and a `clipped` flag. It is framework-free and unit-tested.
+- An explicit percentage scales the document's **declared pixel dimensions**. Portrait and landscape
+  documents are handled identically — no orientation-specific cap exists.
+- `fit` uses the smaller of the two axis ratios and never magnifies past 100%, so 100% keeps exactly
+  one meaning. It scales to the viewport the stage measured, and an unmeasurable viewport falls back
+  to the declared size rather than to a guess.
+- The stage measures its scroll area (`ResizeObserver`, with a window-resize fallback) and passes an
+  **absolute** size to the preview. In that mode the preview applies no `max-width`/`max-height`
+  cap; it hugs the canvas, and the scroll container (`overflow-auto` with an auto-margin child so
+  both edges stay reachable) is how an oversized canvas is explored. Being larger than the pane is
+  reported in the interface instead of hidden.
+- The zoom control shows the effective percentage next to the select, steps out of `fit` relative to
+  what is actually on screen, and states in plain language that a percentage maps document pixels to
+  **CSS** pixels — on a high-density display one CSS pixel is drawn with more than one device pixel,
+  so 100% is a 1:1 CSS-pixel mapping, not a guarantee of device-pixel identity.
+
+**Reasoning.** A zoom control is a measurement claim. If the interface says 200%, the box must be
+twice the declared size, and if that cannot fit the pane, scrolling is the honest answer rather than
+a quieter cap. Putting the arithmetic in Forge Core also means the cases that broke last time
+(portrait, oversized zooms, fit with an unmeasured viewport) are covered by tests that do not need a
+browser.
+
+**Consequences.** The stage needs a measured viewport, so `ResizeObserver` is required in the browser
+(with a documented fallback) and tests stub element measurements to exercise `fit`. Fluid previews
+(creation flow, project cards) keep their container-fitted behaviour explicitly via
+`sizing={{ kind: 'fluid' }}`, so the two meanings of "preview" never blur. Any future zoom mode (a
+zoom-to-selection, a percentage between the fixed levels) is added to the core function with tests
+rather than to the component's CSS.

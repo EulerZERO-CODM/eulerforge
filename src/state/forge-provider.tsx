@@ -15,10 +15,11 @@ import { createAssetCatalog, type AssetCatalog } from '../core/assets/catalog';
 import { createPlatformEventBus, type PlatformEventBus } from '../core/events/event-bus';
 import type { DocumentRepository } from '../core/persistence/document-repository';
 import { LocalDocumentRepository } from '../core/persistence/document-repository';
-import { BrowserLocalStorage, type KeyValueStorage } from '../core/persistence/storage';
+import { createBrowserStorage, type KeyValueStorage } from '../core/persistence/storage';
 import { LocalPreferencesRepository } from '../core/preferences/repository';
 import { env } from '../config/env';
 import { DocumentsStore } from './documents-store';
+import { describeStorageBackend, type ForgeStorageStatus } from './storage-status';
 import { LearningProgressStore } from './learning-progress-store';
 import { PreferencesStore } from './preferences-store';
 import { ToastStore } from './toast-store';
@@ -26,6 +27,11 @@ import { ToastStore } from './toast-store';
 export type ForgeServices = {
   readonly bus: PlatformEventBus;
   readonly storage: KeyValueStorage;
+  /**
+   * How durable `storage` is. Presentational components read this instead of assuming that a write
+   * survives a reload — the in-memory fallback is real but not persistent (ADR-0006).
+   */
+  readonly storageStatus: ForgeStorageStatus;
   readonly documents: DocumentsStore;
   readonly documentRepository: DocumentRepository;
   readonly catalog: AssetCatalog;
@@ -36,7 +42,9 @@ export type ForgeServices = {
 
 export function createForgeServices(): ForgeServices {
   const bus = createPlatformEventBus();
-  const storage = BrowserLocalStorage.create();
+  const backend = createBrowserStorage();
+  const storage = backend.storage;
+  const storageStatus = describeStorageBackend(backend);
   const documentRepository = new LocalDocumentRepository(storage);
   const documents = new DocumentsStore({ repository: documentRepository, bus });
   const preferences = new PreferencesStore(new LocalPreferencesRepository(storage));
@@ -47,6 +55,7 @@ export function createForgeServices(): ForgeServices {
   return {
     bus,
     storage,
+    storageStatus,
     documents,
     documentRepository,
     catalog,

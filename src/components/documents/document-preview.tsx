@@ -3,6 +3,19 @@ import { aspectRatioLabel, orientationOf } from '../../core/documents/geometry';
 import { toPixels } from '../../core/documents/units';
 import { cn } from '../../lib/cn';
 
+/**
+ * How the canvas box is sized.
+ *
+ * - `fluid` fits the container: the caller decides how wide it may become, and the box keeps the
+ *   document's aspect ratio. Used where the preview is an illustration (creation flow, project
+ *   cards).
+ * - `absolute` renders the canvas at an exact CSS-pixel box. Used by the workspace stage, where the
+ *   box *is* the zoom level, so no maximum-width rule may shrink it — the stage scrolls instead.
+ */
+export type DocumentPreviewSizing =
+  | { readonly kind: 'fluid'; readonly maxWidthRem?: number }
+  | { readonly kind: 'absolute'; readonly width: number; readonly height: number };
+
 export type DocumentPreviewProps = {
   readonly canvas: Canvas;
   readonly guides: GuideSettings;
@@ -10,6 +23,9 @@ export type DocumentPreviewProps = {
   readonly showGuides?: boolean;
   readonly className?: string;
   readonly caption?: string;
+  readonly sizing?: DocumentPreviewSizing;
+  /** Set false where the surrounding UI already states the size (the workspace stage does). */
+  readonly showCaption?: boolean;
 };
 
 /**
@@ -26,7 +42,10 @@ export function DocumentPreview({
   showGuides = true,
   className,
   caption,
+  sizing,
+  showCaption = true,
 }: DocumentPreviewProps) {
+  const absolute = sizing?.kind === 'absolute' ? sizing : null;
   const safeMarginXPx = toPixels(guides.safeMarginMm, 'mm', canvas.dpi);
   const safeMarginYPx = toPixels(guides.safeMarginMm, 'mm', canvas.dpi);
   const bleedPx = toPixels(guides.bleedMm, 'mm', canvas.dpi);
@@ -39,17 +58,45 @@ export function DocumentPreview({
   const gridX = percent(gridPx / canvas.width);
   const gridY = percent(gridPx / canvas.height);
 
+  // With an absolute size the canvas *is* the zoom: the box is exactly the requested CSS-pixel size
+  // and every surrounding rule must give it room, which is why the frame hugs its content here.
+  const frameClassName = absolute
+    ? 'bg-ink-1000/80 forge-grid-backdrop relative inline-flex w-max items-center justify-center rounded-sm p-3'
+    : 'bg-ink-1000/80 forge-grid-backdrop relative flex items-center justify-center rounded-sm p-3';
+  const boxClassName = absolute
+    ? cn(
+        'relative overflow-hidden rounded-xs border',
+        canvas.transparent ? 'border-line-strong' : 'border-line',
+      )
+    : cn(
+        'relative max-h-full max-w-full overflow-hidden rounded-xs border',
+        canvas.transparent ? 'border-line-strong' : 'border-line',
+      );
+  const boxStyle = absolute
+    ? {
+        width: `${String(absolute.width)}px`,
+        height: `${String(absolute.height)}px`,
+      }
+    : {
+        aspectRatio: `${String(canvas.width)} / ${String(canvas.height)}`,
+        width:
+          sizing?.kind === 'fluid' && sizing.maxWidthRem !== undefined
+            ? `min(100%, ${String(sizing.maxWidthRem)}rem)`
+            : orientationOf(canvas) === 'portrait'
+              ? 'min(100%, 14rem)'
+              : '100%',
+      };
+
   return (
-    <figure className={cn('min-w-0', className)}>
-      <div className="bg-ink-1000/80 forge-grid-backdrop relative flex items-center justify-center rounded-sm p-3">
+    <figure className={cn('min-w-0', absolute && 'w-max', className)}>
+      <div className={frameClassName}>
         <div
-          className={cn(
-            'relative max-h-full max-w-full overflow-hidden rounded-xs border',
-            canvas.transparent ? 'border-line-strong' : 'border-line',
-          )}
+          data-testid="document-canvas"
+          data-canvas-width={canvas.width}
+          data-canvas-height={canvas.height}
+          className={boxClassName}
           style={{
-            aspectRatio: `${String(canvas.width)} / ${String(canvas.height)}`,
-            width: orientationOf(canvas) === 'portrait' ? 'min(100%, 14rem)' : '100%',
+            ...boxStyle,
             backgroundColor: canvas.transparent ? 'transparent' : canvas.background,
             backgroundImage: canvas.transparent
               ? 'linear-gradient(45deg, oklch(30% 0 0 / 0.5) 25%, transparent 25%, transparent 75%, oklch(30% 0 0 / 0.5) 75%), linear-gradient(45deg, oklch(30% 0 0 / 0.5) 25%, transparent 25%, transparent 75%, oklch(30% 0 0 / 0.5) 75%)'
@@ -108,15 +155,17 @@ export function DocumentPreview({
           ) : null}
         </div>
       </div>
-      <figcaption className="text-2xs text-fg-subtle mt-2 flex items-center justify-between gap-2">
-        <span className="forge-numeric">
-          {canvas.width} × {canvas.height} px
-        </span>
-        <span className="forge-numeric">
-          {aspectRatioLabel(canvas)} · {orientationOf(canvas)}
-        </span>
-        {caption ? <span className="truncate">{caption}</span> : null}
-      </figcaption>
+      {showCaption ? (
+        <figcaption className="text-2xs text-fg-subtle mt-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="forge-numeric">
+            {canvas.width} × {canvas.height} px
+          </span>
+          <span className="forge-numeric">
+            {aspectRatioLabel(canvas)} · {orientationOf(canvas)}
+          </span>
+          {caption ? <span className="truncate">{caption}</span> : null}
+        </figcaption>
+      ) : null}
     </figure>
   );
 }

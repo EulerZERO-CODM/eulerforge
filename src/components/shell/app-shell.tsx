@@ -5,10 +5,12 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import { env } from '../../config/env';
 import { useForgeServices } from '../../state/forge-provider';
+import { isVolatile } from '../../state/storage-status';
 import { useDocumentLibrary } from '../../state/hooks';
 import { TooltipProvider } from '../ui/tooltip';
 import { ToastViewport } from '../ui/toast-viewport';
 import { CommandPalette, useCommandPaletteShortcut } from './command-palette';
+import { StorageNotice } from './storage-notice';
 import { MotionPreferenceSync } from './motion-preference';
 import { SidebarNav } from './sidebar-nav';
 import { Topbar } from './topbar';
@@ -68,6 +70,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
               setPaletteOpen(true);
             }}
           />
+          <StorageNotice />
           <main id="main-content" tabIndex={-1} className="min-w-0 flex-1 focus:outline-none">
             {children}
           </main>
@@ -81,11 +84,16 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
 }
 
 function ShellFooter() {
+  const { storageStatus } = useForgeServices();
+  const volatile = isVolatile(storageStatus);
+
   return (
     <div className="border-line-subtle text-2xs text-fg-subtle mt-4 space-y-1 border-t pt-3">
       <p className="forge-numeric">v0.1.0 · {env.environment}</p>
       <p>
-        Projects are stored in this browser only.{' '}
+        {volatile
+          ? 'Nothing is being written to this device: projects live in memory for this tab only.'
+          : 'Projects are stored in this browser only.'}{' '}
         <Link
           href="/learn/how-your-projects-are-stored"
           className="hover:text-fg-muted underline decoration-1 underline-offset-2"

@@ -44,9 +44,14 @@ The parts every studio must share. Each module is small, pure where possible, an
   integrity validation. Lessons reference studios by id and exercise steps link to real routes,
   which the test suite verifies.
 - **`persistence/`** — `KeyValueStorage` and `DocumentRepository`. Both are promise-based so a remote
-  adapter can replace the local one without touching callers (ADR-0006).
+  adapter can replace the local one without touching callers (ADR-0006). `createBrowserStorage()`
+  also reports the backend's *durability*, because an in-memory fallback must never be presented as a
+  save (ADR-0006 → durability reporting).
 - **`export/`** — the format registry (which formats exist versus which are planned), the readiness
   checklist that evaluates a document against a format, and the `.forge.json` project file format.
+- **`documents/zoom.ts`** — the canvas zoom arithmetic (setting + measured viewport → exact pixel
+  box), kept out of the components so portrait, landscape, oversized zooms and `fit` are testable
+  without a browser (ADR-0015).
 - **`history/`, `commands/`, `events/`** — the linear undo/redo stack, the command registry behind
   Cmd/Ctrl + K, and the typed platform event bus.
 - **`preferences/`** — user defaults with a tolerant loader (a corrupt record resets field by field
@@ -68,7 +73,12 @@ Stores are plain classes with a `getState`/`subscribe` surface (`DocumentsStore`
 `DocumentSession` is the front door for editing: every change goes through
 `commit(label, patch)`, which validates, records a labelled history step, persists through the
 repository and updates the dirty/saving/error view state together — so undo, the save indicator and
-storage can never disagree.
+storage can never disagree. A failed write keeps the document dirty and exposes `retrySave()`, which
+the workspace wires to a "Try saving again" action.
+
+`ForgeServices` also carries `storageStatus` (`src/state/storage-status.ts`), the durability
+vocabulary the interface uses: components read it rather than importing persistence, which is what
+keeps the "stored in this browser" claim honest when the browser has refused storage.
 
 `ForgeProvider` is the composition root. It constructs the service graph once per tab; components
 read it with hooks and never build repositories or catalogues themselves.
@@ -124,6 +134,8 @@ it, which is why the history panel and the document can never diverge.
 | A new storage backend         | Implement `KeyValueStorage` + `DocumentRepository`; no caller changes are required.                               |
 | A new export format           | Add it to `src/core/export/formats.ts` and give it checks in `src/core/export/checklist.ts`.                       |
 | A new capability claim        | Add an entry to `src/core/platform/status.ts` with `verification` evidence; `/platform-status` renders it.        |
+| A new zoom level or mode      | Add it to `src/core/documents/zoom.ts` with tests, and to the select in `document-stage.tsx` — never as CSS that caps the canvas. |
+| A new storage backend         | Report its durability through `describeStorageBackend` so the interface can state whether a save survives a reload.   |
 
 ## Performance and accessibility expectations
 

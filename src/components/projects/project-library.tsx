@@ -1,6 +1,6 @@
 'use client';
 
-import { FolderOpen, Search, SlidersHorizontal } from 'lucide-react';
+import { FolderOpen, Search, ShieldAlert, SlidersHorizontal } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 
@@ -9,11 +9,12 @@ import { getStudio } from '../../core/studios';
 import { truncate } from '../../lib/format';
 import { useForgeServices } from '../../state/forge-provider';
 import { useDocuments } from '../../state/hooks';
+import { isVolatile } from '../../state/storage-status';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { SegmentedControl } from '../ui/controls';
 import { Field, Select } from '../ui/field';
-import { EmptyState, ErrorState, SkeletonCard } from '../ui/states';
+import { EmptyState, ErrorState, InlineNote, SkeletonCard } from '../ui/states';
 import { ProjectCard } from './project-card';
 
 type SortKey = 'updated' | 'name' | 'size';
@@ -25,7 +26,8 @@ type SortKey = 'updated' | 'name' | 'size';
  * this browser's storage — including the count, which is why the header never implies cloud backup.
  */
 export function ProjectLibrary() {
-  const { documents, toasts } = useForgeServices();
+  const { documents, toasts, storageStatus } = useForgeServices();
+  const volatile = isVolatile(storageStatus);
   const state = useDocuments();
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<DocumentStatus | 'all'>('all');
@@ -90,6 +92,20 @@ export function ProjectLibrary() {
 
   return (
     <div className="space-y-5">
+      {volatile ? (
+        <InlineNote
+          tone="danger"
+          icon={<ShieldAlert aria-hidden />}
+          title="This list is not stored on this device"
+        >
+          <p>
+            Storage is unavailable, so these projects are held in memory for this tab only. They
+            disappear when the tab reloads or closes. Export project files for anything you want to
+            keep.
+          </p>
+        </InlineNote>
+      ) : null}
+
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Search" className="min-w-56 flex-1">
           <div className="relative">
@@ -170,7 +186,11 @@ export function ProjectLibrary() {
         <EmptyState
           icon={<FolderOpen aria-hidden />}
           title="Your library is empty"
-          description="Projects are created and stored in this browser on this device. There is no account and no sync, so a new browser starts from nothing."
+          description={
+            volatile
+              ? 'Storage is unavailable, so nothing is written to this device and this list starts empty every time. Export project files to keep your work.'
+              : 'Projects are created and stored in this browser on this device. There is no account and no sync, so a new browser starts from nothing.'
+          }
           actions={
             <>
               <Button asChild variant="primary">

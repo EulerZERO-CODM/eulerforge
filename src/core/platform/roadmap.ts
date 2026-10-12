@@ -95,11 +95,13 @@ export const ROADMAP: readonly RoadmapPhase[] = [
         completionCriteria: [
           'Every primary navigation target renders a real screen',
           'Creating a project from a preset produces a persisted, validated document',
+          'A save is never claimed when storage is a session-only fallback',
         ],
         capabilityIds: [
           'shell.navigation',
           'shell.command-palette',
           'shell.project-library',
+          'platform.storage-durability',
           'studios.design',
         ],
       },

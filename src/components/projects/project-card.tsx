@@ -89,7 +89,11 @@ export function ProjectCard({
       </div>
 
       <div className="p-3">
-        <DocumentPreview canvas={document.canvas} guides={document.guides} />
+        <DocumentPreview
+          canvas={document.canvas}
+          guides={document.guides}
+          sizing={{ kind: 'fluid' }}
+        />
       </div>
 
       <div className="border-line-subtle mt-auto flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2.5">

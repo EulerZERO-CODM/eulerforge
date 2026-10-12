@@ -71,6 +71,14 @@ verifies it. A summary:
   with a v0 → v1 migration path, unit conversion (px/mm/in), canvas geometry and 13 canvas presets.
 - Local project storage in `localStorage` behind a promise-based repository boundary, with corrupt
   record handling, quota errors, a skipped-record report and device-local learning progress.
+- Honest storage durability: when a browser refuses local storage (private mode, blocked site data),
+  the app keeps working through an in-memory fallback and says so — a shell banner, a save indicator
+  that reads "in memory only" instead of "saved", a storage row in Settings, and a retry for writes
+  that genuinely fail. Server rendering claims nothing until the browser has been checked.
+- A canvas stage whose zoom is real geometry: `fit` scales to the measured pane, explicit percentages
+  render the document at exactly that multiple of its declared pixel size, portrait and landscape
+  behave the same, oversized zooms scroll rather than being capped, and the interface states that a
+  percentage maps document pixels to CSS pixels (not device pixels).
 - Layout starters: three documented starting arrangements that preselect a canvas and the guides
   describing their regions — the interface is explicit that the user places the artwork, because
   nothing renders a layout yet.

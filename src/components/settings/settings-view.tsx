@@ -13,6 +13,7 @@ import { env } from '../../config/env';
 import { formatBytes, pluralise } from '../../lib/format';
 import { useForgeServices } from '../../state/forge-provider';
 import { useDocuments, useLearningProgress, usePreferences } from '../../state/hooks';
+import { isVolatile } from '../../state/storage-status';
 import { Button } from '../ui/button';
 import { ConfirmDialog } from '../ui/dialog';
 import { Field, Input, Select, SwitchField } from '../ui/field';
@@ -28,7 +29,8 @@ import { StatusDot } from '../ui/controls';
  * validated environment and the actual storage footprint so nothing has to be taken on trust.
  */
 export function SettingsView() {
-  const { documents, preferences, learning, toasts } = useForgeServices();
+  const { documents, preferences, learning, toasts, storageStatus } = useForgeServices();
+  const volatile = isVolatile(storageStatus);
   const preferenceState = usePreferences();
   const library = useDocuments();
   useLearningProgress();
@@ -240,9 +242,25 @@ export function SettingsView() {
           actions={<Database aria-hidden className="text-fg-subtle size-4" />}
         />
 
+        {volatile ? (
+          <InlineNote
+            tone="danger"
+            icon={<ShieldAlert aria-hidden />}
+            title="Storage is not available, so nothing is being written"
+          >
+            <p>{storageStatus.notice}</p>
+            {storageStatus.detail ? (
+              <p className="forge-numeric text-2xs">
+                Reported by this browser: {storageStatus.detail}
+              </p>
+            ) : null}
+          </InlineNote>
+        ) : null}
+
         <DataList
           columns={2}
           items={[
+            { label: 'Storage mode', value: storageStatus.label },
             {
               label: 'Stored projects',
               value: pluralise(health?.count ?? library.documents.length, 'project'),

@@ -991,6 +991,12 @@ export const LESSONS: readonly Lesson[] = [
       },
       {
         type: 'callout',
+        tone: 'warning',
+        title: 'When the browser refuses to store anything',
+        body: 'Some configurations — private browsing, blocked site data, or cookies turned off — do not allow local storage at all. In that case the app keeps working but holds projects in memory for the tab only, and the interface says so with a banner, a workspace warning instead of a “saved” message, and a storage row in Settings. Nothing survives a reload, so export project files immediately if you intend to keep working that way.',
+      },
+      {
+        type: 'callout',
         tone: 'note',
         title: 'Versioning protects you later',
         body: 'Every stored project carries a schema version. When the document model changes, older projects are migrated forward on load rather than being discarded. A project saved by a newer version of the app is refused with a clear message instead of being silently downgraded.',

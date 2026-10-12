@@ -159,6 +159,17 @@ export class DocumentSession {
     return ok(saved.value);
   }
 
+  /**
+   * Re-attempts persistence for the current document.
+   *
+   * Used by the workspace's "Try saving again" action after a failed write (quota, or a browser that
+   * refused the write). It persists whatever the history currently holds, so a retry can never save
+   * a different revision than the one the user sees.
+   */
+  public async retrySave(): Promise<Result<ForgeDocument>> {
+    return this.persistToStore(true);
+  }
+
   /** Replaces the session's document (e.g. after an external reload). */
   public replace(document: ForgeDocument): void {
     this.history.reset(document);

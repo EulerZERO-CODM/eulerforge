@@ -3,6 +3,7 @@
 import { Redo2, Undo2 } from 'lucide-react';
 
 import { DEFAULT_HISTORY_LIMIT } from '../../core/history/history';
+import { isVolatile, type ForgeStorageStatus } from '../../state/storage-status';
 import { formatRelative } from '../../lib/format';
 import { Button } from '../ui/button';
 import { Kbd } from '../ui/kbd';
@@ -92,18 +93,38 @@ export function HistoryPanel({
   );
 }
 
-/** Compact save-state indicator for the workspace header. */
+/**
+ * Compact save-state indicator for the workspace header.
+ *
+ * Takes the storage durability with it, because "saved" is only true when the write survives a
+ * reload. With a volatile backend the indicator says the document is held in memory instead — it
+ * never claims a durable save it cannot deliver (ADR-0006).
+ */
 export function SaveState({
   dirty,
   saving,
   savedAt,
   error,
+  storage,
 }: {
   readonly dirty: boolean;
   readonly saving: boolean;
   readonly savedAt: string | null;
   readonly error: string | null;
+  readonly storage: ForgeStorageStatus;
 }) {
+  const volatile = isVolatile(storage);
+
+  if (!storage.determined) {
+    // Server rendering: storage has not been inspected yet, so claim nothing.
+    return (
+      <span className="text-2xs text-fg-subtle inline-flex items-center gap-1.5" role="status">
+        <span aria-hidden className="bg-ink-500 size-1.5 rounded-full" />
+        Checking storage…
+      </span>
+    );
+  }
+
   if (error) {
     return (
       <span className="text-2xs inline-flex items-center gap-1.5 text-rose-400" role="status">
@@ -116,7 +137,7 @@ export function SaveState({
     return (
       <span className="text-2xs text-fg-subtle inline-flex items-center gap-1.5" role="status">
         <span aria-hidden className="bg-arc-400 size-1.5 animate-pulse rounded-full" />
-        Saving…
+        {volatile ? 'Holding in memory…' : 'Saving…'}
       </span>
     );
   }
@@ -124,7 +145,15 @@ export function SaveState({
     return (
       <span className="text-2xs inline-flex items-center gap-1.5 text-amber-400" role="status">
         <span aria-hidden className="size-1.5 rounded-full bg-amber-400" />
-        Unsaved changes
+        {volatile ? 'Unsaved changes — memory only' : 'Unsaved changes'}
+      </span>
+    );
+  }
+  if (volatile) {
+    return (
+      <span className="text-2xs inline-flex items-center gap-1.5 text-amber-400" role="status">
+        <span aria-hidden className="size-1.5 rounded-full bg-amber-400" />
+        In memory only — reloading loses this
       </span>
     );
   }

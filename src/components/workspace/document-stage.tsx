@@ -1,18 +1,28 @@
 'use client';
 
 import { Grid2X2, Maximize2, Ruler, ZoomIn, ZoomOut } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { ForgeDocument } from '../../core/documents/types';
 import { aspectRatioLabel, megapixelLabel, orientationOf } from '../../core/documents/geometry';
 import { formatLength } from '../../core/documents/units';
+import {
+  ZOOM_PERCENT_LEVELS,
+  computeZoom,
+  parseZoomSetting,
+  stepZoom,
+  type ViewportBox,
+  type ZoomSetting,
+} from '../../core/documents/zoom';
 import { cn } from '../../lib/cn';
 import { Button } from '../ui/button';
 import { IconButton } from '../ui/icon-button';
 import { DocumentPreview } from '../documents/document-preview';
 
-const ZOOM_LEVELS = [25, 50, 100, 200] as const;
-type ZoomLevel = 'fit' | (typeof ZOOM_LEVELS)[number];
+/** Padding around the canvas inside the scroll area, in pixels (`p-4`); measured space excludes it. */
+const STAGE_PADDING_PX = 16 * 2;
+/** Smallest sensible scroll area; below this the stage still renders rather than collapsing. */
+const MIN_STAGE_HEIGHT_PX = 22 * 16;
 
 /**
  * Document stage.
@@ -20,16 +30,51 @@ type ZoomLevel = 'fit' | (typeof ZOOM_LEVELS)[number];
  * The workspace's main surface. Because no layer tools exist yet, this renders the document's real
  * geometry — background, safe area, bleed, centre lines, grid — at a controllable zoom, and it says
  * plainly that direct manipulation is not part of this build.
+ *
+ * Zoom is geometry, not styling: `fit` measures the scroll area and scales the document down to it,
+ * and an explicit percentage renders the document at exactly that multiple of its declared pixel
+ * size. Nothing caps the canvas — at 200% the box is genuinely 200% wide and the stage scrolls, which
+ * is the only honest way to offer a zoom level the viewport cannot hold (ADR-0015).
  */
 export function DocumentStage({ doc }: { readonly doc: ForgeDocument }) {
   const [showGuides, setShowGuides] = useState(true);
-  const [zoom, setZoom] = useState<ZoomLevel>('fit');
+  const [zoom, setZoom] = useState<ZoomSetting>('fit');
+  const [viewport, setViewport] = useState<ViewportBox>({ width: 0, height: 0 });
+  const scrollAreaRef = useRef<HTMLDivElement | null>(null);
 
   const { canvas, guides } = doc;
-  // `fit` lets the preview fill the available width; an explicit level renders at true pixel size,
-  // which is what "100%" has to mean in a document tool.
-  const stageWidth =
-    zoom === 'fit' ? undefined : `${String(Math.round((canvas.width * zoom) / 100))}px`;
+
+  // Measure the scroll area so `fit` has something real to fit against, and keep it current when the
+  // window, the sidebar or the pane divider changes size.
+  useEffect(() => {
+    const element = scrollAreaRef.current;
+    if (!element) return;
+
+    const measure = () => {
+      setViewport({
+        width: Math.max(0, element.clientWidth - STAGE_PADDING_PX),
+        height: Math.max(0, element.clientHeight - STAGE_PADDING_PX),
+      });
+    };
+
+    measure();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure);
+      return () => {
+        window.removeEventListener('resize', measure);
+      };
+    }
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  const scale = computeZoom(canvas, zoom, viewport);
+  const unmeasured = scale.setting === 'fit' && scale.unmeasured;
 
   return (
     <section
@@ -59,7 +104,7 @@ export function DocumentStage({ doc }: { readonly doc: ForgeDocument }) {
             label="Zoom out"
             size="sm"
             onClick={() => {
-              setZoom(previousZoom(zoom, -1));
+              setZoom(stepZoom(zoom, -1, scale.percent));
             }}
           >
             <ZoomOut aria-hidden />
@@ -67,24 +112,32 @@ export function DocumentStage({ doc }: { readonly doc: ForgeDocument }) {
           <select
             aria-label="Zoom level"
             value={String(zoom)}
+            title="Percentages map document pixels to CSS pixels. On a high-density display one CSS pixel is drawn with more than one device pixel."
             onChange={(event) => {
-              const next = event.target.value;
-              setZoom(next === 'fit' ? 'fit' : (Number(next) as (typeof ZOOM_LEVELS)[number]));
+              setZoom(parseZoomSetting(event.target.value));
             }}
             className="forge-numeric border-line bg-ink-950 text-2xs text-fg-muted h-7 cursor-pointer rounded-sm border px-1.5"
           >
             <option value="fit">Fit</option>
-            {ZOOM_LEVELS.map((level) => (
+            {ZOOM_PERCENT_LEVELS.map((level) => (
               <option key={level} value={level}>
                 {level}%
               </option>
             ))}
           </select>
+          <span
+            data-testid="zoom-readout"
+            className="forge-numeric text-2xs text-fg-muted w-[5.5rem] text-right"
+          >
+            {unmeasured
+              ? 'declared size'
+              : `${scale.setting === 'fit' ? 'Fit · ' : ''}${String(scale.percent)}%`}
+          </span>
           <IconButton
             label="Zoom in"
             size="sm"
             onClick={() => {
-              setZoom(previousZoom(zoom, 1));
+              setZoom(stepZoom(zoom, 1, scale.percent));
             }}
           >
             <ZoomIn aria-hidden />
@@ -92,18 +145,24 @@ export function DocumentStage({ doc }: { readonly doc: ForgeDocument }) {
         </div>
       </div>
 
-      <div className="forge-scroll flex min-h-[22rem] flex-1 items-center justify-center overflow-auto p-4">
-        <div
-          className="flex w-full justify-center"
-          style={stageWidth ? { width: stageWidth } : undefined}
-        >
-          <DocumentPreview
-            canvas={canvas}
-            guides={guides}
-            showGuides={showGuides}
-            className="w-full max-w-3xl"
-          />
-        </div>
+      {/*
+        `m-auto` centres the canvas when it fits and still leaves both edges reachable by scrolling
+        when it does not — `justify-center` on a scroll container would clip the leading edge.
+      */}
+      <div
+        ref={scrollAreaRef}
+        data-testid="stage-scroll-area"
+        className="forge-scroll flex flex-1 overflow-auto p-4"
+        style={{ minHeight: `${String(MIN_STAGE_HEIGHT_PX)}px` }}
+      >
+        <DocumentPreview
+          canvas={canvas}
+          guides={guides}
+          showGuides={showGuides}
+          sizing={{ kind: 'absolute', width: scale.width, height: scale.height }}
+          className="m-auto"
+          showCaption={false}
+        />
       </div>
 
       <dl className="border-line-subtle text-2xs grid grid-cols-2 gap-x-4 gap-y-1.5 border-t px-3 py-2.5 sm:grid-cols-4">
@@ -122,6 +181,15 @@ export function DocumentStage({ doc }: { readonly doc: ForgeDocument }) {
 
       <div className="border-line-subtle flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
         <p className="text-2xs text-fg-subtle">
+          {scale.clipped ? (
+            <span data-testid="zoom-clipped-note">
+              The canvas is larger than this pane — scroll to reach it all.{' '}
+            </span>
+          ) : null}
+          <span>
+            Zoom maps document pixels to CSS pixels; on a high-density display one CSS pixel is
+            drawn with more than one device pixel.
+          </span>{' '}
           Direct manipulation — selection, text, shapes, images — is{' '}
           <strong className="text-fg-muted font-medium">not</strong> implemented in this build. What
           you can change today is the document itself.
@@ -151,11 +219,4 @@ function Spec({ label, value }: { readonly label: string; readonly value: string
       <dd className={cn('forge-numeric text-fg-muted truncate')}>{value}</dd>
     </div>
   );
-}
-
-function previousZoom(current: ZoomLevel, direction: 1 | -1): ZoomLevel {
-  if (current === 'fit') return direction === 1 ? 50 : 25;
-  const index = ZOOM_LEVELS.indexOf(current);
-  const next = ZOOM_LEVELS[Math.min(ZOOM_LEVELS.length - 1, Math.max(0, index + direction))];
-  return next ?? 'fit';
 }

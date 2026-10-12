@@ -16,6 +16,33 @@ export interface KeyValueStorage {
   keys(prefix: string): Result<readonly string[]>;
 }
 
+/**
+ * Durability of a storage backend, as reported to the user.
+ *
+ * `persistent` — writes survive a reload (browser storage).
+ * `volatile`   — writes live in memory only and are lost when the tab closes or reloads.
+ *
+ * The distinction exists because the fallback below is *real* but not durable: presenting an
+ * in-memory write as a saved project would be a lie (ADR-0006 → durability reporting).
+ */
+export type StorageDurability = 'persistent' | 'volatile';
+
+/** Why a volatile backend was used. */
+export type StorageVolatileCause =
+  /** Server rendering: there is no `window`, so nothing can be inspected yet. */
+  | 'server-render'
+  /** The browser refused access: private mode, blocked cookies, or a disabled API. */
+  | 'restricted';
+
+export type StorageBackend = {
+  readonly storage: KeyValueStorage;
+  readonly durability: StorageDurability;
+  /** Non-null exactly when `durability` is `volatile`. */
+  readonly cause: StorageVolatileCause | null;
+  /** The underlying error message, when one is available, for diagnostics. */
+  readonly detail: string | null;
+};
+
 export const STORAGE_NAMESPACE = 'eulerforge';
 
 /** Versioned key helper: `eulerforge.v1.documents`. */
@@ -23,7 +50,13 @@ export function storageKey(...segments: readonly string[]): string {
   return [STORAGE_NAMESPACE, 'v1', ...segments].join('.');
 }
 
-/** In-memory implementation. Used by tests and by the server-render fallback. */
+/**
+ * In-memory implementation.
+ *
+ * Used by tests, and as the session-only fallback when browser storage is refused. It is a real
+ * implementation of the interface — it simply does not persist, which is why every caller that
+ * constructs it must also report `volatile` durability.
+ */
 export class MemoryStorage implements KeyValueStorage {
   private readonly entries = new Map<string, string>();
 
@@ -53,6 +86,51 @@ export class MemoryStorage implements KeyValueStorage {
   }
 }
 
+/**
+ * Builds the browser's storage backend and reports how durable it is.
+ *
+ * Returning the durability alongside the backend is the whole point: the caller (the composition
+ * root) can tell the interface that projects are session-only, instead of letting an in-memory write
+ * look like a saved project.
+ *
+ * Server rendering is reported as `volatile`/`server-render` rather than as an outright failure: on
+ * the server there is genuinely nothing to inspect, and the client re-runs this function on
+ * hydration. The state layer turns that cause into "not determined yet" so a server-rendered page
+ * never shows a warning the browser would contradict.
+ */
+export function createBrowserStorage(): StorageBackend {
+  if (typeof window === 'undefined') {
+    return {
+      storage: new MemoryStorage(),
+      durability: 'volatile',
+      cause: 'server-render',
+      detail: null,
+    };
+  }
+
+  try {
+    // Probe once: some browsers expose the API and then throw on write (Safari private mode), and
+    // disabled-cookie configurations throw on access.
+    const storage = window.localStorage;
+    const probeKey = storageKey('probe');
+    storage.setItem(probeKey, '1');
+    storage.removeItem(probeKey);
+    return {
+      storage: new BrowserLocalStorage(storage),
+      durability: 'persistent',
+      cause: null,
+      detail: null,
+    };
+  } catch (error) {
+    return {
+      storage: new MemoryStorage(),
+      durability: 'volatile',
+      cause: 'restricted',
+      detail: error instanceof Error ? error.message : null,
+    };
+  }
+}
+
 function isQuotaError(error: unknown): boolean {
   return (
     typeof error === 'object' &&
@@ -70,22 +148,6 @@ function isQuotaError(error: unknown): boolean {
  */
 export class BrowserLocalStorage implements KeyValueStorage {
   public constructor(private readonly storage: Storage) {}
-
-  public static create(): KeyValueStorage {
-    // Server rendering has no storage; fall back to the in-memory implementation.
-    if (typeof window === 'undefined') return new MemoryStorage();
-    try {
-      // Probe once: some browsers expose the API and then throw on write (Safari private mode),
-      // and disabled-cookie configurations throw on access.
-      const storage = window.localStorage;
-      const probeKey = storageKey('probe');
-      storage.setItem(probeKey, '1');
-      storage.removeItem(probeKey);
-      return new BrowserLocalStorage(storage);
-    } catch {
-      return new MemoryStorage();
-    }
-  }
 
   public get(key: string): Result<string | null> {
     try {

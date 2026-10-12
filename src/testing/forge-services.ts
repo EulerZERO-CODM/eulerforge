@@ -16,11 +16,17 @@ import { LearningProgressStore } from '../state/learning-progress-store';
 import { PreferencesStore } from '../state/preferences-store';
 import { ToastStore } from '../state/toast-store';
 import type { ForgeServices } from '../state/forge-provider';
+import { persistentStorageStatus, type ForgeStorageStatus } from '../state/storage-status';
 
 export type TestServicesOptions = {
   readonly catalogSource?: CatalogSourceId;
   readonly now?: () => Date;
   readonly generateId?: () => string;
+  /**
+   * Storage durability to report. Defaults to persistent, which is what a normal browser profile
+   * looks like; pass `volatileStorageStatus()` to exercise the session-only fallback.
+   */
+  readonly storageStatus?: ForgeStorageStatus;
 };
 
 /** `ForgeServices` type is not exported from the provider for components, but tests may build one. */
@@ -46,6 +52,7 @@ export function createTestServices(options: TestServicesOptions = {}): TestForge
   return {
     bus,
     storage,
+    storageStatus: options.storageStatus ?? persistentStorageStatus(),
     documents,
     documentRepository,
     catalog: createAssetCatalog(options.catalogSource ?? 'sample'),

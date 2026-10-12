@@ -4,9 +4,10 @@ import { DocumentSession } from './document-session';
 import { DocumentsStore } from './documents-store';
 import { createDocument } from '../core/documents/factories';
 import { createPlatformEventBus, type PlatformEventMap } from '../core/events/event-bus';
-import { LocalDocumentRepository } from '../core/persistence/document-repository';
+import { DOCUMENTS_KEY, LocalDocumentRepository } from '../core/persistence/document-repository';
 import type { DocumentRepository } from '../core/persistence/document-repository';
 import { MemoryStorage } from '../core/persistence/storage';
+import { err, forgeError } from '../core/result';
 import { brand } from '../core/types/brand';
 import type { CreateDocumentInput } from '../core/documents/types';
 
@@ -281,6 +282,42 @@ describe('DocumentSession', () => {
     const result = await failing.commit('Rename project', { title: 'Renamed poster' });
     expect(result.ok).toBe(false);
     expect(failing.getState().lastError?.message).toBe('Local storage is full.');
+    // A failed write leaves the document dirty and keeps the message, so the workspace can offer a
+    // retry rather than quietly dropping the change.
+    expect(failing.getState().dirty).toBe(true);
+    expect(failing.getState().saving).toBe(false);
+  });
+
+  it('re-saves the pending revision when a failed write is retried', async () => {
+    const harness = createHarness();
+    const created = await harness.store.create(baseInput);
+    if (!created.ok) throw new Error('creation should succeed');
+    const session = harness.store.session(created.value.id as string);
+    if (!session) throw new Error('a session should exist for the created document');
+
+    // The device refuses this write, which is what a full quota looks like from the store's side.
+    const refusal = vi
+      .spyOn(harness.storage, 'set')
+      .mockReturnValueOnce(err(forgeError('storage-quota-exceeded', 'Local storage is full.')));
+
+    const failed = await session.commit('Rename project', { title: 'Renamed poster' });
+    expect(failed.ok).toBe(false);
+    expect(session.getState().dirty).toBe(true);
+    expect(session.getState().lastSavedAt).toBeNull();
+
+    // The user frees space (or the browser allows it again) and retries.
+    refusal.mockRestore();
+    const retried = await session.retrySave();
+
+    expect(retried.ok).toBe(true);
+    expect(session.getState().lastError).toBeNull();
+    expect(session.getState().dirty).toBe(false);
+    expect(session.getState().lastSavedAt).not.toBeNull();
+    expect(session.getState().document.title).toBe('Renamed poster');
+    // The retried revision is the one the user was looking at, and it reached storage.
+    const stored = harness.storage.get(DOCUMENTS_KEY);
+    expect(stored.ok).toBe(true);
+    if (stored.ok) expect(stored.value).toContain('Renamed poster');
   });
 });
 
