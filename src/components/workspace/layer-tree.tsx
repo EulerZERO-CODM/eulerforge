@@ -13,7 +13,7 @@ import {
   Pencil,
   Trash2,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import type { Layer, Scene } from '../../core/documents/layer-types';
 import { LAYER_TYPE_LABELS } from '../../core/documents/layer-types';
@@ -44,9 +44,14 @@ export type LayerTreeProps = {
  * Layer panel.
  *
  * Lists the scene top-first — the order layers are painted in reverse, which is how every design tool
- * presents a stack — and gives every operation a button as well as a shortcut, so nothing depends on
- * dragging. The list is a real `listbox`: ArrowUp/ArrowDown step through the stack and Home/End jump
- * to its top and bottom, so a keyboard user can select any layer without touching the pointer.
+ * presents a stack — and gives every operation a button, so nothing depends on dragging.
+ *
+ * The markup is a list of buttons rather than a `listbox` with `option`s, because each row also holds
+ * its own Hide, Lock, Rename, Move, Duplicate and Delete buttons: a listbox option may not contain
+ * interactive children, and claiming the role would misdescribe what a screen reader should expect.
+ * Navigation follows the standard composite-widget pattern instead: one tab stop for the whole list
+ * (roving `tabIndex`), ArrowUp/ArrowDown move between layers *and select them*, Home/End jump to the
+ * ends, and Enter/Space activate the focused row through the button's own native behaviour.
  */
 export function LayerTree({
   scene,
@@ -60,25 +65,39 @@ export function LayerTree({
   onDelete,
 }: LayerTreeProps) {
   const [renaming, setRenaming] = useState<string | null>(null);
+  const buttons = useRef(new Map<string, HTMLButtonElement>());
   const rows = layersTopFirst(scene);
+  const selectedRow = rows.find((layer) => isSelected(selection, layer.id));
+  const activeRow = selectedRow ?? rows[0];
+
+  /** Moves the roving tab stop and the selection to a row, and puts focus there. */
+  function focusRow(index: number): void {
+    const row = rows[Math.min(rows.length - 1, Math.max(0, index))];
+    if (!row) return;
+    onSelectionChange(selectOnly(row.id));
+    buttons.current.get(String(row.id))?.focus();
+  }
+
+  function handleRowKeyDown(event: React.KeyboardEvent<HTMLElement>, index: number): void {
+    const from = selectedRow ? rows.findIndex((layer) => layer.id === selectedRow.id) : index;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      focusRow(from + 1);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      focusRow(from - 1);
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      focusRow(0);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      focusRow(rows.length - 1);
+    }
+  }
 
   /** Z-order index (bottom-up) for a layer id, which is what the reorder commands take. */
   const indexOf = (id: string): number =>
     scene.layers.findIndex((layer) => String(layer.id) === id);
-
-  function moveSelection(direction: 1 | -1): void {
-    if (rows.length === 0) return;
-    const currentIndex = rows.findIndex((layer) => isSelected(selection, layer.id));
-    const nextIndex = Math.min(
-      rows.length - 1,
-      Math.max(
-        0,
-        (currentIndex === -1 ? (direction === 1 ? -1 : rows.length) : currentIndex) + direction,
-      ),
-    );
-    const next = rows[nextIndex];
-    if (next) onSelectionChange(selectOnly(next.id));
-  }
 
   return (
     <section aria-labelledby="layer-panel-heading" className="flex min-h-0 flex-col">
@@ -99,38 +118,23 @@ export function LayerTree({
         </p>
       ) : (
         <ul
-          role="listbox"
           aria-label="Layer stack"
-          aria-orientation="vertical"
-          aria-activedescendant={
-            rows.find((layer) => isSelected(selection, layer.id))
-              ? `layer-row-${String(rows.find((layer) => isSelected(selection, layer.id))?.id ?? '')}`
-              : undefined
-          }
-          tabIndex={0}
           className="forge-scroll border-line max-h-72 min-h-0 overflow-y-auto rounded-sm border"
-          onKeyDown={(event) => {
-            if (event.key === 'ArrowDown') {
-              event.preventDefault();
-              moveSelection(1);
-            } else if (event.key === 'ArrowUp') {
-              event.preventDefault();
-              moveSelection(-1);
-            } else if (event.key === 'Home' && rows[0]) {
-              event.preventDefault();
-              onSelectionChange(selectOnly(rows[0].id));
-            } else if (event.key === 'End' && rows[rows.length - 1]) {
-              event.preventDefault();
-              const last = rows[rows.length - 1];
-              if (last) onSelectionChange(selectOnly(last.id));
-            }
-          }}
         >
           {rows.map((layer, rowIndex) => (
             <LayerRow
               key={layer.id}
               layer={layer}
               selected={isSelected(selection, layer.id)}
+              // One tab stop for the list: the selected row, or the top row when nothing is selected.
+              tabbable={String(activeRow?.id ?? '') === String(layer.id)}
+              buttonRef={(element) => {
+                if (element) buttons.current.set(String(layer.id), element);
+                else buttons.current.delete(String(layer.id));
+              }}
+              onRowKeyDown={(event) => {
+                handleRowKeyDown(event, rowIndex);
+              }}
               renaming={renaming === String(layer.id)}
               onSelect={(additive) => {
                 onSelectionChange(
@@ -173,6 +177,9 @@ export function LayerTree({
 function LayerRow({
   layer,
   selected,
+  tabbable,
+  buttonRef,
+  onRowKeyDown,
   renaming,
   onSelect,
   onStartRename,
@@ -188,6 +195,10 @@ function LayerRow({
 }: {
   readonly layer: Layer;
   readonly selected: boolean;
+  /** Whether this row holds the list's single tab stop (roving tabindex). */
+  readonly tabbable: boolean;
+  readonly buttonRef: (element: HTMLButtonElement | null) => void;
+  readonly onRowKeyDown: (event: React.KeyboardEvent<HTMLElement>) => void;
   readonly renaming: boolean;
   readonly onSelect: (additive: boolean) => void;
   readonly onStartRename: () => void;
@@ -205,9 +216,7 @@ function LayerRow({
 
   return (
     <li
-      role="option"
       id={`layer-row-${String(layer.id)}`}
-      aria-selected={selected}
       data-testid={`layer-row-${String(layer.id)}`}
       className={cn(
         'border-line-subtle flex items-center gap-1.5 border-b px-2 py-1.5 last:border-b-0',
@@ -258,13 +267,21 @@ function LayerRow({
       ) : (
         <button
           type="button"
-          className="min-w-0 flex-1 text-left"
+          ref={buttonRef}
+          data-testid={`layer-name-${String(layer.id)}`}
+          tabIndex={tabbable ? 0 : -1}
+          aria-current={selected ? 'true' : undefined}
+          className="min-w-0 flex-1 rounded-sm text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[color:var(--color-focus)]"
           onClick={(event) => {
             onSelect(event.metaKey || event.ctrlKey || event.shiftKey);
           }}
+          onKeyDown={onRowKeyDown}
           onDoubleClick={onStartRename}
         >
-          <span className="text-fg block truncate text-xs">{layer.name}</span>
+          <span className="text-fg block truncate text-xs">
+            {layer.name}
+            {selected ? <span className="sr-only"> (selected)</span> : null}
+          </span>
           <span className="text-fg-subtle forge-numeric text-2xs block">
             {LAYER_TYPE_LABELS[layer.type]} · {String(layer.opacity * 100)}% · z{String(zIndex + 1)}
             {layer.locked ? ' · locked' : ''}

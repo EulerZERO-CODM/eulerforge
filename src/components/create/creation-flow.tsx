@@ -633,9 +633,10 @@ export function CreationFlow() {
 
             <InlineNote tone="tip" icon={<Sparkles aria-hidden />}>
               <p>
-                After creating, the workspace lets you refine the canvas, guides, palette and
-                details, undo anything, and download the project file. Direct drawing tools are not
-                part of this build — the roadmap shows when they arrive.
+                After creating, the workspace lets you add text, rectangle and ellipse layers,
+                select, move and resize them, edit typography and shape settings, undo anything you
+                change, and export PNG, JPEG or the project file. Vector drawing and Bezier paths
+                are not part of this build — the roadmap shows when they arrive.
               </p>
             </InlineNote>
           </section>

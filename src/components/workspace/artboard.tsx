@@ -36,9 +36,13 @@ import {
 import {
   EMPTY_SELECTION,
   isSelected,
+  lockedSelectionIds,
   selectOnly,
   selectionFrame,
   toggleSelection,
+  transformFrame,
+  transformTargets,
+  unionSelection,
   type Selection,
 } from '../../core/editor/selection';
 import type { useSceneImages } from './use-scene-images';
@@ -65,7 +69,15 @@ export type ArtboardProps = {
   readonly pixelRatio?: number | undefined;
 };
 
-type Marquee = { readonly from: Point; readonly to: Point };
+type Marquee = {
+  readonly from: Point;
+  readonly to: Point;
+  /**
+   * A marquee started with a modifier adds to the selection instead of replacing it, and a modifier
+   * click on empty space leaves the selection alone entirely.
+   */
+  readonly additive: boolean;
+};
 
 /**
  * The artboard.
@@ -97,6 +109,8 @@ export function Artboard({
   // A click on an already-selected layer keeps the whole selection (so a multi-layer drag works) and
   // only collapses to that layer if the pointer never moved.
   const [collapseOnRelease, setCollapseOnRelease] = useState<LayerId | null>(null);
+  // Set by a modifier click, which toggles selection rather than starting a drag.
+  const [selectingOnly, setSelectingOnly] = useState(false);
 
   const dpr = pixelRatio ?? (typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1);
   const width = Math.max(1, Math.round(doc.canvas.width * zoom));
@@ -128,7 +142,16 @@ export function Artboard({
 
   // With no gesture in flight, `preview.scene` *is* the committed scene.
   const scene = preview.scene;
+  /** Everything selected: drawn as selected even when a part of it cannot be transformed. */
   const selectedFrame = selectionFrame(scene, selection);
+  /**
+   * What a gesture can actually change. Handles are drawn from this box, never from `selectedFrame`:
+   * a locked layer inside the selection is shown as selected but must not inflate the box the
+   * handles promise to resize.
+   */
+  const gestureBox = transformFrame(scene, selection);
+  const lockedIds = lockedSelectionIds(scene, selection);
+  const lockedCount = lockedIds.length;
 
   // Paint whenever anything about the picture changes. Selection is drawn in the DOM overlay, so
   // selecting does not repaint the artwork.
@@ -167,27 +190,51 @@ export function Artboard({
 
   function beginPointer(event: React.PointerEvent<HTMLElement>): void {
     const point = toDocument(event);
-    const hit = hitTestScene(doc.scene, point);
+    // Two questions, one hit test: what can be transformed here, and what is *visibly* on top?
+    // A locked layer on top means "nothing happens", not "empty space", so a click on it must not
+    // quietly clear the selection or pick up whatever happens to sit underneath.
+    const topmost = hitTestScene(doc.scene, point, { includeLocked: true });
+    const hit = topmost !== null && !topmost.locked ? topmost : null;
     const additive = event.metaKey || event.ctrlKey || event.shiftKey;
 
+    if (topmost !== null && topmost.locked) {
+      // A locked layer: it can be neither picked nor moved by a canvas gesture, so the press only
+      // explains itself. The selection is left exactly as it was, including a group the user built
+      // in the layer tree that contains more than just this layer.
+      setHint(`“${topmost.name}” is locked — unlock it in the layer list to move or select it.`);
+      setCollapseOnRelease(null);
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+
     if (!hit) {
+      // Empty space: a plain click (or drag) starts a fresh marquee, a modified one extends.
       if (!additive) onSelectionChange(EMPTY_SELECTION);
-      setMarquee({ from: point, to: point });
+      setMarquee({ from: point, to: point, additive });
       event.currentTarget.setPointerCapture(event.pointerId);
       return;
     }
 
     const alreadySelected = isSelected(selection, hit.id);
-    const nextSelection = additive
-      ? toggleSelection(selection, hit.id)
-      : alreadySelected
-        ? selection
-        : selectOnly(hit.id);
-    if (!additive && !alreadySelected) onSelectionChange(selectOnly(hit.id));
-    setCollapseOnRelease(!additive && alreadySelected ? hit.id : null);
+
+    if (additive) {
+      // Modifier click is a selection gesture: it toggles and *does not* start a move, so adding a
+      // layer to a group cannot nudge it by a pixel.
+      onSelectionChange(toggleSelection(selection, hit.id));
+      setSelectingOnly(true);
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+
+    if (!alreadySelected) onSelectionChange(selectOnly(hit.id));
+    // Clicking a member of an existing selection keeps the group so the drag moves all of it; the
+    // click only collapses to that single layer if the pointer never moved.
+    // Clicking an already-selected *locked* layer keeps the group: collapsing to a layer that cannot
+    // be moved would throw away a selection the user just built.
+    setCollapseOnRelease(alreadySelected && !hit.locked ? hit.id : null);
 
     setGesture({
-      ...beginMove({ pointer: point, scene: doc.scene, selection: nextSelection, anchor: hit }),
+      ...beginMove({ pointer: point, scene: doc.scene, selection, anchor: hit }),
       modifiers: modifiersOf(event),
     });
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -196,13 +243,13 @@ export function Artboard({
   function movePointer(event: React.PointerEvent<HTMLElement>): void {
     const point = toDocument(event);
     if (marquee) {
-      setMarquee({ from: marquee.from, to: point });
+      setMarquee({ from: marquee.from, to: point, additive: marquee.additive });
       return;
     }
     if (!gesture) {
       // Hover feedback: the cursor says whether a handle or a layer is under the pointer.
-      const hovered = hitTestScene(doc.scene, point);
-      setHint(hovered ? `${hovered.name}` : null);
+      const hovered = hitTestScene(doc.scene, point, { includeLocked: true });
+      setHint(hovered === null ? null : hovered.locked ? `${hovered.name} — locked` : hovered.name);
       return;
     }
     setGesture(updateGesture(gesture, point, modifiersOf(event)));
@@ -215,16 +262,30 @@ export function Artboard({
 
     if (marquee) {
       const rect = rectFromPoints(marquee.from, marquee.to);
-      // A click without a drag clears the selection; a drag selects what it covers.
+      // A click without a drag leaves the selection as it was (the non-additive case already
+      // cleared it on pointer-down); a drag selects what it covers, adding when modified.
       if (rect.width > 2 || rect.height > 2) {
         const covered: LayerId[] = layersInRect(doc.scene, rect).map((layer) => layer.id);
-        onSelectionChange(Object.freeze(covered));
+        onSelectionChange(
+          marquee.additive ? unionSelection(selection, covered) : Object.freeze(covered),
+        );
       }
       setMarquee(null);
       return;
     }
 
-    if (!gesture) return;
+    if (selectingOnly) {
+      setSelectingOnly(false);
+      setCollapseOnRelease(null);
+      return;
+    }
+
+    if (!gesture) {
+      // A pointer-up that started no gesture (a locked layer, a modifier click) must not leave the
+      // "collapse on release" flag armed for the next gesture.
+      setCollapseOnRelease(null);
+      return;
+    }
 
     if (gestureChangedSomething(gesture, preview)) {
       onCommitFrames(
@@ -242,23 +303,65 @@ export function Artboard({
     setGesture(null);
   }
 
-  /** Escape or a cancelled pointer drops the preview: nothing is committed. */
+  /**
+   * Escape or a cancelled pointer drops the preview: no commit, no history entry, no half-applied
+   * document. The selection is whatever the gesture's first click established, never a stale one.
+   */
   function cancelGesture(): void {
     setGesture(null);
     setMarquee(null);
     setHint(null);
     setCollapseOnRelease(null);
+    setSelectingOnly(false);
   }
 
+  // A gesture can be cancelled from anywhere: while a pointer is captured the keyboard focus may sit
+  // on a handle or an inspector field, so the listener is global but only active mid-interaction.
+  const interactionActive = gesture !== null || marquee !== null;
+  useEffect(() => {
+    if (!interactionActive) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') cancelGesture();
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [interactionActive]);
+
+  /** Moves the transformable selection by whole document pixels — the keyboard path for a move. */
+  function nudgeSelection(dx: number, dy: number): void {
+    const targets = transformTargets(doc.scene, selection);
+    if (targets.length === 0) return;
+    onCommitFrames(
+      nudgeLabel(doc.scene, targets),
+      targets.map((target) => ({
+        id: target.id,
+        frame: createRect(
+          target.frame.x + dx,
+          target.frame.y + dy,
+          target.frame.width,
+          target.frame.height,
+        ),
+      })),
+    );
+  }
+
+  /**
+   * Starts a resize of the whole selection.
+   *
+   * The targets are the unlocked selected layers - the same list the handles were drawn from - so a
+   * group resize scales every one of them through a single transform and lands as one commit.
+   */
   function startResize(event: React.PointerEvent<HTMLElement>, handle: TransformHandle): void {
     event.stopPropagation();
-    const layer = doc.scene.layers.find((candidate) => isSelected(selection, candidate.id));
-    if (!layer) return;
+    const targets = transformTargets(doc.scene, selection);
+    if (targets.length === 0) return;
     const point = toDocument(event);
     const surface = surfaceRef.current;
     surface?.setPointerCapture(event.pointerId);
     setGesture({
-      ...beginResize(point, layer, handle),
+      ...beginResize(point, targets, handle),
       modifiers: modifiersOf(event),
     });
   }
@@ -270,6 +373,11 @@ export function Artboard({
       className="relative shrink-0"
       style={{ width: `${String(width)}px`, height: `${String(height)}px` }}
       data-testid="artboard"
+      // Geometry the browser suite reads to convert document pixels into pointer coordinates at
+      // whatever zoom the stage is using. Inert in the product itself.
+      data-canvas-width={doc.canvas.width}
+      data-canvas-height={doc.canvas.height}
+      data-zoom={zoom}
     >
       {showGuides ? <GuideOverlay doc={doc} zoom={zoom} width={width} height={height} /> : null}
 
@@ -288,43 +396,84 @@ export function Artboard({
 
       {/*
         The capture surface. It is a real focusable element with a label, so selecting, moving and
-        resizing are all reachable from the keyboard as well as the pointer.
+        resizing are all reachable from the keyboard as well as the pointer: arrow keys move the
+        selection, Escape cancels an interaction, and every layer stays reachable from the layer list.
       */}
       <div
         ref={surfaceRef}
         data-testid="artboard-surface"
+        role="group"
+        aria-label="Artboard canvas"
+        aria-describedby="artboard-keyboard-help"
+        tabIndex={0}
         className="absolute inset-0 outline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--color-focus)]"
         onPointerDown={beginPointer}
         onPointerMove={movePointer}
         onPointerUp={endPointer}
         onPointerCancel={cancelGesture}
         onKeyDown={(event) => {
-          if (event.key === 'Escape') cancelGesture();
+          if (event.key === 'Escape') {
+            if (gesture || marquee) cancelGesture();
+            else onSelectionChange(EMPTY_SELECTION);
+            return;
+          }
+          const step = event.shiftKey ? 10 : 1;
+          if (event.key === 'ArrowLeft') nudgeSelection(-step, 0);
+          else if (event.key === 'ArrowRight') nudgeSelection(step, 0);
+          else if (event.key === 'ArrowUp') nudgeSelection(0, -step);
+          else if (event.key === 'ArrowDown') nudgeSelection(0, step);
+          else return;
+          event.preventDefault();
         }}
         title={hint ?? undefined}
       >
+        <span id="artboard-keyboard-help" className="sr-only">
+          Arrow keys move the selection by one pixel, or ten with Shift. Escape cancels a drag in
+          progress, or clears the selection. Layers are selected from the layer list, which also
+          carries every layer operation; position, size, typography and shape settings are in the
+          inspector beside the artboard.
+        </span>
+
         {selectedFrame ? (
           <div
             data-testid="selection-overlay"
             className="pointer-events-none absolute border border-[color:var(--color-accent)]"
             style={box(scaleRect(selectedFrame, zoom))}
           >
-            {TRANSFORM_HANDLES.map((handle) => (
-              <button
-                key={handle}
-                type="button"
-                aria-label={`Resize ${HANDLE_LABELS[handle].toLowerCase()}`}
-                data-testid={`handle-${handle}`}
-                className="bg-surface-raised border-accent pointer-events-auto absolute h-3 w-3 rounded-[2px] border"
-                style={handleStyle(handle, scaleRect(selectedFrame, zoom))}
-                onPointerDown={(event) => {
-                  startResize(event, handle);
-                }}
-                onPointerMove={movePointer}
-                onPointerUp={endPointer}
-                onPointerCancel={cancelGesture}
-              />
-            ))}
+            {gestureBox ? (
+              <>
+                <span data-testid="selection-bounds-label" className="sr-only">
+                  {describeBounds(gestureBox, zoom)}
+                </span>
+                {TRANSFORM_HANDLES.map((handle) => (
+                  <button
+                    key={handle}
+                    type="button"
+                    aria-label={`Resize ${HANDLE_LABELS[handle].toLowerCase()}`}
+                    data-testid={`handle-${handle}`}
+                    className="bg-surface-raised border-accent pointer-events-auto absolute h-3 w-3 rounded-[2px] border"
+                    style={handleStyle(handle, scaleRect(gestureBox, zoom))}
+                    onPointerDown={(event) => {
+                      startResize(event, handle);
+                    }}
+                    onPointerMove={movePointer}
+                    onPointerUp={endPointer}
+                    onPointerCancel={cancelGesture}
+                  />
+                ))}
+              </>
+            ) : (
+              <span data-testid="selection-locked-note" className="sr-only">
+                {lockedCount === 0
+                  ? 'Nothing in the selection can be resized.'
+                  : `Every selected layer is locked, so there are no resize handles. Unlock ${lockedCount === 1 ? 'it' : 'them'} in the layer list to transform ${lockedCount === 1 ? 'it' : 'them'}.`}
+              </span>
+            )}
+            {gestureBox && lockedCount > 0 ? (
+              <span data-testid="selection-locked-note" className="sr-only">
+                {`${String(lockedCount)} selected ${lockedCount === 1 ? 'layer is' : 'layers are'} locked and left out of this box: unlock ${lockedCount === 1 ? 'it' : 'them'} in the layer list to include ${lockedCount === 1 ? 'it' : 'them'}.`}
+              </span>
+            ) : null}
           </div>
         ) : null}
 
@@ -348,6 +497,27 @@ export function Artboard({
       </div>
     </div>
   );
+}
+
+/**
+ * Accessible description of the box the handles act on.
+ *
+ * Says "of N" when only part of the selection can be transformed, so a screen-reader user is told
+ * what the handles will really do rather than being left to discover it.
+ */
+function describeBounds(frame: Rect, zoom: number): string {
+  const round = (value: number) => Math.round(value);
+  return `Selection bounds ${String(round(frame.x))}, ${String(round(frame.y))}, ${String(
+    round(frame.width),
+  )} by ${String(round(frame.height))} document pixels at ${String(Math.round(zoom * 100))} percent zoom.`;
+}
+
+/** Label for a keyboard nudge, matching what a drag of the same layers would record. */
+function nudgeLabel(scene: Scene, targets: readonly { readonly id: LayerId }[]): string {
+  if (targets.length > 1) return `Move ${String(targets.length)} layers`;
+  const id = targets[0]?.id;
+  const name = scene.layers.find((layer) => String(layer.id) === String(id))?.name ?? 'layer';
+  return `Move “${name}”`;
 }
 
 function modifiersOf(event: {

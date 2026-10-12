@@ -20,22 +20,26 @@ import {
   type ImageFit,
   type ImageLayer,
   type Layer,
+  type LayerId,
   type RectLayer,
   type TextLayer,
 } from '../../core/documents/layer-types';
 import {
   deleteLayersCommand,
-  duplicateLayerCommand,
-  reorderLayerCommand,
+  duplicateLayersCommand,
+  reorderLayersCommand,
   renameLayerCommand,
+  setGroupBoundsCommand,
   setImageSettingsCommand,
   setLayerFrameCommand,
-  setLayerLockCommand,
-  setLayerOpacityCommand,
-  setLayerVisibilityCommand,
+  setLayersLockCommand,
+  setLayersOpacityCommand,
+  setLayersVisibilityCommand,
   setShapeSettingsCommand,
   setTextSettingsCommand,
 } from '../../core/editor/commands';
+import { unionRects } from '../../core/documents/geometry';
+import { transformTargets } from '../../core/editor/selection';
 import { selectedLayers, type Selection } from '../../core/editor/selection';
 import type { Scene } from '../../core/documents/layer-types';
 import type { ForgeDocument } from '../../core/documents/types';
@@ -85,6 +89,7 @@ export function SelectionInspector({
 
   const primary = layers[0];
   if (!primary) return null;
+  const ids = layers.map((layer) => layer.id);
 
   return (
     <section aria-labelledby="inspector-selection" className="space-y-5">
@@ -99,8 +104,9 @@ export function SelectionInspector({
       {layers.length > 1 ? (
         <InlineNote tone="info" title="Multiple layers selected">
           <p>
-            Position, opacity, visibility and stacking apply to all selected layers. Type-specific
-            settings apply when a single layer is selected.
+            The bounds below move and scale every unlocked selected layer as one group, and opacity,
+            visibility and stacking apply to all of them. Type-specific settings appear when a
+            single layer is selected.
           </p>
         </InlineNote>
       ) : null}
@@ -110,19 +116,23 @@ export function SelectionInspector({
           <NameField api={api} layer={primary} />
           <FrameFields api={api} layer={primary} />
         </>
-      ) : null}
+      ) : (
+        <GroupFrameFields api={api} ids={ids} />
+      )}
 
-      <OpacityField api={api} layers={layers} />
+      <OpacityField api={api} ids={ids} layers={layers} />
 
+      {/*
+        Every action here is one command over the whole selection. Looping a per-layer command would
+        build each patch from the same snapshot, so the second edit would overwrite the first.
+      */}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           variant="outline"
           size="sm"
           iconLeft={<ArrowUp aria-hidden />}
           onClick={() => {
-            for (const layer of layers) {
-              void api.run(reorderLayerCommand(api.doc, layer.id, 'forward'));
-            }
+            void api.run(reorderLayersCommand(api.doc, ids, 'forward'));
           }}
         >
           Bring forward
@@ -132,17 +142,33 @@ export function SelectionInspector({
           size="sm"
           iconLeft={<ArrowDown aria-hidden />}
           onClick={() => {
-            for (const layer of layers) {
-              void api.run(reorderLayerCommand(api.doc, layer.id, 'backward'));
-            }
+            void api.run(reorderLayersCommand(api.doc, ids, 'backward'));
           }}
         >
           Send backward
         </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            void api.run(reorderLayersCommand(api.doc, ids, 'front'));
+          }}
+        >
+          To front
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            void api.run(reorderLayersCommand(api.doc, ids, 'back'));
+          }}
+        >
+          To back
+        </Button>
         <IconButton
           label={`Duplicate ${layers.length === 1 ? primary.name : 'selection'}`}
           onClick={() => {
-            for (const layer of layers) void api.run(duplicateLayerCommand(api.doc, layer.id));
+            void api.run(duplicateLayersCommand(api.doc, ids));
           }}
         >
           <Copy aria-hidden />
@@ -150,7 +176,6 @@ export function SelectionInspector({
         <IconButton
           label={`Delete ${layers.length === 1 ? primary.name : 'selection'}`}
           onClick={() => {
-            const ids = layers.map((layer) => layer.id);
             onSelectionChange(Object.freeze([]));
             void api.run(deleteLayersCommand(api.doc, ids));
           }}
@@ -160,27 +185,22 @@ export function SelectionInspector({
       </div>
 
       <div className="space-y-3">
-        {layers.map((layer) => (
-          <SwitchField
-            key={`visibility-${String(layer.id)}`}
-            label={`“${layer.name}” visible`}
-            description="Hidden layers stay in the document and are skipped when rendering."
-            checked={layer.visible}
-            onCheckedChange={(visible) => {
-              void api.run(setLayerVisibilityCommand(api.doc, layer.id, visible));
-            }}
-          />
-        ))}
-        {layers.length === 1 ? (
-          <SwitchField
-            label="Lock this layer"
-            description="A locked layer cannot be picked on the artboard; it still renders and exports."
-            checked={primary.locked}
-            onCheckedChange={(locked) => {
-              void api.run(setLayerLockCommand(api.doc, primary.id, locked));
-            }}
-          />
-        ) : null}
+        <SwitchField
+          label={layers.length === 1 ? `“${primary.name}” visible` : 'Selection visible'}
+          description="Hidden layers stay in the document and are skipped when rendering."
+          checked={layers.every((layer) => layer.visible)}
+          onCheckedChange={(visible) => {
+            void api.run(setLayersVisibilityCommand(api.doc, ids, visible));
+          }}
+        />
+        <SwitchField
+          label={layers.length === 1 ? 'Lock this layer' : 'Lock the selection'}
+          description="A locked layer cannot be picked or transformed on the artboard; it still renders and exports."
+          checked={layers.every((layer) => layer.locked)}
+          onCheckedChange={(locked) => {
+            void api.run(setLayersLockCommand(api.doc, ids, locked));
+          }}
+        />
       </div>
 
       {layers.length === 1 && isTextLayer(primary) ? (
@@ -249,7 +269,6 @@ function FrameFields({ api, layer }: { readonly api: WorkspaceApi; readonly laye
   const commitFrame = (patch: Partial<typeof frame>, label: string): void => {
     void api.run(setLayerFrameCommand(api.doc, layer.id, { ...frame, ...patch }, label));
   };
-  void commitFrame;
 
   const x = useDraftField({
     value: String(Math.round(frame.x)),
@@ -290,6 +309,7 @@ function FrameFields({ api, layer }: { readonly api: WorkspaceApi; readonly laye
     <div className="grid grid-cols-2 gap-3">
       <Field label="X" labelSuffix="px" error={x.error}>
         <Input
+          aria-label="Layer X"
           value={x.draft}
           invalid={x.error !== null}
           onChange={(e) => x.setDraft(e.target.value)}
@@ -300,6 +320,7 @@ function FrameFields({ api, layer }: { readonly api: WorkspaceApi; readonly laye
       </Field>
       <Field label="Y" labelSuffix="px" error={y.error}>
         <Input
+          aria-label="Layer Y"
           value={y.draft}
           invalid={y.error !== null}
           onChange={(e) => y.setDraft(e.target.value)}
@@ -310,6 +331,7 @@ function FrameFields({ api, layer }: { readonly api: WorkspaceApi; readonly laye
       </Field>
       <Field label="Width" labelSuffix="px" error={width.error}>
         <Input
+          aria-label="Layer width"
           value={width.draft}
           invalid={width.error !== null}
           onChange={(e) => width.setDraft(e.target.value)}
@@ -320,6 +342,7 @@ function FrameFields({ api, layer }: { readonly api: WorkspaceApi; readonly laye
       </Field>
       <Field label="Height" labelSuffix="px" error={height.error}>
         <Input
+          aria-label="Layer height"
           value={height.draft}
           invalid={height.error !== null}
           onChange={(e) => height.setDraft(e.target.value)}
@@ -334,13 +357,17 @@ function FrameFields({ api, layer }: { readonly api: WorkspaceApi; readonly laye
 
 function OpacityField({
   api,
+  ids,
   layers,
 }: {
   readonly api: WorkspaceApi;
+  readonly ids: readonly LayerId[];
   readonly layers: readonly Layer[];
 }) {
   const primary = layers[0];
   if (!primary) return null;
+  // With several layers selected the slider shows their shared value, or the first layer's when
+  // they differ; either way one move sets every layer in the selection.
   const percent = Math.round(primary.opacity * 100);
 
   return (
@@ -354,11 +381,143 @@ function OpacityField({
         aria-label="Layer opacity"
         className="accent-accent w-full"
         onChange={(event) => {
-          const next = Number(event.target.value) / 100;
-          for (const layer of layers) {
-            void api.run(setLayerOpacityCommand(api.doc, layer.id, next));
-          }
+          // One patch for the whole selection: every layer moves to the same opacity together.
+          void api.run(setLayersOpacityCommand(api.doc, ids, Number(event.target.value) / 100));
         }}
+      />
+    </Field>
+  );
+}
+
+/**
+ * Position and size for a multi-layer selection.
+ *
+ * The keyboard and screen-reader equivalent of dragging the selection's bounding box: X and Y move the
+ * group, and width and height scale it about its top-left corner through the same transform a handle
+ * drag uses. Locked layers are excluded from both the box and the edit, exactly as on the artboard.
+ */
+function GroupFrameFields({
+  api,
+  ids,
+}: {
+  readonly api: WorkspaceApi;
+  readonly ids: readonly LayerId[];
+}) {
+  const targets = transformTargets(api.doc.scene, ids);
+  const box = unionRects(targets.map((target) => target.frame));
+  const lockedCount = ids.length - targets.length;
+
+  const commit = (bounds: {
+    readonly x?: number;
+    readonly y?: number;
+    readonly width?: number;
+    readonly height?: number;
+  }): void => {
+    void api.run(setGroupBoundsCommand(api.doc, ids, bounds));
+  };
+
+  if (!box) {
+    return (
+      <p className="text-fg-muted text-xs">
+        Every selected layer is locked, so there is nothing to position or resize here. Unlock a
+        layer in the list above to transform it.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-2xs text-fg-subtle font-semibold tracking-wider uppercase">
+        Selection bounds
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        <NumberField
+          label="X"
+          name="Selection X"
+          value={box.x}
+          onCommit={(value) => {
+            commit({ x: value });
+          }}
+        />
+        <NumberField
+          label="Y"
+          name="Selection Y"
+          value={box.y}
+          onCommit={(value) => {
+            commit({ y: value });
+          }}
+        />
+        <NumberField
+          label="Width"
+          name="Selection width"
+          value={box.width}
+          minimum={1}
+          onCommit={(value) => {
+            commit({ width: value });
+          }}
+        />
+        <NumberField
+          label="Height"
+          name="Selection height"
+          value={box.height}
+          minimum={1}
+          onCommit={(value) => {
+            commit({ height: value });
+          }}
+        />
+      </div>
+      <p className="text-fg-subtle text-xs">
+        The box around the selected layers. Changing width or height scales every unlocked layer in
+        the selection together, so their arrangement is preserved.
+      </p>
+      {lockedCount > 0 ? (
+        <p className="text-xs text-amber-400">
+          {String(lockedCount)} selected {lockedCount === 1 ? 'layer is' : 'layers are'} locked and
+          left untouched.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** A whole-number field that commits on blur or Enter, so typing is not one undo step per key. */
+function NumberField({
+  label,
+  name,
+  value,
+  minimum,
+  onCommit,
+}: {
+  readonly label: string;
+  /** Accessible name, distinct from the canvas width/height fields elsewhere in the rail. */
+  readonly name: string;
+  readonly value: number;
+  readonly minimum?: number;
+  readonly onCommit: (value: number) => void;
+}) {
+  const field = useDraftField({
+    value: String(Math.round(value)),
+    onCommit: (raw) => {
+      const parsed = Number(raw);
+      if (raw.trim().length === 0 || !Number.isFinite(parsed)) return 'Enter a number.';
+      if (minimum !== undefined && parsed < minimum) return `Must be at least ${String(minimum)}.`;
+      onCommit(parsed);
+      return null;
+    },
+  });
+
+  return (
+    <Field label={label} error={field.error}>
+      <Input
+        className="forge-numeric"
+        aria-label={name}
+        value={field.draft}
+        invalid={field.error !== null}
+        onChange={(event) => {
+          field.setDraft(event.target.value);
+        }}
+        onBlur={field.onBlur}
+        onKeyDown={field.onKeyDown}
       />
     </Field>
   );

@@ -64,7 +64,8 @@ This milestone proves the shell can carry specialists and teach at the same time
 - The creation flow produces a **real, validated document** that appears in the project library and
   opens in the workspace.
 - The Design Studio workspace manages document setup end to end, with undo/redo and export
-  readiness, and states plainly that drawing tools do not exist yet.
+  readiness, and states plainly which editing tools it does not have yet (Phase 1 shipped no
+  drawing or layer tools at all; Phase 2 added text and shape layers with select, move and resize).
 - Studios, learning and assets are data-driven, so adding a discipline or a lesson is an edit to a
   registry rather than surgery on the application.
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect, useMemo, useState } from 'react';
 import { describe, expect, it } from 'vitest';
@@ -151,11 +151,29 @@ async function mount(
   return { services, session };
 }
 
-/** The row's name is a button; pressing it is what selects the layer. */
+function layerRows(): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>('[data-testid^="layer-row-"]')];
+}
+
+/** The name button of a row, found by the layer's visible name (fixtures use "Panel" for lyr-a). */
 function selectRow(name: string): HTMLElement {
-  const row = screen.getAllByRole('option').find((option) => option.textContent?.startsWith(name));
+  const row = layerRows().find((candidate) => candidate.textContent?.startsWith(name));
   if (!row) throw new Error(`there is no layer row named ${name}`);
-  return within(row).getByRole('button', { name: new RegExp(`^${name}`) });
+  const button = row.querySelector<HTMLElement>('[data-testid^="layer-name-"]');
+  if (!button) throw new Error(`the row for ${name} has no name button`);
+  return button;
+}
+
+/**
+ * Selected rows are marked with `aria-current` on the row's name button.
+ *
+ * The list is a list of buttons rather than a listbox, because each row also contains its own Hide,
+ * Lock, Rename, Move, Duplicate and Delete buttons and an `option` may not contain controls.
+ */
+function expectSelected(id: string, selected = true): void {
+  const button = screen.getByTestId(`layer-name-${id}`);
+  if (selected) expect(button).toHaveAttribute('aria-current', 'true');
+  else expect(button).not.toHaveAttribute('aria-current', 'true');
 }
 
 function historyLabels(): string[] {
@@ -164,13 +182,51 @@ function historyLabels(): string[] {
   );
 }
 
+type PointerOptions = {
+  /** Held modifier, as a real pointer event would carry it. */
+  readonly modifier?: 'shift' | 'meta' | 'ctrl';
+  readonly pointerId?: number;
+  readonly target?: HTMLElement;
+};
+
+function modifiersOf(options: PointerOptions): Record<string, boolean> {
+  return {
+    shiftKey: options.modifier === 'shift',
+    metaKey: options.modifier === 'meta',
+    ctrlKey: options.modifier === 'ctrl',
+  };
+}
+
 /** Drags on the artboard surface. jsdom has no layout, so client coordinates map 1:1 to document
  * pixels at zoom 1 — the same maths `toDocumentPoint` applies in a browser. */
-function dragOnArtboard(from: { x: number; y: number }, to: { x: number; y: number }): void {
-  const surface = screen.getByTestId('artboard-surface');
-  fireEvent.pointerDown(surface, { clientX: from.x, clientY: from.y, pointerId: 1, button: 0 });
-  fireEvent.pointerMove(surface, { clientX: to.x, clientY: to.y, pointerId: 1 });
-  fireEvent.pointerUp(surface, { clientX: to.x, clientY: to.y, pointerId: 1 });
+function dragOnArtboard(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  options: PointerOptions = {},
+): void {
+  const surface = options.target ?? screen.getByTestId('artboard-surface');
+  const pointerId = options.pointerId ?? 1;
+  const keys = modifiersOf(options);
+
+  fireEvent.pointerDown(surface, {
+    clientX: from.x,
+    clientY: from.y,
+    pointerId,
+    button: 0,
+    ...keys,
+  });
+  fireEvent.pointerMove(surface, { clientX: to.x, clientY: to.y, pointerId, ...keys });
+  fireEvent.pointerUp(surface, { clientX: to.x, clientY: to.y, pointerId, ...keys });
+}
+
+/** A press and release in one place: a click, as opposed to a drag. */
+function clickOnArtboard(point: { x: number; y: number }, options: PointerOptions = {}): void {
+  dragOnArtboard(point, point, options);
+}
+
+/** Document revision, which must not change when only the selection changes. */
+function revision(services: TestForgeServices): number {
+  return persisted(services).revision;
 }
 
 function layerFrame(services: TestForgeServices, id: string): Rect {
@@ -243,7 +299,7 @@ describe('selecting and editing through the interface', () => {
     const user = userEvent.setup();
 
     await user.click(selectRow('Panel'));
-    expect(screen.getByTestId('layer-row-lyr-a')).toHaveAttribute('aria-selected', 'true');
+    expectSelected('lyr-a');
 
     const nameField = screen.getByLabelText('Layer name');
     await user.clear(nameField);
@@ -302,28 +358,42 @@ describe('selecting and editing through the interface', () => {
     await mount(
       sceneOf(rectLayer('lyr-a', { name: 'Bottom' }), rectLayer('lyr-b', { name: 'Top' })),
     );
-    const list = screen.getByRole('listbox', { name: 'Layer stack' });
+    // One tab stop for the whole list: the roving button is the top row while nothing is selected.
+    const firstButton = screen.getByTestId('layer-name-lyr-b');
+    firstButton.focus();
 
-    list.focus();
-    // The list is top-first, so the first ArrowDown lands on the top-most layer.
-    fireEvent.keyDown(list, { key: 'ArrowDown' });
+    // The list is top-first, so ArrowDown steps down the stack.
+    fireEvent.keyDown(firstButton, { key: 'ArrowDown' });
     await waitFor(() => {
-      expect(screen.getByTestId('layer-row-lyr-b')).toHaveAttribute('aria-selected', 'true');
+      expect(document.activeElement).toBe(screen.getByTestId('layer-name-lyr-a'));
     });
 
-    fireEvent.keyDown(list, { key: 'ArrowDown' });
+    fireEvent.keyDown(document.activeElement ?? firstButton, { key: 'ArrowUp' });
     await waitFor(() => {
-      expect(screen.getByTestId('layer-row-lyr-a')).toHaveAttribute('aria-selected', 'true');
+      expect(document.activeElement).toBe(screen.getByTestId('layer-name-lyr-b'));
     });
 
-    fireEvent.keyDown(list, { key: 'Home' });
+    fireEvent.keyDown(document.activeElement ?? firstButton, { key: 'End' });
     await waitFor(() => {
-      expect(screen.getByTestId('layer-row-lyr-b')).toHaveAttribute('aria-selected', 'true');
+      expect(document.activeElement).toBe(screen.getByTestId('layer-name-lyr-a'));
     });
 
-    fireEvent.keyDown(list, { key: 'End' });
+    fireEvent.keyDown(document.activeElement ?? firstButton, { key: 'Home' });
     await waitFor(() => {
-      expect(screen.getByTestId('layer-row-lyr-a')).toHaveAttribute('aria-selected', 'true');
+      expect(document.activeElement).toBe(screen.getByTestId('layer-name-lyr-b'));
+    });
+
+    // Every arrow step also selects, which is what makes the list usable from the keyboard alone.
+    expectSelected('lyr-b');
+
+    // Enter on a focused row selects it through the button's own native behaviour.
+    fireEvent.keyDown(document.activeElement ?? firstButton, { key: 'ArrowDown' });
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+    await userEvent.setup().click(screen.getByTestId('layer-name-lyr-a'));
+    await waitFor(() => {
+      expectSelected('lyr-a');
     });
   });
 });
@@ -393,6 +463,203 @@ describe('direct manipulation on the artboard', () => {
     expect(historyLabels()).toEqual(['Resize “Panel”']);
   });
 
+  it('selects a single layer with a plain click, and only that layer', async () => {
+    const { services } = await mount(
+      sceneOf(
+        rectLayer('lyr-a', { name: 'A', x: 100, y: 100, width: 100, height: 100 }),
+        rectLayer('lyr-b', { name: 'B', x: 300, y: 300, width: 100, height: 100 }),
+      ),
+      { snapping: false },
+    );
+    const before = revision(services);
+
+    clickOnArtboard({ x: 150, y: 150 });
+
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+    expectSelected('lyr-b', false);
+    // Selecting is transient: no history entry, no document revision, nothing to save.
+    expect(historyLabels()).toEqual([]);
+    expect(revision(services)).toBe(before);
+  });
+
+  it('adds an unselected layer with a modifier click and removes a selected one', async () => {
+    const { services } = await mount(
+      sceneOf(
+        rectLayer('lyr-a', { name: 'A', x: 100, y: 100, width: 100, height: 100 }),
+        rectLayer('lyr-b', { name: 'B', x: 300, y: 300, width: 100, height: 100 }),
+      ),
+      { snapping: false },
+    );
+    const before = revision(services);
+
+    clickOnArtboard({ x: 150, y: 150 });
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+
+    // Shift-click adds the second layer without moving anything.
+    clickOnArtboard({ x: 350, y: 350 }, { modifier: 'shift' });
+    await waitFor(() => {
+      expectSelected('lyr-b');
+    });
+    expectSelected('lyr-a');
+
+    // Shift-clicking an already-selected layer removes it again.
+    clickOnArtboard({ x: 350, y: 350 }, { modifier: 'shift' });
+    await waitFor(() => {
+      expectSelected('lyr-b', false);
+    });
+    expectSelected('lyr-a');
+
+    expect(historyLabels()).toEqual([]);
+    expect(revision(services)).toBe(before);
+  });
+
+  it('extends the selection with an additive marquee, and replaces it with a plain one', async () => {
+    await mount(
+      sceneOf(
+        rectLayer('lyr-a', { name: 'A', x: 40, y: 40, width: 80, height: 80 }),
+        rectLayer('lyr-b', { name: 'B', x: 300, y: 300, width: 80, height: 80 }),
+      ),
+      { snapping: false },
+    );
+
+    clickOnArtboard({ x: 80, y: 80 });
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+
+    // An additive marquee unions the covered layers with what was already selected.
+    dragOnArtboard({ x: 250, y: 250 }, { x: 450, y: 450 }, { modifier: 'shift' });
+    await waitFor(() => {
+      expectSelected('lyr-b');
+    });
+    expectSelected('lyr-a');
+
+    // A plain marquee replaces the selection outright.
+    dragOnArtboard({ x: 250, y: 250 }, { x: 450, y: 450 });
+    await waitFor(() => {
+      expectSelected('lyr-a', false);
+    });
+    expectSelected('lyr-b');
+  });
+
+  it('clears the selection with a click on empty space, unless a modifier is held', async () => {
+    await mount(
+      sceneOf(rectLayer('lyr-a', { name: 'A', x: 100, y: 100, width: 100, height: 100 })),
+      { snapping: false },
+    );
+
+    clickOnArtboard({ x: 150, y: 150 });
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+
+    // A modified click on empty space leaves the selection alone...
+    clickOnArtboard({ x: 800, y: 800 }, { modifier: 'shift' });
+    expectSelected('lyr-a');
+
+    // ...and a plain one clears it.
+    clickOnArtboard({ x: 800, y: 800 });
+    await waitFor(() => {
+      expectSelected('lyr-a', false);
+    });
+  });
+
+  it('moves the whole selected group, not just the layer under the pointer', async () => {
+    const { services } = await mount(
+      sceneOf(
+        rectLayer('lyr-a', { name: 'A', x: 100, y: 100, width: 100, height: 100 }),
+        rectLayer('lyr-b', { name: 'B', x: 300, y: 300, width: 100, height: 100 }),
+      ),
+      { snapping: false },
+    );
+
+    dragOnArtboard({ x: 40, y: 40 }, { x: 500, y: 500 });
+    await waitFor(() => {
+      expectSelected('lyr-b');
+    });
+    expectSelected('lyr-a');
+
+    // Dragging a member of the selection moves every selected layer by the same delta.
+    dragOnArtboard({ x: 150, y: 150 }, { x: 190, y: 170 });
+
+    await waitFor(() => {
+      expect(historyLabels()).toEqual(['Move 2 layers']);
+    });
+    expect(layerFrame(services, 'lyr-a')).toEqual(createRect(140, 120, 100, 100));
+    expect(layerFrame(services, 'lyr-b')).toEqual(createRect(340, 320, 100, 100));
+
+    // Clicking a member without dragging collapses to it instead of moving the group.
+    clickOnArtboard({ x: 150, y: 150 });
+    await waitFor(() => {
+      expectSelected('lyr-b', false);
+    });
+    expectSelected('lyr-a');
+    expect(historyLabels()).toEqual(['Move 2 layers']);
+  });
+
+  it('resizes every selected layer from one bounding-box handle, in one commit', async () => {
+    const { services } = await mount(
+      sceneOf(
+        rectLayer('lyr-a', { name: 'A', x: 100, y: 100, width: 200, height: 100 }),
+        rectLayer('lyr-b', { name: 'B', x: 400, y: 250, width: 100, height: 50 }),
+      ),
+      { snapping: false },
+    );
+
+    // Select both layers; the union box is 400 x 200 at (100, 100).
+    dragOnArtboard({ x: 40, y: 40 }, { x: 600, y: 400 });
+    await waitFor(() => {
+      expectSelected('lyr-b');
+    });
+
+    const handle = screen.getByRole('button', { name: 'Resize bottom right' });
+    // Drag the corner by 200 across and 100 down: the box becomes 600 x 300.
+    fireEvent.pointerDown(handle, { clientX: 500, clientY: 300, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(handle, { clientX: 700, clientY: 400, pointerId: 1 });
+    fireEvent.pointerUp(handle, { clientX: 700, clientY: 400, pointerId: 1 });
+
+    await waitFor(() => {
+      expect(historyLabels()).toEqual(['Resize 2 layers']);
+    });
+    // Both layers scaled by 1.5 about the box's top-left corner; arrangement preserved.
+    expect(layerFrame(services, 'lyr-a')).toEqual(createRect(100, 100, 300, 150));
+    expect(layerFrame(services, 'lyr-b')).toEqual(createRect(550, 325, 150, 75));
+
+    // Undo restores the entire group, not one object.
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: /^undo$/i }));
+    await waitFor(() => {
+      expect(layerFrame(services, 'lyr-a')).toEqual(createRect(100, 100, 200, 100));
+    });
+    expect(layerFrame(services, 'lyr-b')).toEqual(createRect(400, 250, 100, 50));
+    expect(historyLabels()).toEqual([]);
+  });
+
+  it('drops a cancelled group resize without moving either layer', async () => {
+    const { services } = await mount(
+      sceneOf(
+        rectLayer('lyr-a', { name: 'A', x: 100, y: 100, width: 200, height: 100 }),
+        rectLayer('lyr-b', { name: 'B', x: 400, y: 250, width: 100, height: 50 }),
+      ),
+      { snapping: false },
+    );
+
+    dragOnArtboard({ x: 40, y: 40 }, { x: 600, y: 400 });
+    const handle = screen.getByRole('button', { name: 'Resize bottom right' });
+    fireEvent.pointerDown(handle, { clientX: 500, clientY: 300, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(handle, { clientX: 800, clientY: 500, pointerId: 1 });
+    fireEvent.keyDown(screen.getByTestId('artboard-surface'), { key: 'Escape' });
+    fireEvent.pointerUp(handle, { clientX: 800, clientY: 500, pointerId: 1 });
+
+    expect(historyLabels()).toEqual([]);
+    expect(layerFrame(services, 'lyr-a')).toEqual(createRect(100, 100, 200, 100));
+    expect(layerFrame(services, 'lyr-b')).toEqual(createRect(400, 250, 100, 50));
+  });
+
   it('selects several layers with a marquee over empty space', async () => {
     await mount(
       sceneOf(
@@ -405,9 +672,9 @@ describe('direct manipulation on the artboard', () => {
     dragOnArtboard({ x: 40, y: 40 }, { x: 500, y: 500 });
 
     await waitFor(() => {
-      expect(screen.getByTestId('layer-row-lyr-a')).toHaveAttribute('aria-selected', 'true');
+      expectSelected('lyr-a');
     });
-    expect(screen.getByTestId('layer-row-lyr-b')).toHaveAttribute('aria-selected', 'true');
+    expectSelected('lyr-b');
   });
 });
 
@@ -417,9 +684,7 @@ describe('a thirty-layer document', () => {
 
     expect(screen.getByRole('img', { name: /30 layers/i })).toBeInTheDocument();
     expect(screen.getAllByTestId('document-canvas')).toHaveLength(1);
-    expect(
-      within(screen.getByRole('listbox', { name: 'Layer stack' })).getAllByRole('option'),
-    ).toHaveLength(30);
+    expect(layerRows()).toHaveLength(30);
     // Loading a document is not an edit: history starts empty.
     expect(historyLabels()).toEqual([]);
     expect(persisted(services).scene.layers).toHaveLength(30);
@@ -432,7 +697,7 @@ describe('a thirty-layer document', () => {
     // Every stack layer sits inside the top-left 320x280 region, so a marquee over it selects all 30.
     dragOnArtboard({ x: 350, y: 350 }, { x: 10, y: 10 });
     await waitFor(() => {
-      expect(screen.getByTestId('layer-row-lyr-stack-0')).toHaveAttribute('aria-selected', 'true');
+      expectSelected('lyr-stack-0');
     });
     expect(historyLabels()).toEqual([]);
 
@@ -493,6 +758,327 @@ describe('text layers', () => {
     await user.tab();
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/4 and 800/i);
+    expect(historyLabels()).toEqual([]);
+  });
+});
+
+describe('locked layers on the artboard', () => {
+  const lockedScene = () =>
+    sceneOf(
+      rectLayer('lyr-a', { name: 'A', x: 100, y: 100, width: 200, height: 100 }),
+      rectLayer('lyr-b', { name: 'B', x: 400, y: 250, width: 100, height: 50 }),
+    );
+
+  it('does not move a locked layer when a gesture starts on it', async () => {
+    const { services } = await mount(lockedScene(), { snapping: false });
+    const user = userEvent.setup();
+
+    // Lock through the interface, exactly as a user would.
+    await user.click(selectRow('B'));
+    await user.click(screen.getByRole('switch', { name: /lock this layer/i }));
+    await waitFor(() => {
+      expect(layer(services, 'lyr-b').locked).toBe(true);
+    });
+    expect(historyLabels()).toEqual(['Lock “B”']);
+
+    // A drag that starts on the locked layer picks nothing, moves nothing and clears nothing.
+    dragOnArtboard({ x: 450, y: 275 }, { x: 520, y: 300 });
+
+    expect(layerFrame(services, 'lyr-b')).toEqual(createRect(400, 250, 100, 50));
+    expect(historyLabels()).toEqual(['Lock “B”']);
+    // The selection is undisturbed rather than being replaced by something untransformable.
+    expectSelected('lyr-b');
+    // And the surface explains itself instead of silently doing nothing.
+    clickOnArtboard({ x: 450, y: 275 });
+    expect(screen.getByTestId('artboard-surface')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/locked/i),
+    );
+    expect(layerFrame(services, 'lyr-b')).toEqual(createRect(400, 250, 100, 50));
+  });
+
+  it('excludes a locked layer from a group move and from the resize box', async () => {
+    const { services } = await mount(lockedScene(), { snapping: false });
+    const user = userEvent.setup();
+
+    await user.click(selectRow('B'));
+    await user.click(screen.getByRole('switch', { name: /lock this layer/i }));
+    await waitFor(() => {
+      expect(layer(services, 'lyr-b').locked).toBe(true);
+    });
+
+    // Select both: the locked layer is selected, but a marquee cannot pick it up, so add it from
+    // the list instead — which is exactly the case the review asked about.
+    clickOnArtboard({ x: 200, y: 150 });
+    await user.click(screen.getByTestId('layer-name-lyr-b'));
+    await waitFor(() => {
+      expectSelected('lyr-b');
+    });
+    expectSelected('lyr-a', false);
+
+    // Shift-clicking A in the list adds it, giving a selection that mixes locked and unlocked.
+    fireEvent.click(screen.getByTestId('layer-name-lyr-a'), { shiftKey: true });
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+
+    // Moving the group must move only the unlocked layer.
+    dragOnArtboard({ x: 200, y: 150 }, { x: 260, y: 200 });
+    await waitFor(() => {
+      expect(historyLabels()).toContain('Move “A”');
+    });
+    expect(layerFrame(services, 'lyr-a')).toEqual(createRect(160, 150, 200, 100));
+    expect(layerFrame(services, 'lyr-b')).toEqual(createRect(400, 250, 100, 50));
+
+    // The handles describe only the transformable part, so there is no handle that promises more.
+    const before = layerFrame(services, 'lyr-b');
+    const handle = screen.getByRole('button', { name: 'Resize bottom right' });
+    fireEvent.pointerDown(handle, { clientX: 360, clientY: 250, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(handle, { clientX: 460, clientY: 350, pointerId: 1 });
+    fireEvent.pointerUp(handle, { clientX: 460, clientY: 350, pointerId: 1 });
+    await waitFor(() => {
+      expect(layerFrame(services, 'lyr-a')).not.toEqual(createRect(160, 150, 200, 100));
+    });
+    expect(layerFrame(services, 'lyr-b')).toEqual(before);
+  });
+
+  it('draws the handles around what can actually be transformed, not the whole selection', async () => {
+    const { services } = await mount(lockedScene(), { snapping: false });
+    const user = userEvent.setup();
+
+    // Lock B, then select both layers from the list: the selection is two layers, but only A can move.
+    await user.click(selectRow('B'));
+    await user.click(screen.getByRole('switch', { name: /lock this layer/i }));
+    await waitFor(() => {
+      expect(layer(services, 'lyr-b').locked).toBe(true);
+    });
+    await user.click(selectRow('A'));
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+    fireEvent.click(selectRow('B'), { shiftKey: true });
+    await waitFor(() => {
+      expectSelected('lyr-b');
+    });
+
+    // The handle box is A's own frame (100,100 200x100), not the union with the locked layer.
+    expect(screen.getByTestId('selection-bounds-label')).toHaveTextContent(
+      'Selection bounds 100, 100, 200 by 100 document pixels at 100 percent zoom.',
+    );
+    // The locked layer is still visibly selected, and the rail says it is being left out.
+    expect(screen.getByTestId('selection-overlay')).toBeInTheDocument();
+    expect(screen.getByText(/1 selected layer is locked and left untouched/i)).toBeInTheDocument();
+  });
+
+  it('offers no resize handles when every selected layer is locked', async () => {
+    const { services } = await mount(lockedScene(), { snapping: false });
+    const user = userEvent.setup();
+
+    // Lock both, selecting the pair from the layer list, as the review's case describes.
+    await user.click(selectRow('A'));
+    await user.click(screen.getByRole('switch', { name: /lock this layer/i }));
+    await user.click(selectRow('B'));
+    await user.click(screen.getByRole('switch', { name: /lock this layer/i }));
+    await waitFor(() => {
+      expect(layer(services, 'lyr-a').locked).toBe(true);
+    });
+    expect(layer(services, 'lyr-b').locked).toBe(true);
+
+    expect(screen.queryByRole('button', { name: 'Resize bottom right' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('selection-locked-note')).toHaveTextContent(
+      /every selected layer is locked/i,
+    );
+    // The locked layers are still visibly selected, and the inspector says why they cannot move.
+    expect(screen.getByTestId('selection-overlay')).toBeInTheDocument();
+    expect(screen.getByText(/Every selected layer is locked/i)).toBeInTheDocument();
+  });
+});
+
+describe('bulk operations from the inspector', () => {
+  const twoLayers = () =>
+    sceneOf(
+      rectLayer('lyr-a', { name: 'A', x: 100, y: 100, width: 100, height: 100 }),
+      rectLayer('lyr-b', { name: 'B', x: 300, y: 300, width: 100, height: 100 }),
+    );
+
+  async function selectBoth(): Promise<void> {
+    dragOnArtboard({ x: 40, y: 40 }, { x: 500, y: 500 });
+    await waitFor(() => {
+      expectSelected('lyr-b');
+    });
+    expectSelected('lyr-a');
+  }
+
+  it('duplicates the whole selection in one commit', async () => {
+    const { services } = await mount(twoLayers(), { snapping: false });
+    const user = userEvent.setup();
+    await selectBoth();
+
+    await user.click(screen.getByRole('button', { name: 'Duplicate selection' }));
+
+    await waitFor(() => {
+      expect(historyLabels()).toEqual(['Duplicate 2 layers']);
+    });
+    expect(persisted(services).scene.layers.map((entry) => entry.name)).toEqual([
+      'A',
+      'A copy',
+      'B',
+      'B copy',
+    ]);
+
+    await user.click(screen.getByRole('button', { name: /^undo$/i }));
+    await waitFor(() => {
+      expect(persisted(services).scene.layers).toHaveLength(2);
+    });
+    expect(historyLabels()).toEqual([]);
+  });
+
+  it('brings a multi-layer selection forward without losing a layer', async () => {
+    const { services } = await mount(
+      sceneOf(
+        rectLayer('lyr-a', { name: 'A' }),
+        rectLayer('lyr-b', { name: 'B' }),
+        rectLayer('lyr-c', { name: 'C' }),
+      ),
+      { snapping: false },
+    );
+    const user = userEvent.setup();
+
+    await user.click(selectRow('A'));
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+    fireEvent.click(selectRow('B'), { shiftKey: true });
+    await waitFor(() => {
+      expectSelected('lyr-b');
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Bring forward' }));
+
+    await waitFor(() => {
+      expect(historyLabels()).toEqual(['Bring forward: 2 layers']);
+    });
+    // Both layers moved up one slot and kept their relative order; C was untouched.
+    expect(persisted(services).scene.layers.map((entry) => entry.name)).toEqual(['C', 'A', 'B']);
+  });
+
+  it('sets opacity for the whole selection in one step', async () => {
+    const { services } = await mount(twoLayers(), { snapping: false });
+    await selectBoth();
+
+    fireEvent.change(screen.getByLabelText('Layer opacity'), { target: { value: '40' } });
+
+    await waitFor(() => {
+      expect(historyLabels()).toEqual(['Set opacity of 2 layers to 40%']);
+    });
+    expect(persisted(services).scene.layers.map((entry) => entry.opacity)).toEqual([0.4, 0.4]);
+  });
+
+  it('hides the whole selection in one step and shows it again', async () => {
+    const { services } = await mount(twoLayers(), { snapping: false });
+    const user = userEvent.setup();
+    await selectBoth();
+
+    await user.click(screen.getByRole('switch', { name: /selection visible/i }));
+
+    await waitFor(() => {
+      expect(historyLabels()).toEqual(['Hide 2 layers']);
+    });
+    expect(persisted(services).scene.layers.every((entry) => !entry.visible)).toBe(true);
+  });
+
+  it('moves the selection with the inspector bounds fields, without a pointer', async () => {
+    const { services } = await mount(twoLayers(), { snapping: false });
+    const user = userEvent.setup();
+    await selectBoth();
+
+    const x = screen.getByLabelText('Selection X');
+    await user.clear(x);
+    await user.type(x, '0');
+    await user.tab();
+
+    await waitFor(() => {
+      expect(historyLabels()).toEqual(['Move 2 layers']);
+    });
+    // Relative arrangement preserved: A moved 100 left, B moved 100 left as well.
+    expect(layerFrame(services, 'lyr-a')).toEqual(createRect(0, 100, 100, 100));
+    expect(layerFrame(services, 'lyr-b')).toEqual(createRect(200, 300, 100, 100));
+  });
+});
+
+describe('keyboard-only editing', () => {
+  it('walks the layer list, then edits the selected layer through the inspector', async () => {
+    const { services } = await mount(
+      sceneOf(rectLayer('lyr-a', { name: 'Panel', x: 100, y: 100, width: 200, height: 100 })),
+      { snapping: false },
+    );
+    const user = userEvent.setup();
+
+    // Reach the list with the keyboard: the roving tab stop is the only way in.
+    const name = screen.getByTestId('layer-name-lyr-a');
+    expect(name).toHaveAttribute('tabindex', '0');
+    name.focus();
+    expect(document.activeElement).toBe(name);
+
+    // Enter activates the focused row through the button's native behaviour.
+    await user.keyboard('{Enter}');
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+
+    // Then resize it by typing, which needs no pointer at all.
+    const width = screen.getByLabelText('Layer width');
+    await user.clear(width);
+    await user.type(width, '260');
+    await user.tab();
+
+    await waitFor(() => {
+      expect(layerFrame(services, 'lyr-a').width).toBe(260);
+    });
+    expect(historyLabels()).toEqual(['Set “Panel” width to 260px']);
+  });
+
+  it('nudges the selection with the arrow keys on the artboard surface', async () => {
+    const { services } = await mount(
+      sceneOf(rectLayer('lyr-a', { name: 'Panel', x: 100, y: 100, width: 200, height: 100 })),
+      { snapping: false },
+    );
+    const surface = screen.getByTestId('artboard-surface');
+
+    clickOnArtboard({ x: 200, y: 150 });
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+
+    surface.focus();
+    fireEvent.keyDown(surface, { key: 'ArrowRight' });
+    await waitFor(() => {
+      expect(layerFrame(services, 'lyr-a').x).toBe(101);
+    });
+    fireEvent.keyDown(surface, { key: 'ArrowDown', shiftKey: true });
+    await waitFor(() => {
+      expect(layerFrame(services, 'lyr-a').y).toBe(110);
+    });
+
+    expect(historyLabels()).toEqual(['Move “Panel”', 'Move “Panel”']);
+  });
+
+  it('clears the selection with Escape when nothing is in progress', async () => {
+    await mount(
+      sceneOf(rectLayer('lyr-a', { name: 'Panel', x: 100, y: 100, width: 200, height: 100 })),
+      { snapping: false },
+    );
+    const surface = screen.getByTestId('artboard-surface');
+
+    clickOnArtboard({ x: 200, y: 150 });
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+
+    fireEvent.keyDown(surface, { key: 'Escape' });
+    await waitFor(() => {
+      expectSelected('lyr-a', false);
+    });
     expect(historyLabels()).toEqual([]);
   });
 });

@@ -4,13 +4,13 @@ import type { Scene } from '../../core/documents/layer-types';
 import type { ReorderTarget } from '../../core/documents/layer-operations';
 import {
   deleteLayersCommand,
-  duplicateLayerCommand,
+  duplicateLayersCommand,
   renameLayerCommand,
-  reorderLayerCommand,
+  reorderLayersCommand,
   setLayerLockCommand,
   setLayerVisibilityCommand,
 } from '../../core/editor/commands';
-import type { Selection } from '../../core/editor/selection';
+import { isSelected, type Selection } from '../../core/editor/selection';
 import { ExportPanel } from './export-panel';
 import { HistoryPanel } from './history-panel';
 import { InspectorPanel } from './inspector-panel';
@@ -60,7 +60,10 @@ export function DocumentAside({
         selection={selection}
         onSelectionChange={onSelectionChange}
         onReorder={(id, target: ReorderTarget) => {
-          void api.run(reorderLayerCommand(api.doc, id, target));
+          // The row acts on the selection it belongs to: reordering a row that is part of a
+          // multi-layer selection moves the whole block, matching the inspector's buttons.
+          const ids = isSelected(selection, id) && selection.length > 1 ? selection : [id];
+          void api.run(reorderLayersCommand(api.doc, ids, target));
         }}
         onRename={(id, name) => {
           void api.run(renameLayerCommand(api.doc, id, name));
@@ -72,7 +75,8 @@ export function DocumentAside({
           void api.run(setLayerLockCommand(api.doc, id, locked));
         }}
         onDuplicate={(id) => {
-          void api.run(duplicateLayerCommand(api.doc, id));
+          const ids = isSelected(selection, id) && selection.length > 1 ? selection : [id];
+          void api.run(duplicateLayersCommand(api.doc, ids));
         }}
         onDelete={(id) => {
           onSelectionChange(Object.freeze([]));
