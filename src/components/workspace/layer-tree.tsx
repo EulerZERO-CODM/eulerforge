@@ -45,7 +45,8 @@ export type LayerTreeProps = {
  *
  * Lists the scene top-first — the order layers are painted in reverse, which is how every design tool
  * presents a stack — and gives every operation a button as well as a shortcut, so nothing depends on
- * dragging. The list is a real `listbox`: arrow keys move the selection and Enter/Space picks a row.
+ * dragging. The list is a real `listbox`: ArrowUp/ArrowDown step through the stack and Home/End jump
+ * to its top and bottom, so a keyboard user can select any layer without touching the pointer.
  */
 export function LayerTree({
   scene,

@@ -197,6 +197,8 @@ function contentSignature(document: ForgeDocument): string {
     canvas: document.canvas,
     guides: document.guides,
     palette: document.palette,
+    scene: document.scene,
+    attribution: document.attribution,
     metadata: document.metadata,
     status: document.status,
   });

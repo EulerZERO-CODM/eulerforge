@@ -94,6 +94,9 @@ export function Artboard({
   const [gesture, setGesture] = useState<GestureState | null>(null);
   const [marquee, setMarquee] = useState<Marquee | null>(null);
   const [hint, setHint] = useState<string | null>(null);
+  // A click on an already-selected layer keeps the whole selection (so a multi-layer drag works) and
+  // only collapses to that layer if the pointer never moved.
+  const [collapseOnRelease, setCollapseOnRelease] = useState<LayerId | null>(null);
 
   const dpr = pixelRatio ?? (typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1);
   const width = Math.max(1, Math.round(doc.canvas.width * zoom));
@@ -174,8 +177,14 @@ export function Artboard({
       return;
     }
 
-    const nextSelection = additive ? toggleSelection(selection, hit.id) : selectOnly(hit.id);
-    if (!additive) onSelectionChange(selectOnly(hit.id));
+    const alreadySelected = isSelected(selection, hit.id);
+    const nextSelection = additive
+      ? toggleSelection(selection, hit.id)
+      : alreadySelected
+        ? selection
+        : selectOnly(hit.id);
+    if (!additive && !alreadySelected) onSelectionChange(selectOnly(hit.id));
+    setCollapseOnRelease(!additive && alreadySelected ? hit.id : null);
 
     setGesture({
       ...beginMove({ pointer: point, scene: doc.scene, selection: nextSelection, anchor: hit }),
@@ -225,7 +234,11 @@ export function Artboard({
           frame: frameFromScene(preview.scene, entry.id) ?? entry.frame,
         })),
       );
+    } else if (collapseOnRelease) {
+      // A click that moved nothing is a request to select exactly one layer.
+      onSelectionChange(selectOnly(collapseOnRelease));
     }
+    setCollapseOnRelease(null);
     setGesture(null);
   }
 
@@ -234,6 +247,7 @@ export function Artboard({
     setGesture(null);
     setMarquee(null);
     setHint(null);
+    setCollapseOnRelease(null);
   }
 
   function startResize(event: React.PointerEvent<HTMLElement>, handle: TransformHandle): void {

@@ -226,7 +226,11 @@ function NameField({ api, layer }: { readonly api: WorkspaceApi; readonly layer:
   });
 
   return (
-    <Field label="Layer name" hint="Names appear in the layer list and in undo labels.">
+    <Field
+      label="Layer name"
+      hint="Names appear in the layer list and in undo labels."
+      error={name.error}
+    >
       <Input
         value={name.draft}
         invalid={name.error !== null}
@@ -236,7 +240,6 @@ function NameField({ api, layer }: { readonly api: WorkspaceApi; readonly layer:
         onBlur={name.onBlur}
         onKeyDown={name.onKeyDown}
       />
-      {name.error ? <p className="text-2xs text-rose-400">{name.error}</p> : null}
     </Field>
   );
 }
@@ -285,7 +288,7 @@ function FrameFields({ api, layer }: { readonly api: WorkspaceApi; readonly laye
 
   return (
     <div className="grid grid-cols-2 gap-3">
-      <Field label="X" labelSuffix="px">
+      <Field label="X" labelSuffix="px" error={x.error}>
         <Input
           value={x.draft}
           invalid={x.error !== null}
@@ -295,7 +298,7 @@ function FrameFields({ api, layer }: { readonly api: WorkspaceApi; readonly laye
           inputMode="numeric"
         />
       </Field>
-      <Field label="Y" labelSuffix="px">
+      <Field label="Y" labelSuffix="px" error={y.error}>
         <Input
           value={y.draft}
           invalid={y.error !== null}
@@ -305,7 +308,7 @@ function FrameFields({ api, layer }: { readonly api: WorkspaceApi; readonly laye
           inputMode="numeric"
         />
       </Field>
-      <Field label="Width" labelSuffix="px">
+      <Field label="Width" labelSuffix="px" error={width.error}>
         <Input
           value={width.draft}
           invalid={width.error !== null}
@@ -315,7 +318,7 @@ function FrameFields({ api, layer }: { readonly api: WorkspaceApi; readonly laye
           inputMode="numeric"
         />
       </Field>
-      <Field label="Height" labelSuffix="px">
+      <Field label="Height" labelSuffix="px" error={height.error}>
         <Input
           value={height.draft}
           invalid={height.error !== null}
@@ -392,6 +395,7 @@ function ColourField({
   return (
     <Field
       label={label}
+      error={text.error}
       {...(hint === undefined ? {} : { hint })}
       labelSuffix={
         allowNone ? (
@@ -491,7 +495,11 @@ function TextFields({ api, layer }: { readonly api: WorkspaceApi; readonly layer
     <div className="border-line space-y-4 border-t pt-4">
       <h4 className="text-2xs text-fg-subtle font-semibold tracking-wider uppercase">Text</h4>
 
-      <Field label="Content" hint="Text wraps inside the layer box; explicit line breaks are kept.">
+      <Field
+        label="Content"
+        hint="Text wraps inside the layer box; explicit line breaks are kept."
+        error={content.error}
+      >
         <Textarea
           rows={3}
           value={content.draft}
@@ -525,7 +533,7 @@ function TextFields({ api, layer }: { readonly api: WorkspaceApi; readonly layer
       </Field>
 
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Size" labelSuffix="px">
+        <Field label="Size" labelSuffix="px" error={fontSize.error}>
           <Input
             value={fontSize.draft}
             invalid={fontSize.error !== null}
@@ -551,7 +559,7 @@ function TextFields({ api, layer }: { readonly api: WorkspaceApi; readonly layer
             }}
           />
         </Field>
-        <Field label="Line height" labelSuffix="×">
+        <Field label="Line height" labelSuffix="×" error={lineHeight.error}>
           <Input
             value={lineHeight.draft}
             invalid={lineHeight.error !== null}
@@ -561,7 +569,7 @@ function TextFields({ api, layer }: { readonly api: WorkspaceApi; readonly layer
             inputMode="decimal"
           />
         </Field>
-        <Field label="Letter spacing" labelSuffix="px">
+        <Field label="Letter spacing" labelSuffix="px" error={letterSpacing.error}>
           <Input
             value={letterSpacing.draft}
             invalid={letterSpacing.error !== null}
@@ -661,7 +669,7 @@ function ShapeFields({
         }}
       />
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Stroke width" labelSuffix="px">
+        <Field label="Stroke width" labelSuffix="px" error={strokeWidth.error}>
           <Input
             value={strokeWidth.draft}
             invalid={strokeWidth.error !== null}
@@ -672,7 +680,12 @@ function ShapeFields({
           />
         </Field>
         {isRectLayer(layer) ? (
-          <Field label="Corner radius" labelSuffix="px" hint="Clamped to half the shorter side.">
+          <Field
+            label="Corner radius"
+            labelSuffix="px"
+            hint="Clamped to half the shorter side."
+            error={cornerRadius.error}
+          >
             <Input
               value={cornerRadius.draft}
               invalid={cornerRadius.error !== null}
