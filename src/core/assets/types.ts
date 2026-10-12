@@ -64,6 +64,23 @@ export type AssetPreview =
   | { readonly kind: 'glyph'; readonly glyph: string }
   | { readonly kind: 'symbol'; readonly symbol: string };
 
+/**
+ * A renderable file shipped with the catalogue.
+ *
+ * Records carry a `file` only when a real, repository-authored file exists at `href`; the editor
+ * places graphics from this field and nothing else, so a metadata-only record can never end up on a
+ * canvas claiming to be artwork.
+ */
+export type AssetFile = {
+  /** Public path served by the app, e.g. `/forge-assets/aurora-mesh.svg`. */
+  readonly href: string;
+  readonly mediaType: string;
+  /** Intrinsic pixel size, used to place the graphic without loading it first. */
+  readonly width: number;
+  readonly height: number;
+  readonly bytes: number;
+};
+
 export type AssetRecord = {
   readonly id: AssetId;
   readonly name: string;
@@ -79,9 +96,21 @@ export type AssetRecord = {
   /** Only `sample` records exist in Phase 1; `planned` records document the intended catalogue. */
   readonly status: 'sample' | 'planned';
   readonly preview: AssetPreview;
+  /** Present only when a real file ships with the catalogue and can be placed on a canvas. */
+  readonly file?: AssetFile | undefined;
   /** Free-text surface where the asset can be used, e.g. "Design Studio artboards". */
   readonly usageNote: string;
 };
+
+/** True when a record can actually be placed on a canvas as a graphic layer. */
+export function isPlaceable(record: AssetRecord): boolean {
+  return record.file !== undefined;
+}
+
+/** Records that can be placed, which is what the editor offers. */
+export function placeableRecords(records: readonly AssetRecord[]): readonly AssetRecord[] {
+  return records.filter(isPlaceable);
+}
 
 export type AssetSortOrder = 'name-asc' | 'name-desc' | 'newest' | 'relevance';
 

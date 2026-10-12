@@ -121,16 +121,28 @@ export function rectLayer(
 
 export function ellipseLayer(
   id: string,
-  overrides: { readonly x?: number; readonly y?: number; readonly fill?: string | null } = {},
+  overrides: {
+    readonly x?: number;
+    readonly y?: number;
+    readonly width?: number;
+    readonly height?: number;
+    readonly fill?: string | null;
+    readonly name?: string;
+  } = {},
 ): Layer {
   return build(
     {
       type: 'ellipse',
-      frame: createRect(overrides.x ?? 0, overrides.y ?? 0, 120, 120),
+      frame: createRect(
+        overrides.x ?? 0,
+        overrides.y ?? 0,
+        overrides.width ?? 120,
+        overrides.height ?? 120,
+      ),
       shape: { ...(overrides.fill === undefined ? {} : { fill: overrides.fill }) },
     },
     id,
-    `Ellipse ${id}`,
+    overrides.name ?? `Ellipse ${id}`,
   );
 }
 
@@ -143,6 +155,9 @@ export function imageLayer(
     readonly height?: number;
     readonly href?: string;
     readonly assetId?: string | null;
+    readonly name?: string;
+    readonly fit?: ImageLayer['image']['fit'];
+    readonly tint?: string | null;
   } = {},
 ): ImageLayer {
   const layer = build(
@@ -154,10 +169,14 @@ export function imageLayer(
         overrides.width ?? 200,
         overrides.height ?? 200,
       ),
-      image: { href: overrides.href ?? '/forge-assets/sample-gradient-grid.svg' },
+      image: {
+        href: overrides.href ?? '/forge-assets/sample-gradient-grid.svg',
+        ...(overrides.fit === undefined ? {} : { fit: overrides.fit }),
+        ...(overrides.tint === undefined ? {} : { tint: overrides.tint }),
+      },
     },
     id,
-    `Graphic ${id}`,
+    overrides.name ?? `Graphic ${id}`,
   );
   if (layer.type !== 'image') throw new Error('expected an image layer');
   return overrides.assetId === undefined
