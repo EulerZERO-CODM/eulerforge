@@ -3,7 +3,16 @@ import { readFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 
-import { addLayer, centreOf, clickInDocument, createProject, layerNamed, stored } from './fixtures';
+import {
+  addLayer,
+  centreOf,
+  clickInDocument,
+  createProject,
+  historyLabels,
+  layerNamed,
+  stored,
+  storedWhen,
+} from './fixtures';
 
 /**
  * Real raster export.
@@ -173,6 +182,42 @@ test.describe('raster export', () => {
     }
     // And the file really changed, rather than the second capture reusing the first.
     expect(hidden.equals(drawn)).toBe(false);
+  });
+
+  test('blocks the export instead of writing a file, when a graphic cannot load', async ({
+    page,
+  }) => {
+    await createProject(page, { width: 200, height: 150 });
+    // From here on every catalogue file answers 404, so a placed graphic can never decode.
+    await page.route('**/forge-assets/**', (route) =>
+      route.fulfill({ status: 404, contentType: 'image/svg+xml', body: '' }),
+    );
+
+    await page.getByRole('button', { name: 'Graphic', exact: true }).click();
+    await page.getByLabel('Search graphics').fill('aurora');
+    await page.getByRole('button', { name: 'Place on canvas' }).first().click();
+
+    const placed = await storedWhen(
+      page,
+      (document) => document.scene.layers.some((layer) => layer.type === 'image'),
+      'the graphic should have been placed',
+    );
+    // The document is real - the layer and its attribution are recorded - so the refusal below is
+    // about the missing file, not about a placement that silently failed.
+    expect(placed.scene.layers.filter((layer) => layer.type === 'image')).toHaveLength(1);
+    expect(await historyLabels(page)).toEqual(['Place graphic “Aurora Mesh”']);
+
+    await page.getByLabel('Format', { exact: true }).selectOption({ label: 'PNG (.png)' });
+
+    const panel = page.locator('section[aria-labelledby="export-panel-heading"]');
+    await expect(panel.getByText('Every graphic can be drawn')).toBeVisible();
+    await expect(panel.getByText(/aurora-mesh\.svg.+could not be loaded/)).toBeVisible();
+    await expect(panel.getByText(/Reload the graphics/)).toBeVisible();
+
+    // The export control refuses to start, and nothing was written: a blank PNG with a success
+    // message would be a lie, so there is no file and no "last export" record either.
+    await expect(panel.getByRole('button', { name: 'Export blocked' })).toBeDisabled();
+    await expect(page.getByTestId('last-export')).toHaveCount(0);
   });
 
   test('records the whole export history, one labelled step per action', async ({ page }) => {

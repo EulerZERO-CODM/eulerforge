@@ -452,6 +452,36 @@ test.describe('artboard interaction', () => {
     ]);
   });
 
+  test('draws the document at the zoom percentage, backing store and all', async ({ page }) => {
+    await createProject(page, { width: 200, height: 150 });
+
+    const artboard = page.getByTestId('artboard');
+    const canvas = page.getByTestId('document-canvas');
+    const dpr = await page.evaluate(() => window.devicePixelRatio);
+
+    // `fit` never magnifies, so a document smaller than the stage opens at exactly 100%.
+    await expect(page.getByTestId('zoom-readout')).toContainText('100%');
+    expect((await artboard.boundingBox())?.width).toBe(200);
+    expect(Number(await canvas.getAttribute('width'))).toBe(Math.round(200 * dpr));
+
+    // 200% maps one document pixel to two CSS pixels, and the canvas draws into a buffer big enough
+    // for that: the browser rasterises at the zoom, rather than stretching a smaller bitmap.
+    await page.getByLabel('Zoom level').selectOption('200');
+    await expect(page.getByTestId('zoom-readout')).toHaveText('200%');
+    await expect.poll(async () => (await artboard.boundingBox())?.width).toBe(400);
+    expect((await artboard.boundingBox())?.height).toBe(300);
+    expect(Number(await canvas.getAttribute('width'))).toBe(Math.round(400 * dpr));
+    expect(Number(await canvas.getAttribute('height'))).toBe(Math.round(300 * dpr));
+
+    // And 25% shrinks it to a quarter. The box is rounded to whole CSS pixels, so 150 * 0.25 is 38.
+    await page.getByLabel('Zoom level').selectOption('25');
+    await expect(page.getByTestId('zoom-readout')).toHaveText('25%');
+    await expect.poll(async () => (await artboard.boundingBox())?.width).toBe(50);
+    expect((await artboard.boundingBox())?.height).toBe(38);
+    // Nothing was edited by looking closer: the document is untouched at every zoom level.
+    expect(await historyLabels(page)).toEqual([]);
+  });
+
   test('clears the selection with Escape on the surface', async ({ page }) => {
     const rectangle = layerNamed(await stored(page), 'Rectangle').frame;
     await clickInDocument(page, centreOf(rectangle));

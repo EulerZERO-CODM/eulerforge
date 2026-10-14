@@ -254,7 +254,7 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
       'src/core/editor/gesture.test.ts',
       'e2e/workspace.spec.ts',
     ],
-    gap: 'The browser suite covers the interaction paths end to end but not every regression: snapping is asserted in document space rather than against rendered guide pixels, and zoom levels are not exercised under real layout.',
+    gap: 'The browser suite covers the interaction paths end to end but not every regression: snapping is asserted in document space rather than against rendered guide pixels, and text rewrapping under real font metrics is asserted in the renderer tests rather than in the browser.',
   },
   {
     id: 'studios.photo-video-motion-illustration',
