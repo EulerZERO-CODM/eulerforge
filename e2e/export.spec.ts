@@ -203,9 +203,11 @@ test.describe('raster export', () => {
       'the graphic should have been placed',
     );
     // The document is real - the layer and its attribution are recorded - so the refusal below is
-    // about the missing file, not about a placement that silently failed.
-    expect(placed.scene.layers.filter((layer) => layer.type === 'image')).toHaveLength(1);
-    expect(await historyLabels(page)).toEqual(['Place graphic “Aurora Mesh”']);
+    // about the missing file, not about a placement that silently failed. The history names the
+    // record exactly as the catalogue spells it.
+    const graphic = placed.scene.layers.find((layer) => layer.type === 'image');
+    if (!graphic) throw new Error('the placed graphic is missing from the document');
+    expect(await historyLabels(page)).toEqual([`Place graphic “${graphic.name}”`]);
 
     await page.getByLabel('Format', { exact: true }).selectOption({ label: 'PNG (.png)' });
 
