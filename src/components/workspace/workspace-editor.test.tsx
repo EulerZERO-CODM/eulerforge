@@ -801,6 +801,82 @@ describe('text layers', () => {
   });
 });
 
+describe('portrait and landscape documents', () => {
+  /**
+   * The same two objects on an upright 9:16 canvas. Nothing in a transform may depend on the canvas
+   * being square, and a resize must never re-shape the document itself.
+   */
+  const portraitScene = () =>
+    sceneOf(
+      rectLayer('lyr-a', { name: 'A', x: 100, y: 100, width: 200, height: 100 }),
+      rectLayer('lyr-b', { name: 'B', x: 400, y: 250, width: 100, height: 50 }),
+    );
+
+  it('resizes a group on a portrait canvas and leaves the canvas alone', async () => {
+    const { services } = await mount(portraitScene(), {
+      snapping: false,
+      canvas: PORTRAIT_CANVAS,
+    });
+
+    const artboard = screen.getByTestId('artboard');
+    expect(artboard).toHaveAttribute('data-canvas-width', '900');
+    expect(artboard).toHaveAttribute('data-canvas-height', '1600');
+    expect(artboard.style.width).toBe('900px');
+    expect(artboard.style.height).toBe('1600px');
+
+    // Select both layers: the union box is 400 x 200 at (100, 100).
+    dragOnArtboard({ x: 40, y: 40 }, { x: 600, y: 400 });
+    await waitFor(() => {
+      expectSelected('lyr-b');
+    });
+
+    const handle = screen.getByRole('button', { name: 'Resize bottom right' });
+    fireEvent.pointerDown(handle, { clientX: 500, clientY: 300, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(handle, { clientX: 700, clientY: 340, pointerId: 1 });
+    fireEvent.pointerUp(handle, { clientX: 700, clientY: 340, pointerId: 1 });
+
+    await waitFor(() => {
+      expect(historyLabels()).toEqual(['Resize 2 layers']);
+    });
+    // 400 x 200 grew to 600 x 240: both layers scaled by 1.5 across and 1.2 down about (100, 100).
+    expect(layerFrame(services, 'lyr-a')).toEqual(createRect(100, 100, 300, 120));
+    expect(layerFrame(services, 'lyr-b')).toEqual(createRect(550, 280, 150, 60));
+    // The document is still the portrait canvas: the gesture touched layers, not the artboard.
+    expect(persisted(services).canvas).toEqual(PORTRAIT_CANVAS);
+    expect(artboard.style.height).toBe('1600px');
+  });
+
+  it('snaps a group resize to the canvas centre line, in one commit', async () => {
+    const { services } = await mount(
+      sceneOf(
+        rectLayer('lyr-a', { name: 'A', x: 100, y: 100, width: 200, height: 100 }),
+        rectLayer('lyr-b', { name: 'B', x: 400, y: 250, width: 100, height: 50 }),
+      ),
+      { snapping: true },
+    );
+
+    dragOnArtboard({ x: 40, y: 40 }, { x: 600, y: 400 });
+    await waitFor(() => {
+      expectSelected('lyr-b');
+    });
+
+    const handle = screen.getByRole('button', { name: 'Resize bottom right' });
+    fireEvent.pointerDown(handle, { clientX: 500, clientY: 300, pointerId: 1, button: 0 });
+    // Two pixels past the 1080px canvas's 540px centre line, and clear of every grid line on the
+    // other axis, so only the horizontal snap can fire.
+    fireEvent.pointerMove(handle, { clientX: 542, clientY: 320, pointerId: 1 });
+    fireEvent.pointerUp(handle, { clientX: 542, clientY: 320, pointerId: 1 });
+
+    await waitFor(() => {
+      expect(historyLabels()).toEqual(['Resize 2 layers']);
+    });
+    // The right edge landed on 540, so the box is 440 x 220: both layers grew by the same 1.1 factor
+    // about (100, 100), which is what keeps their arrangement intact.
+    expect(layerFrame(services, 'lyr-a')).toEqual(createRect(100, 100, 220, 110));
+    expect(layerFrame(services, 'lyr-b')).toEqual(createRect(430, 265, 110, 55));
+  });
+});
+
 describe('locked layers on the artboard', () => {
   const lockedScene = () =>
     sceneOf(
@@ -1042,6 +1118,36 @@ describe('bulk operations from the inspector', () => {
     // Relative arrangement preserved: A moved 100 left, B moved 100 left as well.
     expect(layerFrame(services, 'lyr-a')).toEqual(createRect(0, 100, 100, 100));
     expect(layerFrame(services, 'lyr-b')).toEqual(createRect(200, 300, 100, 100));
+  });
+
+  it('resizes the whole selection by typing group bounds, without a pointer', async () => {
+    const { services } = await mount(twoLayers(), { snapping: false });
+    const user = userEvent.setup();
+    await selectBoth();
+
+    // The union box is 300 x 300 at (100, 100): a typed width scales both layers about its corner.
+    const width = screen.getByLabelText('Selection width');
+    await user.clear(width);
+    await user.type(width, '600');
+    await user.tab();
+
+    await waitFor(() => {
+      expect(historyLabels()).toEqual(['Resize 2 layers']);
+    });
+    expect(layerFrame(services, 'lyr-a')).toEqual(createRect(100, 100, 200, 100));
+    expect(layerFrame(services, 'lyr-b')).toEqual(createRect(500, 300, 200, 100));
+
+    // And a typed height is its own single commit, not a second write into the same patch.
+    const height = screen.getByLabelText('Selection height');
+    await user.clear(height);
+    await user.type(height, '450');
+    await user.tab();
+
+    await waitFor(() => {
+      expect(historyLabels()).toEqual(['Resize 2 layers', 'Resize 2 layers']);
+    });
+    expect(layerFrame(services, 'lyr-a')).toEqual(createRect(100, 100, 200, 150));
+    expect(layerFrame(services, 'lyr-b')).toEqual(createRect(500, 400, 200, 150));
   });
 });
 

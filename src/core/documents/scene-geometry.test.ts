@@ -21,8 +21,10 @@ import {
   toDocumentPoint,
   HANDLE_ANCHORS,
   TRANSFORM_HANDLES,
+  type SnapTargets,
+  type TransformTarget,
 } from './scene-geometry';
-import { createRect, rectCentre } from './geometry';
+import { createRect, rectCentre, type Rect } from './geometry';
 import { ellipseLayer, imageLayer, rectLayer, sceneOf, textLayer } from '../../testing/layers';
 
 describe('hitTestScene', () => {
@@ -464,5 +466,239 @@ describe('group transforms', () => {
     const scaled = transformTargets(group, transform);
     expect(scaled[0]?.frame).toEqual(createRect(100, 100, 100, 200));
     expect(scaled[1]?.frame).toEqual(createRect(250, 400, 50, 100));
+  });
+});
+
+/**
+ * The geometry matrix on the two document shapes a designer actually opens: 9:16 upright and 16:9
+ * wide. Everything above is square-agnostic by construction, and these cases are what stops that
+ * assumption from creeping back in through snapping targets, fit-to-canvas or a hard-coded axis.
+ */
+describe('group transforms on portrait and landscape documents', () => {
+  const portrait = { width: 900, height: 1600 };
+  const landscape = { width: 1600, height: 900 };
+
+  /**
+   * Two different-sized objects at the same *relative* position on either canvas: the arrangement is
+   * what has to survive a resize, not any particular pixel value.
+   */
+  function arrangement(canvas: { readonly width: number; readonly height: number }): {
+    readonly targets: readonly TransformTarget[];
+    readonly box: Rect;
+  } {
+    const a = rectLayer('lyr-orient-a', {
+      x: canvas.width * 0.2,
+      y: canvas.height * 0.2,
+      width: canvas.width * 0.4,
+      height: canvas.height * 0.15,
+    });
+    const b = rectLayer('lyr-orient-b', {
+      x: canvas.width * 0.6,
+      y: canvas.height * 0.5,
+      width: canvas.width * 0.2,
+      height: canvas.height * 0.075,
+    });
+    return {
+      targets: [
+        { id: a.id, frame: a.frame },
+        { id: b.id, frame: b.frame },
+      ],
+      box: createRect(
+        a.frame.x,
+        a.frame.y,
+        b.frame.x + b.frame.width - a.frame.x,
+        b.frame.y + b.frame.height - a.frame.y,
+      ),
+    };
+  }
+
+  function targetsFor(canvas: { readonly width: number; readonly height: number }): SnapTargets {
+    return buildSnapTargets({
+      canvas,
+      gridMm: 0,
+      pixelsPerMm: 1,
+      siblings: [],
+      alignmentGuides: [],
+    });
+  }
+
+  it('scales a group on a portrait canvas and keeps the arrangement', () => {
+    const { targets, box } = arrangement(portrait);
+    // 540 x 600 at (180, 320); drag the bottom-right corner 150 across and 120 down.
+    expect(box).toEqual(createRect(180, 320, 540, 600));
+
+    const transform = groupTransformForHandle(box, 'se', { x: 150, y: 120 });
+    const scaled = transformTargets(targets, transform);
+
+    expect(transform.scaleX).toBeCloseTo(690 / 540, 10);
+    expect(transform.scaleY).toBeCloseTo(720 / 600, 10);
+    expect(scaled[0]?.frame).toEqual(createRect(180, 320, 460, 288));
+    expect(scaled[1]?.frame).toEqual(createRect(640, 896, 230, 144));
+    // The group box is exactly the rectangle the drag asked for, and nothing left the canvas.
+    expect(applyGroupTransform(box, transform)).toEqual(createRect(180, 320, 690, 720));
+    for (const target of scaled) {
+      expect(target.frame.x + target.frame.width).toBeLessThanOrEqual(portrait.width);
+      expect(target.frame.y + target.frame.height).toBeLessThanOrEqual(portrait.height);
+    }
+  });
+
+  it('scales a group on a landscape canvas, where the two axes are swapped', () => {
+    const { targets, box } = arrangement(landscape);
+    // 960 x 337.5 at (320, 180): the same arrangement, stretched across a wide canvas.
+    expect(box).toEqual(createRect(320, 180, 960, 337.5));
+
+    // Dragging the left edge 240px further left pins the *group's* right edge at 1280, which is the
+    // case a per-layer resize got wrong by pinning each layer's own edge instead.
+    const transform = groupTransformForHandle(box, 'w', { x: -240, y: 0 });
+    const scaled = transformTargets(targets, transform);
+
+    expect(transform.scaleX).toBeCloseTo(1200 / 960, 10);
+    expect(applyGroupTransform(box, transform)).toEqual(createRect(80, 180, 1200, 337.5));
+    expect(scaled[0]?.frame).toEqual(createRect(80, 180, 800, 135));
+    expect(scaled[1]?.frame).toEqual(createRect(880, 450, 400, 67.5));
+    // B's right edge sat on the pinned edge, so it stays there; the gap between the two objects
+    // grew by the same factor as everything else.
+    const first = scaled[0]?.frame;
+    const second = scaled[1]?.frame;
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    expect((second?.x ?? 0) + (second?.width ?? 0)).toBeCloseTo(1280, 10);
+    expect((second?.x ?? 0) - (first?.x ?? 0)).toBeCloseTo(800, 10);
+  });
+
+  it('produces the same relative result for the same relative drag, either way up', () => {
+    const relative = (canvas: { readonly width: number; readonly height: number }) => {
+      const { targets, box } = arrangement(canvas);
+      // A drag of a tenth of the canvas on each axis, in the document's own proportions.
+      const transform = groupTransformForHandle(box, 'se', {
+        x: canvas.width * 0.1,
+        y: canvas.height * 0.1,
+      });
+      return transformTargets(targets, transform).map((target) => ({
+        x: target.frame.x / canvas.width,
+        y: target.frame.y / canvas.height,
+        width: target.frame.width / canvas.width,
+        height: target.frame.height / canvas.height,
+      }));
+    };
+
+    const upright = relative(portrait);
+    const wide = relative(landscape);
+    for (const [index, frame] of upright.entries()) {
+      const other = wide[index];
+      expect(other).toBeDefined();
+      // Frames are rounded to a hundredth of a document pixel, so the two orientations agree to
+      // within that rounding once measured as a fraction of their own canvas.
+      expect(other?.x).toBeCloseTo(frame.x, 4);
+      expect(other?.y).toBeCloseTo(frame.y, 4);
+      expect(other?.width).toBeCloseTo(frame.width, 4);
+      expect(other?.height).toBeCloseTo(frame.height, 4);
+    }
+  });
+
+  it('snaps a group resize to the vertical centre line of a portrait canvas', () => {
+    const { box } = arrangement(portrait);
+    // Drag the right edge to 452: two pixels short of the document's 450px centre line.
+    const pointer = { x: portrait.width / 2 - (box.x + box.width) + 2, y: 0 };
+    const snap = computeSnap({
+      frame: resizeFrame(box, 'e', pointer),
+      targets: targetsFor(portrait),
+      threshold: snapThresholdForZoom(1),
+      edges: snapEdgesForHandle('e'),
+      enabled: true,
+      mode: 'resize',
+      handle: 'e',
+    });
+
+    expect(snap.delta.x).toBeCloseTo(-2, 10);
+    expect(snap.delta.y).toBe(0);
+    // The guide the person sees is the canvas's own centre line, from its real dimensions.
+    expect(snap.guidesX).toContain(portrait.width / 2);
+
+    const applied = applyGroupTransform(
+      box,
+      groupTransformForHandle(box, 'e', {
+        x: pointer.x + snap.delta.x,
+        y: pointer.y + snap.delta.y,
+      }),
+    );
+    expect(applied.x + applied.width).toBeCloseTo(portrait.width / 2, 6);
+    expect(applied.height).toBe(box.height);
+  });
+
+  it('snaps a group resize to the horizontal centre line of a landscape canvas', () => {
+    const { box } = arrangement(landscape);
+    const pointer = { x: 0, y: landscape.height / 2 - (box.y + box.height) + 2 };
+    const snap = computeSnap({
+      frame: resizeFrame(box, 's', pointer),
+      targets: targetsFor(landscape),
+      threshold: snapThresholdForZoom(1),
+      edges: snapEdgesForHandle('s'),
+      enabled: true,
+      mode: 'resize',
+      handle: 's',
+    });
+
+    expect(snap.delta.y).toBeCloseTo(-2, 10);
+    expect(snap.delta.x).toBe(0);
+    expect(snap.guidesY).toContain(landscape.height / 2);
+
+    const applied = applyGroupTransform(
+      box,
+      groupTransformForHandle(box, 's', {
+        x: pointer.x + snap.delta.x,
+        y: pointer.y + snap.delta.y,
+      }),
+    );
+    expect(applied.y + applied.height).toBeCloseTo(landscape.height / 2, 6);
+    expect(applied.width).toBe(box.width);
+  });
+
+  it('does not snap a group resize on either canvas when snapping is switched off', () => {
+    for (const canvas of [portrait, landscape]) {
+      const { box } = arrangement(canvas);
+      const pointer = { x: -2, y: 0 };
+      const snap = computeSnap({
+        frame: resizeFrame(box, 'e', pointer),
+        targets: targetsFor(canvas),
+        threshold: snapThresholdForZoom(1),
+        edges: snapEdgesForHandle('e'),
+        enabled: false,
+        mode: 'resize',
+        handle: 'e',
+      });
+      expect(snap.delta).toEqual({ x: 0, y: 0 });
+      expect(snap.guidesX).toEqual([]);
+    }
+  });
+
+  it('fits a group onto an area of the other orientation without losing a layer', () => {
+    // On the upright canvas, fit the group into a wide area; on the wide canvas, into a tall one that
+    // uses the full height. A fit is a pure scale about the box's own top-left corner, so the
+    // transformed box must equal the target exactly and every layer must land inside it.
+    const cases = [
+      { canvas: portrait, target: createRect(180, 320, 720, 405) },
+      { canvas: landscape, target: createRect(320, 180, 640, 720) },
+    ];
+
+    for (const { canvas, target } of cases) {
+      const { targets, box } = arrangement(canvas);
+      const transform = groupTransformToFit(box, target);
+
+      expect(applyGroupTransform(box, transform)).toEqual(target);
+      for (const each of transformTargets(targets, transform)) {
+        expect(each.frame.x).toBeGreaterThanOrEqual(target.x - 0.001);
+        expect(each.frame.y).toBeGreaterThanOrEqual(target.y - 0.001);
+        expect(each.frame.x + each.frame.width).toBeLessThanOrEqual(
+          target.x + target.width + 0.001,
+        );
+        expect(each.frame.y + each.frame.height).toBeLessThanOrEqual(
+          target.y + target.height + 0.001,
+        );
+        // And the target area itself sits inside the canvas, so nothing spilled off the document.
+        expect(target.x + target.width).toBeLessThanOrEqual(canvas.width);
+        expect(target.y + target.height).toBeLessThanOrEqual(canvas.height);
+      }
+    }
   });
 });
