@@ -119,16 +119,30 @@ export function Artboard({
   const width = Math.max(1, Math.round(doc.canvas.width * zoom));
   const height = Math.max(1, Math.round(doc.canvas.height * zoom));
 
+  /**
+   * The layers the gesture in flight is changing.
+   *
+   * `buildSnapTargets` is documented to receive siblings *excluding* the layers being dragged, and
+   * this is why: a frame's own edges are the positions it is leaving. Including them makes a short
+   * drag snap back onto its starting frame - six screen pixels of pull towards where the layer
+   * already was - and a drag of less than the threshold commits nothing at all.
+   */
+  const draggingIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const entry of gesture?.start.frames ?? []) ids.add(String(entry.id));
+    return ids;
+  }, [gesture]);
+
   const targets = useMemo(
     () =>
       buildSnapTargets({
         canvas: doc.canvas,
         gridMm: doc.guides.gridMm,
         pixelsPerMm: toPixels(1, 'mm', doc.canvas.dpi),
-        siblings: doc.scene.layers,
+        siblings: doc.scene.layers.filter((layer) => !draggingIds.has(String(layer.id))),
         alignmentGuides: [],
       }),
-    [doc.canvas, doc.guides.gridMm, doc.scene.layers],
+    [doc.canvas, doc.guides.gridMm, doc.scene.layers, draggingIds],
   );
 
   const preview = useMemo(
@@ -471,7 +485,11 @@ export function Artboard({
         width={Math.round(width * dpr)}
         height={Math.round(height * dpr)}
         style={{ width: `${String(width)}px`, height: `${String(height)}px` }}
-        className="border-line block rounded-sm border bg-[repeating-conic-gradient(#1b1f27_0%_25%,#151920_0%_50%)] bg-[length:16px_16px]"
+        // An outline rather than a border: a border is inside the element's box, which would squeeze
+        // the painted artwork into a 1px-smaller content box and leave the picture fractionally out
+        // of step with the guides, the handles and the pointer mapping, all of which are positioned
+        // against the artboard's own box.
+        className="outline-line block rounded-sm bg-[repeating-conic-gradient(#1b1f27_0%_25%,#151920_0%_50%)] bg-[length:16px_16px] outline outline-1"
         role="img"
         aria-label={`Artboard preview: ${String(doc.scene.layers.length)} layers, ${String(
           doc.canvas.width,
@@ -762,7 +780,12 @@ export function GuideOverlay({
   );
 }
 
-/** Guide lines a gesture snapped to, drawn as dashed overlays. */
+/**
+ * Guide lines a gesture snapped to, drawn as dashed overlays.
+ *
+ * Each line carries the document coordinate it stands for, so a browser test can compare where the
+ * guide is *drawn* against the target the document asked for instead of trusting the pointer maths.
+ */
 export function SnappingGuides({
   guidesX,
   guidesY,
@@ -782,6 +805,9 @@ export function SnappingGuides({
       {guidesX.map((x) => (
         <div
           key={`x-${String(x)}`}
+          data-testid="snap-guide-x"
+          data-guide-document-x={x}
+          data-guide-screen-x={x * zoom}
           className={cn('bg-accent/70 absolute top-0 w-px')}
           style={{ left: `${String(x * zoom)}px`, height: `${String(height)}px` }}
         />
@@ -789,6 +815,9 @@ export function SnappingGuides({
       {guidesY.map((y) => (
         <div
           key={`y-${String(y)}`}
+          data-testid="snap-guide-y"
+          data-guide-document-y={y}
+          data-guide-screen-y={y * zoom}
           className={cn('bg-accent/70 absolute left-0 h-px')}
           style={{ top: `${String(y * zoom)}px`, width: `${String(width)}px` }}
         />

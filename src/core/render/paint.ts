@@ -35,6 +35,8 @@ export type PainterContext = {
   stroke(): void;
   moveTo(x: number, y: number): void;
   lineTo(x: number, y: number): void;
+  rect(x: number, y: number, width: number, height: number): void;
+  clip(): void;
   roundRect(x: number, y: number, width: number, height: number, radii: number): void;
   ellipse(
     x: number,
@@ -306,6 +308,15 @@ function paintText(context: PainterContext, op: TextOp): void {
   context.save();
   context.globalAlpha = op.opacity;
   context.globalCompositeOperation = 'source-over';
+  if (op.overflows) {
+    // A text layer taller than its box is drawn clipped to the box. The export report tells the user
+    // that the extra lines are clipped, and the artboard paints through this same routine, so the
+    // warning, the preview and the exported file all say the same thing. Text that fits is left
+    // uncut, so a glyph overhanging its measured advance is not shaved off.
+    context.beginPath();
+    context.rect(op.frame.x, op.frame.y, op.frame.width, op.frame.height);
+    context.clip();
+  }
   op.lines.forEach((line, index) => {
     paintTextLine(context, {
       line,

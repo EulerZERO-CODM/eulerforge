@@ -166,6 +166,47 @@ describe('paintPlan', () => {
     expect(drawn).toHaveLength(2);
     expect(drawn[0]?.args).toEqual(['Hello', 20, 52]);
     expect(drawn[1]?.args).toEqual(['world', 20, 76]);
+    // Nothing was clipped: this text fits, so no glyph is shaved off.
+    expect(calls.map((call) => call.op)).not.toContain('clip');
+  });
+
+  it('clips a text layer that is taller than its box, which the export report promises', () => {
+    const { context, calls } = createRecordingContext();
+    paintPlan(
+      context,
+      planOf([
+        {
+          kind: 'text',
+          layerId: 'lyr-text',
+          layerName: 'Body',
+          frame: createRect(20, 40, 200, 48),
+          settings: defaultTextSettings(),
+          lines: [
+            { text: 'Hello', width: 50 },
+            { text: 'world', width: 50 },
+            { text: 'again', width: 50 },
+          ],
+          lineHeightPx: 24,
+          overflows: true,
+          opacity: 1,
+        },
+      ]),
+      { clear: false },
+    );
+
+    // The clip is the layer's own box, and every line is drawn inside it.
+    const clipIndex = calls.findIndex((call) => call.op === 'clip');
+    expect(clipIndex).toBeGreaterThan(-1);
+    const clipRect = calls.find((call) => call.op === 'rect');
+    expect(clipRect?.args).toEqual([20, 40, 200, 48]);
+    expect(calls.findIndex((call) => call.op === 'rect')).toBeLessThan(clipIndex);
+    for (const call of calls.filter((entry) => entry.op === 'fillText')) {
+      expect(calls.indexOf(call)).toBeGreaterThan(clipIndex);
+    }
+    // The clip is undone with the rest of the layer's state rather than leaking into the next layer.
+    const restore = calls.filter((call) => call.op === 'restore');
+    expect(restore).toHaveLength(1);
+    expect(calls.indexOf(restore[0]!)).toBeGreaterThan(clipIndex);
   });
 });
 

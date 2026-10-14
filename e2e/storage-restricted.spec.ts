@@ -1,0 +1,132 @@
+import { expect, test, type Page } from '@playwright/test';
+
+import { createProject, historyLabels, selectLayerFromList } from './fixtures';
+
+/**
+ * Storage the browser refuses.
+ *
+ * Private windows, blocked site data and disabled cookies all make browser storage throw - either on
+ * access or on the first write - and the application has a real fallback for that: an in-memory
+ * store for the tab, with the interface saying so. This spec reproduces the refusal *before* the
+ * application initialises and then checks the promises the product makes in ADR-0006:
+ *
+ *   - the app starts and stays usable,
+ *   - it says the work is in memory only and what that costs,
+ *   - it never claims a durable save it cannot deliver,
+ *   - creating and editing work for the session, and
+ *   - a reload loses the project, and the app says so honestly instead of pretending.
+ *
+ * The test never reads storage itself and the application has no test-only mode: the only thing that
+ * changes is the browser's behaviour. Every assertion reads the interface - the notice, the save
+ * indicator, the layer list, the history rail - because the interface is what has to be honest here.
+ */
+
+/**
+ * Makes browser storage refuse writes and reads, the way a private window does.
+ *
+ * Three layers of the same refusal, because browsers differ in which one throws: the property
+ * itself (disabled cookies throw on access), the `Storage` methods (some private modes expose the
+ * API and throw on the write), and `sessionStorage` for symmetry. Nothing is stubbed in the
+ * application: `createBrowserStorage()` catches this and reports `volatile`/`restricted`.
+ */
+async function denyStorage(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const deny = (): never => {
+      throw new DOMException(
+        'Access to storage is not allowed from this context.',
+        'SecurityError',
+      );
+    };
+    for (const target of [window, Object.getPrototypeOf(window) as object]) {
+      try {
+        Object.defineProperty(target, 'localStorage', { configurable: true, get: deny });
+        Object.defineProperty(target, 'sessionStorage', { configurable: true, get: deny });
+      } catch {
+        // Some browsers define these as non-configurable own properties; the method patch below
+        // still produces the same refusal, which is what the application has to survive.
+      }
+    }
+    for (const method of ['getItem', 'setItem', 'removeItem', 'clear', 'key'] as const) {
+      try {
+        Object.defineProperty(Storage.prototype, method, { configurable: true, value: deny });
+      } catch {
+        // Ignore: the property override above already refuses access.
+      }
+    }
+  });
+}
+
+test.describe('a browser that refuses to store anything', () => {
+  test.beforeEach(async ({ page }) => {
+    await denyStorage(page);
+  });
+
+  test('starts, says it is holding work in memory, and loses it on reload without pretending', async ({
+    page,
+  }) => {
+    const uncaught: string[] = [];
+    page.on('pageerror', (error) => uncaught.push(error.message));
+
+    // 1. It starts. The shell renders and nothing threw on the way in.
+    await page.goto('/');
+    await expect(page.getByRole('navigation', { name: 'Primary' }).first()).toBeVisible();
+
+    // 2. It reports memory-only storage, and explains what that means, in the user's words.
+    const notice = page.getByText('Projects are not being saved to this device').first();
+    await expect(notice).toBeVisible();
+    const explanation = page.getByText(/held in memory for this tab only/i).first();
+    await expect(explanation).toBeVisible();
+    await expect(explanation).toContainText(/lost when it reloads or closes/i);
+    await expect(explanation).toContainText(/export/i);
+
+    // 3. It does not claim a durable save. Neither the persistent claim nor the persistent notice
+    //    is on the page, and the claim it does make says memory only.
+    await expect(page.getByText('Projects are stored in this browser only.')).toHaveCount(0);
+    await expect(page.getByText(/Projects are stored in this browser on this device/)).toHaveCount(
+      0,
+    );
+    await expect(
+      page
+        .getByText('Projects are only in memory and will be lost when this page reloads.')
+        .first(),
+    ).toBeVisible();
+
+    // 4. Creating a project works for this session, through the real creation flow.
+    await createProject(page, { title: 'Memory-only session', width: 320, height: 240 });
+    await expect(page.getByTestId('artboard')).toBeVisible();
+    await expect(notice).toBeVisible();
+
+    // 5. Editing works: a layer is added, it appears in the layer list, and the edit is recorded in
+    //    the history rail. Both are read from the interface, not from storage, which the spec must
+    //    not touch.
+    await page.getByRole('button', { name: 'Rectangle', exact: true }).click();
+    await selectLayerFromList(page, 'Rectangle');
+    expect(await historyLabels(page)).toContain('Add rectangle layer');
+
+    // The save indicator says the change is held in memory rather than saved...
+    await expect(
+      page
+        .getByRole('status')
+        .filter({ hasText: /memory/i })
+        .first(),
+    ).toBeVisible();
+    // ...and no status anywhere claims a save, because no save happened: the write went to memory.
+    await expect(page.getByRole('status').filter({ hasText: /^Saved/ })).toHaveCount(0);
+
+    // 6. A reload loses it, and the workspace says that rather than showing an empty editor or an
+    //    error page: the project is genuinely gone, and the app is honest about why.
+    await page.reload();
+    await expect(page.getByText('Project not found').first()).toBeVisible();
+    await expect(page.getByText(/may have been deleted/i).first()).toBeVisible();
+    await expect(notice).toBeVisible();
+
+    // 7. The library agrees: nothing was written, and it says so before the list.
+    await page.goto('/projects');
+    await expect(page.getByText('This list is not stored on this device').first()).toBeVisible();
+    await expect(page.getByText('Your library is empty').first()).toBeVisible();
+    await expect(page.getByText('Memory-only session')).toHaveCount(0);
+
+    // Nothing along the way threw: a refused write is a reported state, not a crash.
+    expect(uncaught).toEqual([]);
+  });
+});

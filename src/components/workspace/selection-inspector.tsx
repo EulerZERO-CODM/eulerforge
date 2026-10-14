@@ -922,7 +922,10 @@ function ImageFields({
       />
 
       {attribution ? (
-        <div className="border-line-subtle bg-surface-raised/40 space-y-1 rounded-sm border px-3 py-2">
+        <div
+          data-testid="attribution-panel"
+          className="border-line-subtle bg-surface-raised/40 space-y-1 rounded-sm border px-3 py-2"
+        >
           <p className="text-2xs text-fg-subtle font-semibold tracking-wider uppercase">
             Attribution recorded
           </p>

@@ -935,6 +935,34 @@ describe('portrait and landscape documents', () => {
     expect(layerFrame(services, 'lyr-a')).toEqual(createRect(100, 100, 220, 110));
     expect(layerFrame(services, 'lyr-b')).toEqual(createRect(430, 265, 110, 55));
   });
+
+  it('moves a layer by a short drag instead of snapping it back where it started', async () => {
+    // The layer sits where none of its own edges - moved or not - is within the six-pixel snap
+    // threshold of a guide, a grid line or the other layer, so the drag below could only change the
+    // frame by exactly the pointer delta.
+    const { services } = await mount(
+      sceneOf(
+        rectLayer('lyr-a', { name: 'A', x: 22, y: 914, width: 60, height: 40 }),
+        rectLayer('lyr-b', { name: 'B', x: 400, y: 250, width: 100, height: 50 }),
+      ),
+      { snapping: true },
+    );
+
+    clickOnArtboard({ x: 52, y: 934 });
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+    expect(historyLabels()).toEqual([]);
+
+    dragOnArtboard({ x: 52, y: 934 }, { x: 55, y: 936 });
+
+    await waitFor(() => {
+      expect(historyLabels()).toEqual(['Move \u201cA\u201d']);
+    });
+    // Three pixels across and two down: the frame the gesture is leaving is not a snap target, so a
+    // short drag is not pulled back onto it.
+    expect(layerFrame(services, 'lyr-a')).toEqual(createRect(25, 916, 60, 40));
+  });
 });
 
 describe('locked layers on the artboard', () => {

@@ -31,12 +31,31 @@ export type StoredLayer = {
   readonly opacity: number;
 };
 
+/** A licence/provenance record as the document persists it. */
+export type StoredAttribution = {
+  readonly id: string;
+  readonly assetId: string;
+  readonly assetName: string;
+  readonly licenseId: string;
+  readonly licenseName: string;
+  readonly licenseUrl: string | null;
+  readonly attributionRequired: boolean;
+  readonly commercialUse: boolean;
+  readonly author: string;
+  readonly source: string;
+  readonly verified: boolean;
+  readonly notes: string;
+  readonly placedAt: string;
+};
+
 export type StoredDocument = {
   readonly id: string;
   readonly title: string;
   readonly revision: number;
   readonly canvas: StoredFrame & { readonly dpi: number };
   readonly scene: { readonly layers: readonly StoredLayer[] };
+  /** Licence records for the catalogue graphics the document still contains. */
+  readonly attribution: readonly StoredAttribution[];
 };
 
 type StoredEnvelope = { readonly documents: readonly StoredDocument[] };
@@ -208,6 +227,68 @@ export async function clickInDocument(
   options: DragOptions = {},
 ): Promise<void> {
   await dragInDocument(page, point, point, options);
+}
+
+/**
+ * The artboard's rendered box, in CSS pixels relative to the viewport.
+ *
+ * Every pointer coordinate and every expected guide position in these specs comes from this box and
+ * from the document size the artboard reports, never from a hard-coded viewport offset or from an
+ * assumption about the device pixel ratio.
+ */
+export async function artboardBox(page: Page): Promise<{
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}> {
+  const box = await page.getByTestId('artboard').boundingBox();
+  if (!box) throw new Error('the artboard has no box to measure');
+  return box;
+}
+
+export type ZoomPercent = 25 | 50 | 100 | 200;
+
+/**
+ * Selects an explicit zoom percentage and waits until the artboard has re-rendered at that scale.
+ *
+ * `data-zoom` is the effective scale factor the artboard paints with, so this waits for the real
+ * mapping rather than for the control's label.
+ */
+export async function setZoom(page: Page, percent: ZoomPercent): Promise<void> {
+  await page.getByLabel('Zoom level').selectOption(String(percent));
+  await expect(page.getByTestId('zoom-readout')).toHaveText(`${String(percent)}%`);
+  await expect(page.getByTestId('artboard')).toHaveAttribute('data-zoom', String(percent / 100));
+}
+
+/** True when the stage had to scroll: a percentage zoom larger than the pane it sits in. */
+export async function artboardIsClipped(page: Page): Promise<boolean> {
+  return (await page.getByTestId('zoom-clipped-note').count()) > 0;
+}
+
+/** Commits a number field in the inspector, the way a person does: type, then Enter. */
+export async function setNumberField(
+  page: Page,
+  label: string,
+  value: number | string,
+): Promise<void> {
+  const field = page.getByLabel(label, { exact: true });
+  await field.fill(String(value));
+  await field.press('Enter');
+  await expect(field).toHaveValue(String(value));
+}
+
+/** The current value of a number field, read the way the interface displays it. */
+export async function readNumberField(page: Page, label: string): Promise<number> {
+  return Number(await page.getByLabel(label, { exact: true }).inputValue());
+}
+
+/** Leaves a switch in the requested state, clicking only when it is not already there. */
+export async function setSwitch(page: Page, label: string, checked: boolean): Promise<void> {
+  const control = page.getByRole('switch', { name: label, exact: true });
+  const state = await control.getAttribute('data-state');
+  if ((state === 'checked') !== checked) await control.click();
+  await expect(control).toHaveAttribute('data-state', checked ? 'checked' : 'unchecked');
 }
 
 /** A name safe to embed in a regular expression. */

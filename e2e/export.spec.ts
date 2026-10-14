@@ -1,10 +1,11 @@
 import { readFile } from 'node:fs/promises';
 
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 
 import {
   addLayer,
+  artboardScale,
   centreOf,
   clickInDocument,
   createProject,
@@ -63,6 +64,17 @@ function jpegSize(bytes: Buffer): { width: number; height: number } {
     offset += 2 + length;
   }
   throw new Error('the JPEG has no start-of-frame marker');
+}
+
+/** Clicks the product's own export button, captures the real download and reads its bytes. */
+async function exportPng(page: Page): Promise<Buffer> {
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: 'Export PNG' }).click(),
+  ]);
+  const path = await download.path();
+  if (!path) throw new Error('the PNG download produced no file');
+  return readFile(path);
 }
 
 test.describe('raster export', () => {
@@ -220,6 +232,49 @@ test.describe('raster export', () => {
     // message would be a lie, so there is no file and no "last export" record either.
     await expect(panel.getByRole('button', { name: 'Export blocked' })).toBeDisabled();
     await expect(page.getByTestId('last-export')).toHaveCount(0);
+  });
+
+  test('leaves the editing guides out of the file it writes', async ({ page }) => {
+    await createProject(page, { width: 200, height: 150 });
+    await addLayer(page, 'Rectangle');
+
+    // Every editing guide on at once: safe margin, bleed, grid and centre lines. They are helper
+    // marks, not artwork, so none of them may reach an exported image.
+    await page.getByRole('button', { name: /Apply print-ready defaults/ }).click();
+    await expect(page.locator('[data-guide="bleed"]')).toBeVisible();
+    await expect(page.locator('[data-guide="safe"]')).toBeVisible();
+    await expect(page.locator('[data-guide="centre-x"]')).toBeVisible();
+    await expect(page.locator('[data-guide="grid-x"]').first()).toBeVisible();
+
+    // Where the safe-margin line is drawn, in document pixels, measured from the artboard itself.
+    await page.getByLabel('Format', { exact: true }).selectOption({ label: 'PNG (.png)' });
+    const safeBox = await page.locator('[data-guide="safe"]').boundingBox();
+    const artboard = await page.getByTestId('artboard').boundingBox();
+    if (!safeBox || !artboard) throw new Error('the guides have no box to measure');
+    const { scale } = await artboardScale(page);
+    const marginDocumentX = Math.round((safeBox.x - artboard.x) / scale);
+
+    const withGuides = await exportPng(page);
+
+    // Hide the guides through the product's own control, and export again.
+    await page.getByRole('button', { name: 'Hide guides' }).click();
+    await expect(page.locator('[data-guide="safe"]')).toHaveCount(0);
+    const withoutGuides = await exportPng(page);
+
+    // Identical bytes: the guides are not in the artwork at all, so turning them off cannot change
+    // what is written. A guide leaking into the render would show up here immediately.
+    expect(withGuides.equals(withoutGuides)).toBe(true);
+
+    // ...and no guide pixels are baked in near where the safe-margin line was drawn. The row is
+    // canvas all the way across that neighbourhood: every sample is the background colour, and none
+    // of them is the guide's blue.
+    const samples = await Promise.all(
+      [-2, -1, 0, 1, 2].map((offset) => pixelAt(withGuides, marginDocumentX + offset, 4)),
+    );
+    for (const sample of samples) {
+      expect(sample).toEqual(samples[0]);
+      expect(sample.slice(0, 3)).not.toEqual([79, 140, 255]);
+    }
   });
 
   test('records the whole export history, one labelled step per action', async ({ page }) => {

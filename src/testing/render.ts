@@ -137,6 +137,8 @@ export function createRecordingContext(): {
     stroke: record('stroke'),
     moveTo: record('moveTo') as PainterContext['moveTo'],
     lineTo: record('lineTo') as PainterContext['lineTo'],
+    rect: record('rect'),
+    clip: record('clip'),
     roundRect: record('roundRect') as PainterContext['roundRect'],
     ellipse: record('ellipse') as PainterContext['ellipse'],
     drawImage: record('drawImage') as PainterContext['drawImage'],
