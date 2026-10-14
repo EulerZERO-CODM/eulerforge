@@ -61,16 +61,17 @@ a group (with undo), cancels gestures with Escape, confirms locked layers are ne
 checks bulk duplicate and reorder, exercises the keyboard-only path (focusing the layer list,
 editing the inspector fields, nudging with the arrow keys, and resizing from a focused handle), and
 exports a PNG and a JPEG whose downloaded bytes are inspected (signature plus declared pixel size,
-at 1x and 2x).
+at 1x and 2x). One export spec decodes the PNG it downloaded and reads pixels out of it: a drawn
+layer's fill is present, and after the layer is hidden every pixel inside its frame is the canvas
+background again.
 
 What it does *not* cover, and is therefore still a manual check:
 
 1. Snapping against rendered guide pixels. The suite asserts snapping in document space; that a
    guide line is drawn on the right screen pixel is not asserted anywhere.
-2. That a hidden layer is absent from exported pixels.
-3. Zoom behaviour at 25% and 200% with real layout, and text rewrapping at each level.
-4. A missing asset file at export time (the refusal is unit-tested; the browser path is not).
-5. Storage refusal in a private window, and reload-and-reopen of a placed graphic with its
+2. Zoom behaviour at 25% and 200% with real layout, and text rewrapping at each level.
+3. A missing asset file at export time (the refusal is unit-tested; the browser path is not).
+4. Storage refusal in a private window, and reload-and-reopen of a placed graphic with its
    attribution row.
 
 Run these by hand before claiming them; nothing in the roadmap depends on them, and the gaps are

@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 
 import { expect, test } from '@playwright/test';
+import { createCanvas, loadImage } from '@napi-rs/canvas';
 
 import { addLayer, centreOf, clickInDocument, createProject, layerNamed, stored } from './fixtures';
 
@@ -18,6 +19,21 @@ function pngSize(bytes: Buffer): { width: number; height: number } {
   expect(bytes.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
   expect(bytes.subarray(12, 16).toString('ascii')).toBe('IHDR');
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+}
+
+/**
+ * One pixel of a decoded PNG, as `[r, g, b, a]`.
+ *
+ * The spec decodes the file it downloaded with the same Canvas 2D implementation the raster tests use,
+ * so "the exported pixels" means pixels and not a metadata claim about them.
+ */
+async function pixelAt(bytes: Buffer, x: number, y: number): Promise<readonly number[]> {
+  const image = await loadImage(bytes);
+  const canvas = createCanvas(image.width, image.height);
+  const context = canvas.getContext('2d');
+  context.drawImage(image, 0, 0);
+  const data = context.getImageData(x, y, 1, 1).data;
+  return [data[0] ?? -1, data[1] ?? -1, data[2] ?? -1, data[3] ?? -1];
 }
 
 /** Width and height out of a JPEG's start-of-frame marker (baseline or progressive). */
@@ -102,6 +118,61 @@ test.describe('raster export', () => {
     expect(pngSize(await readFile(path))).toEqual({ width: 400, height: 300 });
     await expect(page.getByTestId('last-export')).toContainText('400 × 300 px');
     await expect(page.getByTestId('last-export')).toContainText('2x');
+  });
+
+  test('leaves a hidden layer out of the exported pixels', async ({ page }) => {
+    await createProject(page, { width: 200, height: 150 });
+    await addLayer(page, 'Rectangle');
+
+    // The default shape is a solid #e2833a square centred on the canvas, so the middle of its frame
+    // is the pixel to watch, and the corner of the canvas is the colour of "nothing here".
+    const document = await stored(page);
+    const rectangle = layerNamed(document, 'Rectangle');
+    const centre = centreOf(rectangle.frame);
+    const corner = { x: 2, y: 2 };
+
+    await page.getByLabel('Format', { exact: true }).selectOption({ label: 'PNG (.png)' });
+    const exportPng = async (): Promise<Buffer> => {
+      const [download] = await Promise.all([
+        page.waitForEvent('download'),
+        page.getByRole('button', { name: 'Export PNG' }).click(),
+      ]);
+      const path = await download.path();
+      if (!path) throw new Error('the PNG download produced no file');
+      return readFile(path);
+    };
+
+    const drawn = await exportPng();
+    const filled = await pixelAt(drawn, centre.x, centre.y);
+    const empty = await pixelAt(drawn, corner.x, corner.y);
+    // A real drawn pixel, and it is the layer's own fill, not the background.
+    expect(filled.slice(0, 3)).toEqual([226, 131, 58]);
+    expect(filled).not.toEqual(empty);
+
+    // Hide the layer through its own control, then export again from the same document.
+    await page.getByRole('button', { name: 'Hide “Rectangle”' }).click();
+    await expect.poll(async () => layerNamed(await stored(page), 'Rectangle').visible).toBe(false);
+
+    const hidden = await exportPng();
+    // Every pixel inside the hidden layer's frame - sampled on a grid, inside its bounds - is the
+    // background: the layer left no trace in the file, not a ghost or a placeholder.
+    for (
+      let x = rectangle.frame.x + 4;
+      x < rectangle.frame.x + rectangle.frame.width - 4;
+      x += 12
+    ) {
+      for (
+        let y = rectangle.frame.y + 4;
+        y < rectangle.frame.y + rectangle.frame.height - 4;
+        y += 12
+      ) {
+        expect(await pixelAt(hidden, x, y), `pixel ${String(x)},${String(y)}`).toEqual(
+          await pixelAt(hidden, corner.x, corner.y),
+        );
+      }
+    }
+    // And the file really changed, rather than the second capture reusing the first.
+    expect(hidden.equals(drawn)).toBe(false);
   });
 
   test('records the whole export history, one labelled step per action', async ({ page }) => {
