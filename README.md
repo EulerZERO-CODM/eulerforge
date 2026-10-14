@@ -23,8 +23,9 @@ working **Phase 2: Design Studio editing** surface. In plain terms:
 
 Nothing in this repository claims cloud sync, accounts, collaboration, vector export, video or AI
 features. The places those will live are marked as interfaces, planned items, or unavailable — never
-as working buttons. Where a capability is browser-only (a download, a real canvas raster) it is
-described as covered by a manual checklist rather than by a passing test.
+as working buttons. Capabilities that only exist in a browser (a download, a real canvas raster) are
+verified by a Chromium suite that runs in CI, and whatever even that cannot reach is listed as a
+manual check in `docs/ROADMAP.md` rather than assumed.
 
 ## Quick start
 
@@ -160,8 +161,8 @@ is stored in one browser profile on one device, so exporting a project file is t
 What is not implemented, and is labelled as such in the interface: multiple artboards per document,
 per-run text styling, custom fonts, reusable styles, templates and brand kits, vector (SVG/PDF)
 output, WebP and video, and every other studio. Pointer capture, the browser's own canvas output and
-file downloads have no automated browser runner in this repository — `docs/ROADMAP.md` carries the
-manual checklist for those, and roadmap items that depend on them stay `partial` rather than `done`.
+file downloads are covered by `e2e/**`, a Playwright suite that drives the production build in a real
+Chromium in CI; `docs/ROADMAP.md` lists what it still does not reach.
 
 ## Licence
 

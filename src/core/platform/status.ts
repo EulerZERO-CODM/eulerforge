@@ -110,6 +110,7 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
       'src/core/render/plan.test.ts',
       'src/core/render/paint.test.ts',
       'src/core/export/raster.test.ts (real pixels through @napi-rs/canvas)',
+      "e2e/export.spec.ts (the browser's own rasteriser writes the file)",
     ],
     gap: 'SVG, PDF, WebP and video output are still planned; the format registry keeps them labelled as such.',
   },
@@ -251,8 +252,9 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
       'src/components/workspace/document-stage.test.tsx',
       'src/core/editor/commands.test.ts',
       'src/core/editor/gesture.test.ts',
+      'e2e/workspace.spec.ts',
     ],
-    gap: 'Pointer capture, canvas rasterisation and file download have no automated browser runner in this repository: they are covered by the manual checklist in docs/ROADMAP.md, not by a passing test.',
+    gap: 'The browser suite covers the interaction paths end to end but not every regression: snapping is asserted in document space rather than against rendered guide pixels, and no test asserts that a hidden layer is absent from exported pixels.',
   },
   {
     id: 'studios.photo-video-motion-illustration',

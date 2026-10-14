@@ -93,6 +93,7 @@ describe('capability ledger', () => {
     // The editing tools exist and are described as existing...
     expect(design?.description).toMatch(/artboard/i);
     // ...and the gap names what a jsdom suite cannot cover rather than staying silent.
-    expect(design?.gap).toMatch(/manual checklist/i);
+    // A gap has to be specific about what is *not* covered, so it names the uncovered behaviour.
+    expect(design?.gap).toMatch(/snapping is asserted in document space/i);
   });
 });

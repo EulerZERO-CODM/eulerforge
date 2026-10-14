@@ -45,31 +45,34 @@ laptop; undo/redo covers every editing action with meaningful labels.
 | Layer model and scene tree          | `done`     | Ordered text/rectangle/ellipse/graphic layers, stable ids, schema validation, v1 → v2 migration, commands with undo |
 | Text tool with typography controls  | `done`     | Font stack, size, weight, line height, tracking, alignment, colour; wrapping inside the layer's box              |
 | Selection, move, resize and snapping| `done`     | Selection from the artboard and the tree, visible handles, snapping to guides/grid/siblings, one commit per gesture |
-| Raster export pipeline              | `partial`  | PNG and JPEG at the document's pixel size times a scale, transparency preserved, JPEG flattened onto a stated colour. Gap: pixel-for-pixel comparison with a real browser canvas has no automated runner here |
+| Raster export pipeline              | `done`     | PNG and JPEG at the document's pixel size times a scale, transparency preserved, JPEG flattened onto a stated colour; a real browser writes the files and the downloaded bytes are checked |
 | Asset placement                     | `done`     | Ten repository-authored graphics placeable as image layers with licence, author and provenance recorded in the document; metadata-only records stay labelled reference-only |
 
 Not part of this phase, and not claimed anywhere: multiple artboards per document, per-run text
 styling, custom font uploads, reusable styles, templates and brand kits, vector (SVG/PDF) export.
 
-### Manual browser checklist for Phase 2
+### What the browser suite covers, and what it does not
 
-The repository has no automated browser runner. These steps were written to be run by hand, and they
-are listed rather than assumed; anything they cover stays out of the "tested" column until someone
-does:
+`e2e/*.spec.ts` drives the production build in a real Chromium on every push, as a separate CI job
+(`Browser (Chromium)`), so pointer capture, the browser's own rasteriser and file downloads are
+verified by a passing test rather than described as a manual step. The suite opens a project, adds
+text and shape layers, selects and modifier-selects, moves a selection, resizes a single object and
+a group (with undo), cancels gestures with Escape, confirms locked layers are never transformed,
+checks bulk duplicate and reorder, exercises the keyboard-only path, and exports a PNG and a JPEG
+whose downloaded bytes are inspected (signature plus declared pixel size, at 1x and 2x).
 
-1. Open a project, add a rectangle, an ellipse and a text layer; drag each one and confirm the
-   artboard updates while dragging and that the history panel gains exactly one entry per drag.
-2. Resize a layer from each of the eight handles and confirm the opposite edge stays put (or moves
-   symmetrically with Alt held), and that snapping can be toggled off from the toolbar.
-3. Press Escape mid-drag and confirm the document is unchanged and no history entry appears.
-4. Edit the text content and typography in the inspector; confirm the text rewraps inside its box
-   and stays inside the frame at 25%, 100% and 200% zoom.
-5. Place a graphic from the catalogue, confirm the attribution row appears in the document
-   inspector, save, reload the page and confirm the graphic and its attribution come back.
-6. Export PNG with transparency at 2x and JPEG at 1x; open both files and confirm the pixel
-   dimensions are canvas size × scale, the stacking matches the artboard and the JPEG is flattened.
-7. Reload with the image file removed from `public/forge-assets/` and confirm the export refuses
-   with a named cause instead of producing a blank file.
+What it does *not* cover, and is therefore still a manual check:
+
+1. Snapping against rendered guide pixels. The suite asserts snapping in document space; that a
+   guide line is drawn on the right screen pixel is not asserted anywhere.
+2. That a hidden layer is absent from exported pixels.
+3. Zoom behaviour at 25% and 200% with real layout, and text rewrapping at each level.
+4. A missing asset file at export time (the refusal is unit-tested; the browser path is not).
+5. Storage refusal in a private window, and reload-and-reopen of a placed graphic with its
+   attribution row.
+
+Run these by hand before claiming them; nothing in the roadmap depends on them, and the gaps are
+recorded against the items they belong to.
 
 ## Planned after Phase 2
 

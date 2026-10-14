@@ -204,7 +204,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'src/core/documents/layer-operations.test.ts (add, update, duplicate, delete, reorder, stable z-order)',
           'src/core/documents/migrations.test.ts (v0 to v1 to v2, v1 to v2 gains an empty scene)',
           'src/core/documents/layer-persistence.test.ts (layers survive JSON, .forge.json and reload)',
-          'src/components/workspace/workspace-editor.test.tsx (selection is not persisted)',
+          'src/components/workspace/workspace-editor.test.tsx (selection is not persisted, list keyboard model)',
         ],
         capabilityIds: ['studios.design'],
       },
@@ -239,11 +239,13 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Every transform is one undoable step',
         ],
         evidence: [
-          'src/core/editor/gesture.test.ts (move, resize, snapping on and off, cancellation)',
-          'src/core/documents/scene-geometry.test.ts (hit-testing, resize anchors, snap targets)',
-          'src/components/workspace/workspace-editor.test.tsx (one history entry per drag)',
+          'src/core/editor/gesture.test.ts (move, group resize, locked layers, snapping on and off, cancellation)',
+          'src/core/documents/scene-geometry.test.ts (hit-testing, resize anchors, snap targets, group transforms)',
+          'src/components/workspace/workspace-editor.test.tsx (one history entry per gesture, group resize and undo, locked layers, keyboard paths)',
           'src/components/workspace/document-stage.test.tsx (keyboard equivalents for every pointer action)',
+          'e2e/workspace.spec.ts (real pointer capture: select and modifier-select, group move, single and group resize with undo, Escape cancellation, locked layers, bulk duplicate and reorder, keyboard-only editing)',
         ],
+        gap: 'Snapping is verified in document space, not against rendered guide pixels: no browser test yet asserts that a guide line is drawn on the right screen pixel.',
         capabilityIds: ['studios.design'],
       },
       {
@@ -251,7 +253,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
         title: 'Raster export pipeline',
         description:
           'PNG and JPEG export through the same render plan and painter as the live artboard, at the document size times a chosen scale, with JPEG quality and an explicit background for alpha.',
-        status: 'partial',
+        status: 'done',
         dependsOn: ['p2.layers'],
         completionCriteria: [
           'Exported pixels match the on-screen composition within tolerance',
@@ -261,8 +263,8 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'src/core/export/raster.test.ts (dimensions per scale, stacking order, transparency, JPEG background, failures)',
           'src/core/render/plan.test.ts (blocking versus advisory render issues)',
           'src/components/workspace/document-aside.test.tsx (the panel refuses formats it cannot write)',
+          'e2e/export.spec.ts (a real browser exports a real PNG and JPEG and the downloaded bytes are checked: PNG signature and IHDR size, JPEG signature and frame size, at 1x and 2x)',
         ],
-        gap: 'Pixel-for-pixel comparison against a real browser canvas cannot run here: the suite rasterises with @napi-rs/canvas and the browser path is a manual checklist item, not a passing test.',
         capabilityIds: ['core.rendering'],
       },
       {

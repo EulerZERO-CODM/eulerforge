@@ -213,7 +213,11 @@ it, which is why the history panel and the document can never diverge.
   `@napi-rs/canvas` (a dev dependency) and assert on actual pixel values, so the export pipeline is
   tested against a canvas implementation rather than a mock.
 
-What the suite cannot reach is documented instead of claimed: pointer capture, the browser's own
-canvas output and the download of a generated file have no automated browser runner in this
-repository. `docs/ROADMAP.md` carries the manual checklist for those, and roadmap items that depend
-on them stay `partial` rather than `done`.
+What the unit suite cannot reach is covered by a browser suite instead of by assertion: `e2e/**`
+drives the production build in a real Chromium (`@playwright/test`, a dev dependency, its own CI
+job), because pointer capture, the browser's own canvas output and a real file download cannot be
+verified in jsdom. It reads state from the same local storage the application writes, so it asserts
+what the product actually persisted rather than what a test double was told. The application does not
+import anything from `e2e/**`: the only hooks it exposes are inert `data-*` attributes the component
+tests use too. Whatever even that cannot reach — rendered guide pixels, zoom-level text rewrapping —
+is listed as a manual check in `docs/ROADMAP.md` rather than quietly assumed.

@@ -487,3 +487,38 @@ undo history stays meaningful: one drag, one entry, with a label that names what
 duplication — each pointer affordance needs a keyboard equivalent — and the test suite covers both
 paths (`document-stage.test.tsx` for the keyboard surface, `gesture.test.ts` for the pointer maths)
 so they cannot drift apart. Anything that can only be done by dragging is treated as a bug.
+
+## ADR-0018 — Browser behaviour is verified in a browser, in a separate CI job
+
+**Status:** accepted (Phase 2 review fixes).
+
+**Context.** The Phase 2 review found that the claims which depend on real browser behaviour — native
+pointer capture, the browser's own canvas rasteriser, and a file download actually starting — were
+covered only by reasoning and by a manual checklist. jsdom cannot supply any of the three: it has no
+canvas 2D context, no pointer capture, and no download mechanism, so unit tests over those paths can
+only ever assert that the code *called* something. That is not evidence for the claim, and saying
+"verified" on that basis would be exactly the kind of overclaiming these ADRs exist to prevent.
+
+**Decision.**
+
+- **A real browser verifies browser behaviour.** `e2e/**` runs `@playwright/test` against the
+  production build (`next start`), as its own CI job (`Browser (Chromium)`) that reports its own
+  result. It runs on Node 22 alongside — not instead of — the existing `Verify (22.x)` and
+  `Verify (24.x)` jobs, and it runs with retries disabled: a browser suite that only passes on the
+  second attempt is not evidence.
+- **The harness reads the real product state.** Assertions are made against the document the
+  application persisted to `localStorage`, and against bytes the browser actually downloaded. No
+  application code is stubbed, mocked or replaced.
+- **The application does not depend on the harness.** Nothing under `src/**` imports from `e2e/**`.
+  The only hooks the tests use are inert `data-*` attributes that the component tests already rely
+  on, and they carry geometry the interface genuinely has (canvas size, zoom, layer ids).
+- **Residual gaps are written down, not glossed over.** Whatever the browser suite does not reach —
+  rendered guide pixels, hidden layers in exported pixels, zoom-level text rewrapping — is listed as
+  a manual check in `docs/ROADMAP.md`, and the roadmap items it belongs to carry a `gap` or stay
+  `partial` in the ledger.
+
+**Consequences.** The export, transform and selection claims now have executable evidence from the
+environment they are about. The cost is a build plus a Chromium download on every push, and a suite
+that has to be kept honest: it fails when the interface changes, which is the point. The risk to
+watch is a test that only asserts what a mock would have asserted anyway — so the browser specs
+assert persisted state and real file bytes, never the shape of a call.
