@@ -95,7 +95,7 @@ test.describe('artboard interaction', () => {
 
     // Selecting is transient: nothing reached the document and nothing reached history.
     expect(await stored(page)).toEqual(before);
-    expect(await historyLabels(page)).toEqual([]);
+    expect(await historyLabels(page)).toEqual([...FIXTURE_LABELS]);
   });
 
   test('clears the selection with a plain click on empty space, but not a modified one', async ({
@@ -216,7 +216,7 @@ test.describe('artboard interaction', () => {
     expect(await historyLabels(page)).toEqual(['Resize 2 layers', ...FIXTURE_LABELS]);
 
     // One undo restores both layers: the group is a single history entry, not one per layer.
-    await page.getByRole('button', { name: 'Undo' }).click();
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
     const undone = await storedWhen(
       page,
       (document) => layerNamed(document, 'Rectangle').frame.width === rectangle.width,
@@ -334,7 +334,7 @@ test.describe('artboard interaction', () => {
     await selectLayerFromList(page, 'Panel');
     await addLayerToSelection(page, 'Headline');
 
-    await page.getByRole('button', { name: 'Duplicate selection' }).click();
+    await page.getByRole('button', { name: 'Duplicate selection', exact: true }).click();
     const duplicated = await storedWhen(
       page,
       (document) => document.scene.layers.length === 4,
@@ -348,7 +348,7 @@ test.describe('artboard interaction', () => {
     ]);
 
     // Reordering moves the whole selected block and keeps the pair's relative order.
-    await page.getByRole('button', { name: 'To front' }).click();
+    await page.getByRole('button', { name: 'To front', exact: true }).click();
     const layerOrder = (document: {
       readonly scene: { readonly layers: readonly { readonly name: string }[] };
     }) => document.scene.layers.map((layer) => layer.name).join(' | ');
