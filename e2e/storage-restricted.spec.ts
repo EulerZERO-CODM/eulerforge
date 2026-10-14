@@ -54,6 +54,19 @@ async function denyStorage(page: Page): Promise<void> {
       }
     }
   });
+  // TEMPORARY DIAGNOSTIC: the first error the page reports arrives while React is still hydrating,
+  // so the DOM at that moment is the tree React compared against the served markup.
+  await page.addInitScript(() => {
+    (window as unknown as { __forgeSnapshot?: string | null }).__forgeSnapshot = null;
+    window.addEventListener(
+      'error',
+      () => {
+        const store = window as unknown as { __forgeSnapshot?: string | null };
+        if (store.__forgeSnapshot === null) store.__forgeSnapshot = document.body.outerHTML;
+      },
+      true,
+    );
+  });
 }
 
 test.describe('a browser that refuses to store anything', () => {
@@ -67,8 +80,10 @@ test.describe('a browser that refuses to store anything', () => {
     const uncaught: string[] = [];
     page.on('pageerror', (error) => uncaught.push(`${error.message}\n${error.stack ?? ''}`));
 
-    // TEMPORARY DIAGNOSTIC: the markup the server served for the current document, so a hydration
-    // failure can name the text that differs instead of only reporting React's error code.
+    // TEMPORARY DIAGNOSTIC: React only reports an error code in a production build, so the served
+    // markup and the DOM are flattened side by side and the first differences are named. The
+    // snapshot is taken from the error listener, before React regenerates the tree, so a difference
+    // is the mismatch itself rather than a later update.
     let served = '';
     page.on('response', (response) => {
       if (response.request().resourceType() !== 'document') return;
@@ -80,39 +95,65 @@ test.describe('a browser that refuses to store anything', () => {
         .catch(() => undefined);
     });
 
-    /** Sentences present in only one of the served markup and the DOM the client rendered. */
-    const servedVersusHydrated = (
-      html: string,
-    ): Promise<{ onlyServed: string[]; onlyLive: string[] }> =>
-      page.evaluate((markup) => {
-        const sentences = (text: string): string[] =>
-          text
-            .split(/(?<=[.!?\u00b7])\s+/)
-            .map((sentence) => sentence.trim())
-            .filter((sentence) => sentence.length > 0);
-        const parsed = new DOMParser().parseFromString(markup, 'text/html');
-        const server = sentences(String(parsed.body.textContent));
-        const live = sentences(String(document.body.textContent));
-        const serverSet = new Set(server);
-        const liveSet = new Set(live);
-        return {
-          onlyServed: [...serverSet].filter((sentence) => !liveSet.has(sentence)).slice(0, 10),
-          onlyLive: [...liveSet].filter((sentence) => !serverSet.has(sentence)).slice(0, 10),
-        };
-      }, html);
+    type HydrationWindow = Window & { readonly __forgeSnapshot?: string | null };
 
-    /**
-     * Every full page load has to hydrate, so each step is checked on its own: the assertion names the
-     * step, which is what makes a failure here diagnosable. A refused write or a lost project is a
-     * reported state, never an exception.
-     */
+    const describeDifference = (markup: string): Promise<string> =>
+      page.evaluate((html) => {
+        const skip = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT', 'LINK', 'META', 'TITLE']);
+        const flatten = (root: Element): string[] => {
+          const lines: string[] = [];
+          const walk = (node: Element, path: string): void => {
+            const own = [...node.childNodes]
+              .filter((child) => child.nodeType === Node.TEXT_NODE)
+              .map((child) => (child.textContent ?? '').trim())
+              .join('')
+              .slice(0, 70);
+            const classes =
+              typeof node.className === 'string' && node.className !== ''
+                ? `.${node.className.split(/\s+/).slice(0, 2).join('.')}`
+                : '';
+            lines.push(`${path}<${node.tagName.toLowerCase()}${classes}>=${JSON.stringify(own)}`);
+            [...node.children]
+              .filter((child) => !skip.has(child.tagName))
+              .forEach((child, index) => {
+                walk(child, `${path}.${String(index)}`);
+              });
+          };
+          walk(root, '');
+          return lines;
+        };
+
+        const served = flatten(new DOMParser().parseFromString(html, 'text/html').body);
+        const snapshot = (window as unknown as HydrationWindow).__forgeSnapshot ?? '';
+        const sources: readonly (readonly [string, string])[] = [
+          ['at-error', snapshot],
+          ['live', document.body.outerHTML],
+        ];
+        const report: string[] = [];
+        for (const [label, source] of sources) {
+          if (source === '') continue;
+          const live = flatten(new DOMParser().parseFromString(source, 'text/html').body);
+          const found: string[] = [];
+          for (let index = 0; index < Math.max(served.length, live.length); index += 1) {
+            const server = served[index];
+            const client = live[index];
+            if (server !== client) {
+              found.push(
+                `#${String(index)} server ${server ?? '(absent)'} | client ${client ?? '(absent)'}`,
+              );
+              if (found.length >= 3) break;
+            }
+          }
+          report.push(`${label} differences=${String(found.length)} ${found.join(' ;; ')}`);
+          if (found.length > 0) break;
+        }
+        return report.join(' // ').slice(0, 1600);
+      }, markup);
+
     const expectNoThrow = async (step: string): Promise<void> => {
       if (uncaught.length === 0) return;
-      const diff = served === '' ? null : await servedVersusHydrated(served);
-      expect(
-        uncaught.splice(0),
-        `${step} should not have thrown${diff ? `; served only: ${JSON.stringify(diff.onlyServed)}; client only: ${JSON.stringify(diff.onlyLive)}` : ''}`,
-      ).toEqual([]);
+      const diff = served === '' ? 'no served markup captured' : await describeDifference(served);
+      expect(uncaught.splice(0), `${step} should not have thrown; ${diff}`).toEqual([]);
     };
 
     // 1. It starts. The shell renders and nothing threw on the way in.
