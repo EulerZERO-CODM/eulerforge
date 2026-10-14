@@ -1069,6 +1069,79 @@ describe('keyboard-only editing', () => {
     expect(historyLabels()).toEqual(['Set “Panel” width to 260px']);
   });
 
+  it('reaches every enabled layer operation by Tab, and skips the disabled ones', async () => {
+    const { services } = await mount(
+      sceneOf(
+        rectLayer('lyr-a', { name: 'Bottom' }),
+        rectLayer('lyr-b', { name: 'Middle' }),
+        rectLayer('lyr-c', { name: 'Top' }),
+      ),
+      { snapping: false },
+    );
+    const user = userEvent.setup();
+
+    // The middle layer can move in either direction, so every operation is live.
+    await user.click(selectRow('Middle'));
+    screen.getByTestId('layer-name-lyr-b').focus();
+
+    const reachable: string[] = [];
+    for (let step = 0; step < 7; step += 1) {
+      await user.tab();
+      const focused = document.activeElement;
+      if (focused instanceof HTMLElement) {
+        reachable.push(focused.getAttribute('aria-label') ?? focused.textContent?.trim() ?? '?');
+      }
+    }
+    expect(reachable).toEqual([
+      'Rename \u201cMiddle\u201d',
+      'Bring \u201cMiddle\u201d forward',
+      'Send \u201cMiddle\u201d backward',
+      'Bring \u201cMiddle\u201d to front',
+      'Send \u201cMiddle\u201d to back',
+      'Duplicate \u201cMiddle\u201d',
+      'Delete \u201cMiddle\u201d',
+    ]);
+
+    // Tab backwards to "Send to back" and press Enter: the focused control performs it, exactly as
+    // a click would.
+    for (let step = 0; step < 2; step += 1) await user.tab({ shift: true });
+    expect(document.activeElement).toHaveAccessibleName('Send \u201cMiddle\u201d to back');
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => {
+      expect(persisted(services).scene.layers.map((layer) => layer.name)).toEqual([
+        'Middle',
+        'Bottom',
+        'Top',
+      ]);
+    });
+    expect(historyLabels()).toEqual(['Send to back: \u201cMiddle\u201d']);
+  });
+
+  it('leaves a control that cannot act unfocusable rather than silently inert', async () => {
+    await mount(sceneOf(rectLayer('lyr-a', { name: 'Only' })), { snapping: false });
+    const user = userEvent.setup();
+    await user.click(selectRow('Only'));
+
+    // A single layer can neither move up nor down, so those buttons are disabled and Tab skips
+    // them: a keyboard user cannot land on a control that would do nothing.
+    for (const label of [
+      'Bring \u201cOnly\u201d forward',
+      'Send \u201cOnly\u201d backward',
+      'Bring \u201cOnly\u201d to front',
+      'Send \u201cOnly\u201d to back',
+    ]) {
+      const button = screen.getByRole('button', { name: label });
+      expect(button).toBeDisabled();
+      button.focus();
+      expect(document.activeElement).not.toBe(button);
+    }
+
+    // Duplicate and delete still work, so they stay reachable.
+    expect(screen.getByRole('button', { name: 'Duplicate \u201cOnly\u201d' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Delete \u201cOnly\u201d' })).toBeEnabled();
+  });
+
   it('nudges the selection with the arrow keys on the artboard surface', async () => {
     const { services } = await mount(
       sceneOf(rectLayer('lyr-a', { name: 'Panel', x: 100, y: 100, width: 200, height: 100 })),

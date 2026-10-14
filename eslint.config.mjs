@@ -94,6 +94,27 @@ const config = [
   },
 
   {
+    // The browser suite drives the production build from outside it (ADR-0018). Nothing the
+    // application ships may import the harness: a spec must be able to fail without the product
+    // knowing it exists, and the harness must never become a runtime dependency.
+    files: ['src/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/e2e/**', '@playwright/**', 'playwright', 'playwright-core'],
+              message:
+                'Application code must not import the browser-test harness. The Playwright specs read persisted state instead (ADR-0018).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  {
     // jsdom environment shims and test helpers legitimately check for APIs the DOM types claim exist.
     files: ['vitest.setup.ts', '**/*.test.{ts,tsx}'],
     rules: {
