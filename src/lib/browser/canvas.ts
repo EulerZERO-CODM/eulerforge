@@ -1,12 +1,13 @@
 /**
- * Browser canvas boundary.
+ * Browser canvas adapter.
  *
- * `src/core/**` is framework-free, but it is not DOM-free: the export pipeline needs a real
- * `HTMLCanvasElement` to rasterise into. This module is the single place where that dependency is
- * named, so the pipeline itself stays portable and testable with any canvas implementation.
+ * The one place in the application that names a real `HTMLCanvasElement`. `src/core/**` stays
+ * free of DOM globals (ESLint enforces it), so the raster pipeline takes a *canvas factory* it is
+ * handed instead: the live export passes this one, the tests pass a recording or a `@napi-rs/canvas`
+ * implementation. That is what keeps the pipeline portable and testable without a browser.
  */
 
-import type { RasterCanvas } from '../export/raster';
+import type { RasterCanvas } from '../../core/export/raster';
 
 export function createBrowserCanvas(width: number, height: number): RasterCanvas {
   if (typeof document === 'undefined') {

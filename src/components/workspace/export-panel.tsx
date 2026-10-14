@@ -4,9 +4,9 @@ import { Check, CircleAlert, Download, Info, XCircle } from 'lucide-react';
 import { useState } from 'react';
 
 import { buildExportChecklist, type CheckStatus } from '../../core/export/checklist';
-import { downloadBlob } from '../../core/export/download';
+import { downloadBlob } from '../../lib/browser/download';
 import { EXPORT_FORMATS, PROJECT_FILE_FORMAT_ID, getExportFormat } from '../../core/export/formats';
-import { downloadProjectFile, serialiseProjectFile } from '../../core/export/project-file';
+import { projectFilePayload } from '../../core/export/project-file';
 import {
   DEFAULT_JPEG_QUALITY,
   JPEG_BACKGROUND_LABELS,
@@ -18,7 +18,7 @@ import {
   type JpegBackground,
   type RasterExport,
 } from '../../core/export/raster';
-import { createBrowserCanvas, canRasteriseHere } from '../../core/render/browser-canvas';
+import { createBrowserCanvas, canRasteriseHere } from '../../lib/browser/canvas';
 import { cn } from '../../lib/cn';
 import { useForgeServices } from '../../state/forge-provider';
 import { Button } from '../ui/button';
@@ -269,7 +269,13 @@ export function ExportPanel({
           disabled={busy || !checklist.ready}
           onClick={() => {
             if (formatId === PROJECT_FILE_FORMAT_ID) {
-              const started = downloadProjectFile(api.doc);
+              // The core builds the payload; handing it to the browser happens here, through the
+              // download adapter, so no DOM call sits behind a core module (ADR-0019).
+              const payload = projectFilePayload(api.doc);
+              const started = downloadBlob(
+                new Blob([payload.contents], { type: payload.mimeType }),
+                payload.fileName,
+              );
               if (started) {
                 toasts.success(
                   'Project file downloaded',
@@ -337,7 +343,7 @@ export function ExportPanel({
           fullWidth
           onClick={() => {
             void navigator.clipboard
-              .writeText(serialiseProjectFile(api.doc))
+              .writeText(projectFilePayload(api.doc).contents)
               .then(() => {
                 toasts.success(
                   'Document definition copied',

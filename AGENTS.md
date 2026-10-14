@@ -41,7 +41,12 @@ never weaken a check to make something pass.
 4. **Do not silence lint.** Fix the cause or add a narrow, commented disable. Blanket rule
    exclusions in `eslint.config.mjs` need a reason in the commit message.
 5. **Respect the layers.** `src/core/**` stays framework-free (no React, no DOM, no storage).
-   Components never import `src/core/persistence/**` — ESLint enforces it.
+   Browser-only calls — creating a canvas, handing a file to the browser — belong in
+   `src/lib/browser/**` and are composed with core values by the interface. Components never import
+   `src/core/persistence/**`, and components and core never import `src/lib/browser/**`. ESLint
+   enforces all three in `eslint.config.mjs` (ADR-0019). The single exception is the storage
+   boundary: `src/core/persistence/storage.ts` probes `window.localStorage` behind a server-render
+   guard and reports the volatile fallback (ADR-0006).
 6. **Documents are immutable.** Mutate through `applyDocumentPatch` / `DocumentSession.commit`, never
    in place.
 7. **Route integrity.** Every href a user can click must resolve to a page under `src/app`. Tests for

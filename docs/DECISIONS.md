@@ -434,7 +434,8 @@ graphics dependency would also have added a second geometry model to keep in syn
 - The **live artboard** and the **offscreen export** both build a plan from the same document and
   paint it through the same code; they differ only in the transform they apply first (viewport zoom
   versus output scale) and in which canvas implements `PainterContext`. The browser adapter is
-  `render/browser-canvas.ts`; tests use recording and real-canvas implementations.
+  `render/browser-canvas.ts` (moved to `src/lib/browser/canvas.ts` by ADR-0019); tests use recording
+  and real-canvas implementations.
 - **Text layout, wrapping, alignment and measurement live in the core** (`render/text-layout.ts`,
   `render/measure.ts`) behind an injected `MeasureFactory`. Fonts are system stacks resolved per
   platform, so nothing is downloaded and no webfont can fail at paint time.
@@ -443,7 +444,8 @@ graphics dependency would also have added a second geometry model to keep in syn
   while keeping them out of the canvas guarantees they cannot leak into an export.
 - Raster output is produced offscreen at document size × scale, and `export/raster.ts` returns a
   `Blob` plus width, height and byte size. Nothing in `src/core/**` touches `URL.createObjectURL` or
-  an `<a>` element; that lives in the single `export/download.ts` adapter.
+  an `<a>` element; that lives in the single `export/download.ts` adapter (now
+  `src/lib/browser/download.ts`, outside the core — ADR-0019).
 - Cost: no SVG export, no vector paths, and large documents are rasterised rather than
   incrementally redrawn. Those are roadmap items (Phase 3 owns the path model), not gaps hidden in
   this decision.
@@ -522,3 +524,46 @@ environment they are about. The cost is a build plus a Chromium download on ever
 that has to be kept honest: it fails when the interface changes, which is the point. The risk to
 watch is a test that only asserts what a mock would have asserted anyway — so the browser specs
 assert persisted state and real file bytes, never the shape of a call.
+
+## ADR-0019 — Browser adapters live outside the core, and ESLint enforces the boundary
+
+**Context.** `AGENTS.md` and this document both say that `src/core/**` is framework-free: domain code
+that Node tests, the server renderer and the export pipeline can all run without a browser. Two Phase 2
+files broke that rule. `src/core/render/browser-canvas.ts` called `document.createElement('canvas')`,
+and `src/core/export/download.ts` used `window`, `document` and `URL.createObjectURL`. Both compiled and
+both were tested, but a reader could no longer tell from a path whether importing a module might reach
+for a DOM global.
+
+**Decision.**
+
+- **The adapters move out of the core.** `src/lib/browser/canvas.ts` owns the canvas element and the
+  `canRasteriseHere()` capability probe; `src/lib/browser/download.ts` owns `downloadBlob()`, the only
+  place a file is handed to the browser. Their responsibilities stay narrow: take values in, touch the
+  browser, report honestly (a `false` when there is no document to attach an anchor to, a thrown error
+  with a readable message when there is no canvas).
+- **The core keeps its architecture.** `src/core/export/raster.ts` still takes a *canvas factory* as an
+  argument, so the pipeline is unchanged — the live export passes the browser adapter, the tests pass a
+  recording canvas or a `@napi-rs/canvas` one. `src/core/export/project-file.ts` returns a payload
+  (`projectFilePayload`: contents, file name, MIME type) instead of performing a download, so serialising
+  a project file is testable with no browser and no DOM.
+- **The rule is executable, not aspirational.** `eslint.config.mjs` restricts, for `src/core/**`:
+  browser-only globals (`document`, `window`, `navigator`, storage, `HTMLCanvasElement`, `requestAnimationFrame`,
+  and the rest), `URL.createObjectURL`/`revokeObjectURL` by syntax selector (plain `URL` parsing stays
+  legal, and `Blob` stays legal because Node provides it), and imports of `src/lib/browser/**`,
+  `src/state/**`, `src/components/**`, `src/app/**`, React and Next. The single exemption is the storage
+  boundary — `src/core/persistence/storage.ts` and its tests — which probes `window.localStorage` behind a
+  server-render guard and reports the volatile fallback (ADR-0006).
+- **The fix also closed a hole in the old config.** Flat config replaces a rule's options rather than
+  merging them, so the ADR-0018 block that banned importing the Playwright harness from `src/**` was
+  silently replacing the components' persistence ban: a component could import
+  `src/core/persistence/**` and lint would stay green, while `AGENTS.md` claimed otherwise. The pattern
+  lists are now shared constants (`HARNESS_IMPORT_PATTERNS`, `PERSISTENCE_IMPORT_PATTERNS`,
+  `CORE_IMPORT_PATTERNS`) and every block that restricts imports states the harness ban alongside its own
+  patterns. The persistence patterns also now match the relative forms (`**/core/persistence/**`), which
+  the previous `../core/persistence/**` never matched from a component two directories down.
+
+**Consequences.** Every boundary that this repository talks about — components not reaching into
+persistence, core not knowing about React, the DOM, the state layer or routes — fails a lint run when it
+is crossed, and each was verified by introducing a deliberate violation and watching ESLint report it.
+A future module that needs a browser API has one obvious home, and a reviewer can accept or reject it as
+a one-line change of a pattern list rather than as an unwritten convention.

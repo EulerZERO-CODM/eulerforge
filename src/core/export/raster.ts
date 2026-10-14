@@ -2,9 +2,10 @@
  * Raster export: document -> real PNG or JPEG bytes.
  *
  * The pipeline is deliberately framework-free and takes its canvas factory as an argument, so the
- * same code runs in the browser (with `document.createElement('canvas')`) and in tests (with a
- * rasteriser that can actually produce pixels). Nothing here downloads anything: it returns a
- * `Blob` and lets the caller decide what to do with it.
+ * same code runs in the browser (through `src/lib/browser/canvas.ts`, which owns the one
+ * `document.createElement('canvas')` call in the application) and in tests (with a rasteriser that
+ * can actually produce pixels). Nothing here downloads anything either: it returns a `Blob` and
+ * lets the caller decide what to do with it, which is what keeps this module out of the browser.
  *
  * Honesty rules this file enforces:
  *  - output size comes from the *document's* declared pixel dimensions and the chosen scale, never

@@ -7,10 +7,12 @@ and how to extend the platform without touching the shell. Decisions are recorde
 ## The one-paragraph version
 
 The application is a Next.js App Router project. Everything under `src/core/**` is framework-free
-domain code with no React, no DOM and no storage access. `src/state/**` composes those modules into
-stores and exposes them to React through `useSyncExternalStore`. `src/components/**` renders, and is
-forbidden from reaching into persistence — ESLint enforces that. `src/app/**` is thin routing: each
-route resolves data and renders a feature component.
+domain code with no React, no DOM and no storage access; the few calls only a browser can make live
+behind `src/lib/browser/**`, and the interface composes them with core values — ESLint enforces both
+directions. `src/state/**` composes those modules into stores and exposes them to React through
+`useSyncExternalStore`. `src/components/**` renders, and is forbidden from reaching into persistence —
+ESLint enforces that too. `src/app/**` is thin routing: each route resolves data and renders a feature
+component.
 
 ```
 src/app/**                routes (server by default, client only where interaction requires it)
@@ -22,7 +24,8 @@ src/state/**               stores, provider, hooks             ─ the only plac
 src/core/**                documents, studios, assets, learning, persistence, export, history,
                            commands, events, preferences, platform  ─ framework-free and testable
       │
-src/lib/**                 class names, store primitives, formatting
+src/lib/**                 class names, store primitives, formatting, and the browser adapters
+                           (src/lib/browser/**) that core deliberately does not contain
       │
 e2e/**                     Playwright specs against the production build ─ nothing in src/ imports it
 ```
@@ -60,15 +63,18 @@ The parts every studio must share. Each module is small, pure where possible, an
 - **`render/`** — the renderer, in two halves: `plan.ts` turns a document into an ordered, immutable
   list of paint operations plus any issues it found, and `paint.ts` draws that plan into anything
   that satisfies `PainterContext`. `text-layout.ts` and `measure.ts` do wrapping and alignment
-  through an injected measure function. Nothing here imports React or touches a DOM; the browser
-  canvas adapter lives in `browser-canvas.ts` (ADR-0016).
+  through an injected measure function. Nothing here imports React or touches a DOM: the browser
+  canvas adapter lives in `src/lib/browser/canvas.ts` and is passed in as a factory (ADR-0016,
+  ADR-0019).
 - **`editor/`** — the interaction model: `selection.ts` (what is selected, never persisted),
   `commands.ts` (each edit as a label plus the patch that performs it) and `gesture.ts` (move and
   resize previews in document coordinates, resolved once on release, with snapping).
 - **`export/`** — the format registry (which formats exist versus which are planned), the readiness
-  checklist that evaluates a document against a format, the `.forge.json` project file format, the
-  raster pipeline that rasterises a render plan offscreen (`raster.ts`), and `download.ts`, the one
-  module that touches `URL.createObjectURL` so every other file stays testable.
+  checklist that evaluates a document against a format, the `.forge.json` project file format (whose
+  payload is built here and saved by the caller), and the raster pipeline that rasterises a render
+  plan offscreen (`raster.ts`) into an injected canvas. `URL.createObjectURL` and the `<a>` element
+  live in `src/lib/browser/download.ts`, outside the core, so every file here stays testable with no
+  browser at all.
 - **`documents/zoom.ts`** — the canvas zoom arithmetic (setting + measured viewport → exact pixel
   box), kept out of the components so portrait, landscape, oversized zooms and `fit` are testable
   without a browser (ADR-0015).
