@@ -507,7 +507,9 @@ only ever assert that the code *called* something. That is not evidence for the 
   production build (`next start`), as its own CI job (`Browser (Chromium)`) that reports its own
   result. It runs on Node 22 alongside — not instead of — the existing `Verify (22.x)` and
   `Verify (24.x)` jobs, and it runs with retries disabled: a browser suite that only passes on the
-  second attempt is not evidence.
+  second attempt is not evidence. It is deliberately *not* gated on those jobs: a failing unit test
+  must not be able to hide whether the product works in a browser, which is the whole reason for
+  having a second, independent signal.
 - **The harness reads the real product state.** Assertions are made against the document the
   application persisted to `localStorage`, and against bytes the browser actually downloaded. No
   application code is stubbed, mocked or replaced.

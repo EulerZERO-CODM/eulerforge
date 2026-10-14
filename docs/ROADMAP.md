@@ -56,8 +56,9 @@ styling, custom font uploads, reusable styles, templates and brand kits, vector 
 `e2e/*.spec.ts` drives the production build in a real Chromium on every push, as a separate CI job
 (`Browser (Chromium)`), so pointer capture, the browser's own rasteriser and file downloads are
 verified by a passing test rather than described as a manual step. The suite opens a project, adds
-text and shape layers, selects and modifier-selects, moves a selection, resizes a single object and
-a group (with undo), cancels gestures with Escape, confirms locked layers are never transformed,
+text and shape layers, selects and modifier-selects, moves a selection, drags an unselected layer
+without dragging the previous selection along, resizes a single object and a group (with undo),
+cancels gestures with Escape, confirms locked layers are never transformed,
 checks bulk duplicate and reorder, exercises the keyboard-only path (focusing the layer list,
 editing the inspector fields, nudging with the arrow keys, and resizing from a focused handle), and
 exports a PNG and a JPEG whose downloaded bytes are inspected (signature plus declared pixel size,
