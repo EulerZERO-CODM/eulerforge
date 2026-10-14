@@ -69,10 +69,13 @@ jobs:
   browser:
     # Real Chromium: pointer capture, canvas rasterisation and real downloads cannot be verified in
     # jsdom, so they get their own job with its own reported result (docs/ROADMAP.md).
+    #
+    # Deliberately *not* gated on `verify`: a failing unit test must not be able to hide whether the
+    # product works in a browser. The job builds the application itself, so a broken build still
+    # fails here, and an independent result is the whole point of having a second signal (ADR-0018).
     name: Browser (Chromium)
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    needs: verify
 
     steps:
       - name: Checkout
