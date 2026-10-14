@@ -640,6 +640,66 @@ describe('direct manipulation on the artboard', () => {
     expect(historyLabels()).toEqual(['Move 2 layers']);
   });
 
+  it('drags an unselected layer alone, without carrying the old selection with it', async () => {
+    const { services } = await mount(
+      sceneOf(
+        rectLayer('lyr-a', { name: 'A', x: 100, y: 100, width: 100, height: 100 }),
+        rectLayer('lyr-b', { name: 'B', x: 400, y: 300, width: 100, height: 100 }),
+      ),
+      { snapping: false },
+    );
+
+    // Select A, so the press below replaces a real selection rather than adding to nothing.
+    clickOnArtboard({ x: 150, y: 150 });
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+    const revisionBefore = revision(services);
+
+    // Drag B, which was not selected: the selection becomes B alone, so only B may move.
+    dragOnArtboard({ x: 450, y: 350 }, { x: 490, y: 320 });
+
+    await waitFor(() => {
+      expect(historyLabels()).toEqual(['Move “B”']);
+    });
+    expect(layerFrame(services, 'lyr-b')).toEqual(createRect(440, 270, 100, 100));
+    // A is untouched - not moved by the same delta, not resized.
+    expect(layerFrame(services, 'lyr-a')).toEqual(createRect(100, 100, 100, 100));
+    expectSelected('lyr-b');
+    expectSelected('lyr-a', false);
+    // One interaction, one commit, one revision step.
+    expect(historyLabels()).toHaveLength(1);
+    expect(revision(services)).toBe(revisionBefore + 1);
+  });
+
+  it('selects a layer on a plain click without editing the document', async () => {
+    const { services } = await mount(
+      sceneOf(
+        rectLayer('lyr-a', { name: 'A', x: 100, y: 100, width: 100, height: 100 }),
+        rectLayer('lyr-b', { name: 'B', x: 400, y: 300, width: 100, height: 100 }),
+      ),
+      { snapping: false },
+    );
+
+    clickOnArtboard({ x: 150, y: 150 });
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+    const revisionBefore = revision(services);
+
+    // A press and release on an unselected layer, with no movement: a selection change, not an edit.
+    clickOnArtboard({ x: 450, y: 350 });
+    await waitFor(() => {
+      expectSelected('lyr-b');
+    });
+
+    expectSelected('lyr-a', false);
+    expect(layerFrame(services, 'lyr-b')).toEqual(createRect(400, 300, 100, 100));
+    expect(layerFrame(services, 'lyr-a')).toEqual(createRect(100, 100, 100, 100));
+    expect(revision(services)).toBe(revisionBefore);
+    expect(historyLabels()).toEqual([]);
+  });
+
   it('resizes every selected layer from one bounding-box handle, in one commit', async () => {
     const { services } = await mount(
       sceneOf(

@@ -151,6 +151,42 @@ test.describe('artboard interaction', () => {
     expect(await historyLabels(page)).toEqual(['Move 2 layers', ...FIXTURE_LABELS]);
   });
 
+  test('drags an unselected layer without dragging the old selection along', async ({ page }) => {
+    const before = await stored(page);
+    const rectangle = layerNamed(before, 'Rectangle').frame;
+    const text = layerNamed(before, 'Text').frame;
+
+    // Select the text box first, so the drag below replaces a real one-layer selection.
+    await clickInDocument(page, centreOf(text));
+    await expect(page.getByLabel('Layer name')).toHaveValue('Text');
+
+    const delta = { x: 40, y: -30 };
+    const from = centreOf(rectangle);
+    await dragInDocument(page, from, { x: from.x + delta.x, y: from.y + delta.y });
+
+    const after = await storedWhen(
+      page,
+      (document) => layerNamed(document, 'Rectangle').frame.x === rectangle.x + delta.x,
+      'the dragged layer should have moved by the pointer delta',
+    );
+    // The dragged layer moved by exactly the pointer delta, at its original size...
+    expect(layerNamed(after, 'Rectangle').frame).toEqual({
+      x: rectangle.x + delta.x,
+      y: rectangle.y + delta.y,
+      width: rectangle.width,
+      height: rectangle.height,
+    });
+    // ...and the layer that was selected beforehand did not move at all.
+    expect(layerNamed(after, 'Text').frame).toEqual(text);
+
+    // Only the dragged layer is selected, and the history names it exactly once.
+    await expect(page.getByLabel('Layer name')).toHaveValue('Rectangle');
+    await expect(
+      page.getByTestId('layer-name-' + layerNamed(after, 'Rectangle').id),
+    ).toHaveAttribute('aria-current', 'true');
+    expect(await historyLabels(page)).toEqual(['Move “Rectangle”', ...FIXTURE_LABELS]);
+  });
+
   test('resizes a single object through its handle, in one commit', async ({ page }) => {
     const before = await stored(page);
     const rectangle = layerNamed(before, 'Rectangle').frame;
