@@ -58,8 +58,10 @@ styling, custom font uploads, reusable styles, templates and brand kits, vector 
 verified by a passing test rather than described as a manual step. The suite opens a project, adds
 text and shape layers, selects and modifier-selects, moves a selection, resizes a single object and
 a group (with undo), cancels gestures with Escape, confirms locked layers are never transformed,
-checks bulk duplicate and reorder, exercises the keyboard-only path, and exports a PNG and a JPEG
-whose downloaded bytes are inspected (signature plus declared pixel size, at 1x and 2x).
+checks bulk duplicate and reorder, exercises the keyboard-only path (focusing the layer list,
+editing the inspector fields, nudging with the arrow keys, and resizing from a focused handle), and
+exports a PNG and a JPEG whose downloaded bytes are inspected (signature plus declared pixel size,
+at 1x and 2x).
 
 What it does *not* cover, and is therefore still a manual check:
 

@@ -415,6 +415,43 @@ test.describe('artboard interaction', () => {
     ]);
   });
 
+  test('resizes from a focused handle with the keyboard', async ({ page }) => {
+    const rectangle = layerNamed(await stored(page), 'Rectangle').frame;
+    await clickInDocument(page, centreOf(rectangle));
+
+    // The handle is a real button in the tab order, and the keyboard path is the pointer gesture's
+    // own maths: holding a key is repeated keydowns and a single keyup, so it is one resize and one
+    // commit - not a commit per repeat.
+    const handle = page.getByRole('button', { name: 'Resize bottom right' });
+    await handle.focus();
+    await expect(handle).toBeFocused();
+
+    await page.keyboard.down('ArrowRight');
+    await page.keyboard.down('ArrowRight');
+    await page.keyboard.up('ArrowRight');
+    await page.keyboard.down('Shift');
+    await page.keyboard.down('ArrowDown');
+    await page.keyboard.up('ArrowDown');
+    await page.keyboard.up('Shift');
+
+    const after = await storedWhen(
+      page,
+      (document) => layerNamed(document, 'Rectangle').frame.width === rectangle.width + 2,
+      'the handle keys should have resized the selection',
+    );
+    const resized = layerNamed(after, 'Rectangle').frame;
+    // Two pixels wider and ten taller, with the top-left corner pinned: Shift steps ten pixels and
+    // the arrow keys must not also have nudged the layer along.
+    expect(resized.height).toBe(rectangle.height + 10);
+    expect(resized.x).toBe(rectangle.x);
+    expect(resized.y).toBe(rectangle.y);
+    expect(await historyLabels(page)).toEqual([
+      'Resize “Rectangle”',
+      'Resize “Rectangle”',
+      ...FIXTURE_LABELS,
+    ]);
+  });
+
   test('clears the selection with Escape on the surface', async ({ page }) => {
     const rectangle = layerNamed(await stored(page), 'Rectangle').frame;
     await clickInDocument(page, centreOf(rectangle));

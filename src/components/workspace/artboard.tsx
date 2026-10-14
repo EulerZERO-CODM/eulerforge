@@ -111,6 +111,9 @@ export function Artboard({
   const [collapseOnRelease, setCollapseOnRelease] = useState<LayerId | null>(null);
   // Set by a modifier click, which toggles selection rather than starting a drag.
   const [selectingOnly, setSelectingOnly] = useState(false);
+  // A keyboard resize in flight, held in a ref because the keyup that ends it must resolve exactly
+  // the gesture the last keydown produced, whatever React has re-rendered in between.
+  const keyResizeRef = useRef<{ gesture: GestureState; point: Point } | null>(null);
 
   const dpr = pixelRatio ?? (typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1);
   const width = Math.max(1, Math.round(doc.canvas.width * zoom));
@@ -308,6 +311,7 @@ export function Artboard({
    * document. The selection is whatever the gesture's first click established, never a stale one.
    */
   function cancelGesture(): void {
+    keyResizeRef.current = null;
     setGesture(null);
     setMarquee(null);
     setHint(null);
@@ -364,6 +368,80 @@ export function Artboard({
       ...beginResize(point, targets, handle),
       modifiers: modifiersOf(event),
     });
+  }
+
+  /**
+   * Resizes the selection from the keyboard, for the handle that has focus.
+   *
+   * The arrow keys move *that handle* by one document pixel, or ten with Shift, and Alt resizes from
+   * the centre - the same modifiers the pointer path honours. It is not a shortcut around the maths:
+   * the keys drive `beginResize`/`updateGesture`, so a keyboard resize is one preview and one commit
+   * on keyup, exactly like a drag.
+   */
+  function keyResize(event: React.KeyboardEvent<HTMLElement>, handle: TransformHandle): void {
+    const move = arrowDelta(event.key, event.shiftKey ? KEY_RESIZE_STEP * 10 : KEY_RESIZE_STEP);
+    if (!move) return;
+    // The handle sits inside the capture surface, whose own handler nudges the selection with the
+    // very same keys: without this the two would both fire and the layer would move as it resized.
+    event.preventDefault();
+    event.stopPropagation();
+
+    const live = keyResizeRef.current;
+    if (!live) {
+      // A pointer gesture in flight owns the transform; the keys must not hijack it.
+      if (gesture) return;
+      const frames = transformTargets(doc.scene, selection);
+      if (frames.length === 0) return;
+      // `beginResize` uses the pointer only as a reference, so zero is the origin and each press is
+      // measured from it.
+      const started = updateGesture(
+        beginResize({ x: 0, y: 0 }, frames, handle),
+        move,
+        resizeModifiers(event),
+      );
+      keyResizeRef.current = { gesture: started, point: move };
+      setGesture(started);
+      return;
+    }
+
+    // The delta is absolute from the origin, so the ref holds the gesture as it now stands: the
+    // keyup resolves the same value the preview showed.
+    const point = { x: live.point.x + move.x, y: live.point.y + move.y };
+    const next = updateGesture(live.gesture, point, resizeModifiers(event));
+    keyResizeRef.current = { gesture: next, point };
+    setGesture(next);
+  }
+
+  /** Ends a keyboard resize: one labelled commit if anything changed, nothing at all if it did not. */
+  function endKeyResize(): void {
+    const live = keyResizeRef.current;
+    if (!live) return;
+    keyResizeRef.current = null;
+
+    const resolved = resolveGesture(live.gesture, {
+      scene: doc.scene,
+      canvas: doc.canvas,
+      targets,
+      snapEnabled: snapping,
+      snapThreshold: snapThresholdForZoom(zoom),
+    });
+    if (gestureChangedSomething(live.gesture, resolved)) {
+      onCommitFrames(
+        gestureLabel(live.gesture, doc.scene),
+        live.gesture.start.frames.map((entry) => ({
+          id: entry.id,
+          frame: frameFromScene(resolved.scene, entry.id) ?? entry.frame,
+        })),
+      );
+    }
+    setGesture(null);
+  }
+
+  /** Tabbing away from a half-finished keyboard resize abandons it, like a cancelled pointer. */
+  function abandonKeyResize(): void {
+    if (!keyResizeRef.current) return;
+    keyResizeRef.current = null;
+    setGesture(null);
   }
 
   const marqueeRect = marquee ? rectFromPoints(marquee.from, marquee.to) : null;
@@ -428,10 +506,11 @@ export function Artboard({
         title={hint ?? undefined}
       >
         <span id="artboard-keyboard-help" className="sr-only">
-          Arrow keys move the selection by one pixel, or ten with Shift. Escape cancels a drag in
-          progress, or clears the selection. Layers are selected from the layer list, which also
-          carries every layer operation; position, size, typography and shape settings are in the
-          inspector beside the artboard.
+          Arrow keys move the selection by one pixel, or ten with Shift. With a resize handle
+          focused, they move that handle instead, and Alt resizes from the centre. Escape cancels a
+          drag in progress, or clears the selection. Layers are selected from the layer list, which
+          also carries every layer operation; position, size, typography and shape settings are in
+          the inspector beside the artboard.
         </span>
 
         {selectedFrame ? (
@@ -451,7 +530,7 @@ export function Artboard({
                     type="button"
                     aria-label={`Resize ${HANDLE_LABELS[handle].toLowerCase()}`}
                     data-testid={`handle-${handle}`}
-                    className="bg-surface-raised border-accent pointer-events-auto absolute h-3 w-3 rounded-[2px] border"
+                    className="bg-surface-raised border-accent pointer-events-auto absolute h-3 w-3 rounded-[2px] border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-focus)]"
                     style={handleStyle(handle, scaleRect(gestureBox, zoom))}
                     onPointerDown={(event) => {
                       startResize(event, handle);
@@ -459,6 +538,11 @@ export function Artboard({
                     onPointerMove={movePointer}
                     onPointerUp={endPointer}
                     onPointerCancel={cancelGesture}
+                    onKeyDown={(event) => {
+                      keyResize(event, handle);
+                    }}
+                    onKeyUp={endKeyResize}
+                    onBlur={abandonKeyResize}
                   />
                 ))}
               </>
@@ -518,6 +602,28 @@ function nudgeLabel(scene: Scene, targets: readonly { readonly id: LayerId }[]):
   const id = targets[0]?.id;
   const name = scene.layers.find((layer) => String(layer.id) === String(id))?.name ?? 'layer';
   return `Move “${name}”`;
+}
+
+/** One document pixel per arrow press from a handle, or ten with Shift: the move keys' own step. */
+const KEY_RESIZE_STEP = 1;
+
+/** The movement one arrow key asks for, or null for any other key. */
+function arrowDelta(key: string, step: number): Point | null {
+  if (key === 'ArrowLeft') return { x: -step, y: 0 };
+  if (key === 'ArrowRight') return { x: step, y: 0 };
+  if (key === 'ArrowUp') return { x: 0, y: -step };
+  if (key === 'ArrowDown') return { x: 0, y: step };
+  return null;
+}
+
+/**
+ * Modifiers for a keyboard resize.
+ *
+ * Shift is the ten-pixel step here rather than the pointer's aspect-ratio lock, so it cannot also
+ * mean `preserveAspectRatio`; Alt keeps its meaning of resizing from the centre.
+ */
+function resizeModifiers(event: { readonly altKey: boolean }): GestureModifiers {
+  return { preserveAspectRatio: false, resizeFromCentre: event.altKey };
 }
 
 function modifiersOf(event: {

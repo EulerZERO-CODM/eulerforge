@@ -11,7 +11,7 @@ import { createDocument } from '../../core/documents/factories';
 import { createRect, type Rect } from '../../core/documents/geometry';
 import type { Layer } from '../../core/documents/layer-types';
 import { EMPTY_SELECTION, type Selection } from '../../core/editor/selection';
-import type { ForgeDocument } from '../../core/documents/types';
+import type { Canvas, ForgeDocument } from '../../core/documents/types';
 import type { DocumentPatch, DocumentSession } from '../../state/document-session';
 import { ForgeProvider } from '../../state/forge-provider';
 import { createTestServices, type TestForgeServices } from '../../testing/forge-services';
@@ -30,20 +30,28 @@ import { rectLayer, sceneOf, stackOf, textLayer, TEST_DOCUMENT_TYPE } from '../.
 
 const documentId = 'doc-editor';
 
-function makeDocument(scene = sceneOf()): ReturnType<typeof createDocument> {
+const SQUARE_CANVAS: Canvas = {
+  width: 1080,
+  height: 1080,
+  unit: 'px',
+  dpi: 96,
+  background: '#0f1115',
+  transparent: false,
+};
+
+/** The other document shape a designer opens, so the maths cannot quietly assume a square. */
+const PORTRAIT_CANVAS: Canvas = { ...SQUARE_CANVAS, width: 900, height: 1600 };
+
+function makeDocument(
+  scene = sceneOf(),
+  canvas: Canvas = SQUARE_CANVAS,
+): ReturnType<typeof createDocument> {
   return createDocument(
     {
       title: 'Editor fixture',
       studioId: 'design',
       documentTypeId: TEST_DOCUMENT_TYPE,
-      canvas: {
-        width: 1080,
-        height: 1080,
-        unit: 'px',
-        dpi: 96,
-        background: '#0f1115',
-        transparent: false,
-      },
+      canvas: { ...canvas },
       ...(scene.layers.length > 0 ? { scene } : {}),
     },
     { generateId: () => documentId },
@@ -129,10 +137,10 @@ function persisted(services: TestForgeServices): ForgeDocument {
 
 async function mount(
   scene?: ReturnType<typeof sceneOf>,
-  options: { readonly snapping?: boolean } = {},
+  options: { readonly snapping?: boolean; readonly canvas?: Canvas } = {},
 ): Promise<{ services: TestForgeServices; session: DocumentSession }> {
   const services = createTestServices({ generateId: () => documentId });
-  const created = makeDocument(scene);
+  const created = makeDocument(scene, options.canvas ?? SQUARE_CANVAS);
   if (!created.ok) throw new Error(`fixture document is invalid: ${created.error.message}`);
   const stored = await services.documents.create({
     title: created.value.title,
@@ -1184,5 +1192,71 @@ describe('keyboard-only editing', () => {
       expectSelected('lyr-a', false);
     });
     expect(historyLabels()).toEqual([]);
+  });
+
+  it('resizes from a focused handle with the arrow keys, one commit on release', async () => {
+    const { services } = await mount(
+      sceneOf(rectLayer('lyr-a', { name: 'Panel', x: 100, y: 100, width: 200, height: 200 })),
+      { snapping: false },
+    );
+
+    clickOnArtboard({ x: 200, y: 200 });
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+
+    // The handle is a real button in the tab order, so a keyboard user can land on it.
+    const handle = screen.getByRole('button', { name: 'Resize bottom right' });
+    handle.focus();
+    expect(document.activeElement).toBe(handle);
+
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    fireEvent.keyDown(handle, { key: 'ArrowRight' });
+    // Mid-resize: a preview only, and the surface's own arrow-key nudge did not also fire.
+    expect(layerFrame(services, 'lyr-a')).toEqual(createRect(100, 100, 200, 200));
+    expect(historyLabels()).toEqual([]);
+
+    fireEvent.keyUp(handle, { key: 'ArrowRight' });
+    await waitFor(() => {
+      expect(layerFrame(services, 'lyr-a')).toEqual(createRect(100, 100, 202, 200));
+    });
+    expect(historyLabels()).toEqual(['Resize “Panel”']);
+
+    // Shift steps ten pixels at a time, and Escape abandons the resize without a commit.
+    fireEvent.keyDown(handle, { key: 'ArrowDown', shiftKey: true });
+    fireEvent.keyDown(handle, { key: 'Escape' });
+    fireEvent.keyUp(handle, { key: 'ArrowDown', shiftKey: true });
+
+    expect(layerFrame(services, 'lyr-a')).toEqual(createRect(100, 100, 202, 200));
+    expect(historyLabels()).toEqual(['Resize “Panel”']);
+  });
+
+  it('resizes a whole selection from the keyboard and keeps the arrangement', async () => {
+    const { services } = await mount(
+      sceneOf(
+        rectLayer('lyr-a', { name: 'A', x: 100, y: 100, width: 200, height: 100 }),
+        rectLayer('lyr-b', { name: 'B', x: 400, y: 250, width: 100, height: 50 }),
+      ),
+      { snapping: false },
+    );
+
+    dragOnArtboard({ x: 40, y: 40 }, { x: 600, y: 400 });
+    await waitFor(() => {
+      expectSelected('lyr-b');
+    });
+
+    const handle = screen.getByRole('button', { name: 'Resize bottom right' });
+    handle.focus();
+    // Ten ten-pixel presses of ArrowRight: the 400px box grows by 100, so both layers scale by 1.25.
+    for (let press = 0; press < 10; press += 1) {
+      fireEvent.keyDown(handle, { key: 'ArrowRight', shiftKey: true });
+    }
+    fireEvent.keyUp(handle, { key: 'ArrowRight', shiftKey: true });
+
+    await waitFor(() => {
+      expect(historyLabels()).toEqual(['Resize 2 layers']);
+    });
+    expect(layerFrame(services, 'lyr-a')).toEqual(createRect(100, 100, 250, 100));
+    expect(layerFrame(services, 'lyr-b')).toEqual(createRect(475, 250, 125, 50));
   });
 });
