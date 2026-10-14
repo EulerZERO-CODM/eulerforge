@@ -136,6 +136,7 @@ src/
     export/               Format registry, readiness checklist, project file format
     history/ commands/ events/ preferences/ platform/
   lib/                    Tiny shared utilities (class names, store, formatting, hooks)
+  lib/browser/            The browser-only adapters (canvas element, file download)
   state/                  Application stores and React bindings
   testing/                Test-only helpers (in-memory services, App Router route resolver)
 docs/                     Product vision, architecture, roadmap, decision records
@@ -143,7 +144,10 @@ docs/                     Product vision, architecture, roadmap, decision record
 
 Rules that keep this maintainable:
 
-- `src/core/**` is framework-free. It has no React, no DOM and no `localStorage` access.
+- `src/core/**` is framework-free. It has no React, no DOM and no `localStorage` access; browser
+  calls live behind `src/lib/browser/**`, and ESLint fails the build if core reaches for one
+  (ADR-0019). The single exception is the storage boundary, which probes `window.localStorage` behind
+  a server-render guard to report volatility honestly.
 - Components never import persistence directly; ESLint enforces it. They talk to stores in
   `src/state/**`, which talk to the repository boundary.
 - Anything a user can click either does something real, or is visibly disabled/unavailable with the
