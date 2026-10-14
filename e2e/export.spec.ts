@@ -238,3 +238,51 @@ test.describe('raster export', () => {
     await expect(labels.first()).toContainText('Add rectangle layer');
   });
 });
+
+/**
+ * The project file, saved through the same relocated adapter as the rasters.
+ *
+ * It is the one export whose bytes the core prepares (`projectFilePayload`) while the component does
+ * the browser part, which is exactly the split ADR-0019 introduced. A jsdom test can only prove the
+ * payload; this proves that clicking the button really writes the file the user asked for.
+ */
+test.describe('project file export', () => {
+  test('saves the project file, with the current document inside it', async ({ page }) => {
+    await createProject(page, { width: 200, height: 150 });
+    await addLayer(page, 'Rectangle');
+
+    await page.getByLabel('Format', { exact: true }).selectOption('forge-json');
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: 'Download project file' }).click(),
+    ]);
+
+    // The name comes from the document's own title, so it is a filename a person recognises.
+    expect(download.suggestedFilename()).toBe('browser-verification.forge.json');
+    const path = await download.path();
+    if (!path) throw new Error('the project file download produced no file');
+
+    const envelope = JSON.parse(await readFile(path, 'utf8')) as {
+      readonly $schema: string;
+      readonly fileVersion: number;
+      readonly document: {
+        readonly revision: number;
+        readonly canvas: { readonly width: number; readonly height: number };
+        readonly scene: { readonly layers: readonly { readonly name: string }[] };
+      };
+    };
+
+    expect(envelope.$schema).toBe('forge/project-file');
+    expect(envelope.fileVersion).toBe(1);
+    expect(envelope.document.canvas.width).toBe(200);
+    expect(envelope.document.canvas.height).toBe(150);
+    expect(envelope.document.scene.layers.map((layer) => layer.name)).toEqual(['Rectangle']);
+
+    // The file holds *this* document, at the revision the application has persisted: a download of
+    // some earlier snapshot would pass a "a file arrived" check and still be wrong.
+    expect(envelope.document.revision).toBe((await stored(page)).revision);
+
+    // The success message is shown only after the adapter reports that the save started.
+    await expect(page.getByText('Project file downloaded')).toBeVisible();
+  });
+});
