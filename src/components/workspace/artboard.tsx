@@ -229,7 +229,13 @@ export function Artboard({
       return;
     }
 
-    if (!alreadySelected) onSelectionChange(selectOnly(hit.id));
+    // The selection the gesture runs with, decided *here* rather than left to the next render:
+    // `onSelectionChange` schedules a state update, and React does not replace the `selection` prop
+    // in the middle of this handler. Passing the old prop would let a drag on a layer that was not
+    // selected capture the group it is replacing, so the visible selection and the moving layers
+    // would disagree.
+    const gestureSelection = alreadySelected ? selection : selectOnly(hit.id);
+    if (!alreadySelected) onSelectionChange(gestureSelection);
     // Clicking a member of an existing selection keeps the group so the drag moves all of it; the
     // click only collapses to that single layer if the pointer never moved.
     // Clicking an already-selected *locked* layer keeps the group: collapsing to a layer that cannot
@@ -237,7 +243,7 @@ export function Artboard({
     setCollapseOnRelease(alreadySelected && !hit.locked ? hit.id : null);
 
     setGesture({
-      ...beginMove({ pointer: point, scene: doc.scene, selection, anchor: hit }),
+      ...beginMove({ pointer: point, scene: doc.scene, selection: gestureSelection, anchor: hit }),
       modifiers: modifiersOf(event),
     });
     event.currentTarget.setPointerCapture(event.pointerId);
