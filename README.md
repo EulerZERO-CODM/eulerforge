@@ -60,9 +60,15 @@ npm start
 | `npm run test:watch`    | Vitest in watch mode                                                |
 | `npm run test:coverage` | Vitest with V8 coverage                                             |
 | `npm run verify`        | Format check → lint → typecheck → tests → production build          |
+| `npm run test:e2e`      | Playwright against the production build (`npm run build` first)     |
+| `npm run test:e2e:install` | Installs the Chromium build Playwright drives                    |
 | `npm run clean`         | Removes `.next`, `out` and `coverage`                               |
 
-`.github/workflows/ci.yml` runs the same gates as separate steps (so a failure names the gate) plus a coverage report, on Node 22.x and 24.x.
+`.github/workflows/ci.yml` runs the same gates as separate steps (so a failure names the gate) plus a
+coverage report, on Node 22.x and 24.x. A second job, `Browser (Chromium)`, installs Chromium and runs
+`npm run test:e2e` against the production build: pointer capture, the browser's own rasteriser and real
+file downloads cannot be verified in jsdom, so they are verified there instead of being described as
+tested.
 
 ## What is actually implemented
 
@@ -149,7 +155,7 @@ Rules that keep this maintainable:
   refuses to become.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — layers, data flow, extension conventions.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — implemented / planned / exploratory, with exit criteria.
-- [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision records (ADR-0001 … ADR-0017).
+- [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision records (ADR-0001 … ADR-0018).
 - [`AGENTS.md`](AGENTS.md) — conventions for humans and coding agents working in this repository.
 
 ## Status and limitations

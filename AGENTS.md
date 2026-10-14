@@ -10,7 +10,14 @@ Conventions for humans and coding agents editing Euler's Forge. Read
 npm ci                 # reproducible install from package-lock.json
 npm run verify         # format:check → lint → typecheck → test → build  (same as CI)
 npm run dev            # development server
+npm run test:e2e       # Playwright against the production build (npm run build first)
 ```
+
+`npm run test:e2e` is the only way to check anything that depends on real browser behaviour — native
+pointer capture, the browser's own canvas rasteriser, a file download. jsdom supplies none of the
+three, so a unit test over those paths proves nothing about them (ADR-0018). Run `npm run test:e2e`
+before claiming such a capability works, and if Chromium is unavailable, say that the check was not
+run rather than implying it passed.
 
 `npm run typecheck` is expected to pass with or without a dev server running (`.next/dev/types` is
 excluded from the type-check project for that reason — see ADR-0003).
@@ -67,6 +74,7 @@ never weaken a check to make something pass.
 | A capability claim   | Entry in `src/core/platform/status.ts` with `verification` evidence.                                    |
 | A roadmap item       | `src/core/platform/roadmap.ts` with dependencies and measurable completion criteria.                    |
 | A dependency         | Justify it in the PR description; prefer platform features. Record anything architectural.              |
+| A browser-only claim | A spec in `e2e/**` that reads persisted state or downloaded bytes; `docs/ROADMAP.md` lists what it still does not reach. |
 | A new ADR            | Append to `docs/DECISIONS.md` with context, decision, reasoning and consequences.                      |
 
 ## Tests

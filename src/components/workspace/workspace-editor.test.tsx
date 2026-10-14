@@ -438,6 +438,37 @@ describe('direct manipulation on the artboard', () => {
 
     expect(historyLabels()).toEqual([]);
     expect(layerFrame(services, 'lyr-a')).toEqual(createRect(100, 100, 200, 200));
+    // The selection survives the cancellation: a dropped gesture leaves a selected layer, not a
+    // cleared one, and the pointer-up that follows must not commit the preview either.
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+    expect(screen.getByLabelText('Layer name')).toHaveValue('Panel');
+  });
+
+  it('cancels an in-flight resize with Escape even when focus is not on the artboard', async () => {
+    const { services } = await mount(
+      sceneOf(rectLayer('lyr-a', { name: 'Panel', x: 100, y: 100, width: 200, height: 200 })),
+      { snapping: false },
+    );
+
+    clickOnArtboard({ x: 200, y: 200 });
+    await waitFor(() => {
+      expectSelected('lyr-a');
+    });
+
+    // Grab a handle: focus is on the handle button, not on the capture surface, which is exactly
+    // where a keyboard user ends up mid-resize.
+    const handle = screen.getByRole('button', { name: 'Resize bottom right' });
+    handle.focus();
+    fireEvent.pointerDown(handle, { clientX: 300, clientY: 300, pointerId: 1, button: 0 });
+    fireEvent.pointerMove(handle, { clientX: 380, clientY: 360, pointerId: 1 });
+    // The listener is global, so the key press does not have to reach the artboard surface.
+    fireEvent.keyDown(handle, { key: 'Escape' });
+    fireEvent.pointerUp(handle, { clientX: 380, clientY: 360, pointerId: 1 });
+
+    expect(historyLabels()).toEqual([]);
+    expect(layerFrame(services, 'lyr-a')).toEqual(createRect(100, 100, 200, 200));
   });
 
   it('resizes through a visible handle, which is labelled and focusable', async () => {

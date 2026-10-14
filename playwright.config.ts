@@ -36,7 +36,9 @@ export default defineConfig({
   outputDir: './test-results',
   use: {
     baseURL: BASE_URL,
-    // Real downloads are part of the contract (PNG/JPEG export), so they must be accepted.
+    // Real downloads are part of the contract (PNG/JPEG export), so they must be accepted: each one
+    // lands in Playwright's own temporary directory and the specs read its bytes from `download.path()`
+    // before it is cleaned up. Nothing is written into the repository.
     acceptDownloads: true,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',

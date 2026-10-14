@@ -23,6 +23,8 @@ src/core/**                documents, studios, assets, learning, persistence, ex
                            commands, events, preferences, platform  ─ framework-free and testable
       │
 src/lib/**                 class names, store primitives, formatting
+      │
+e2e/**                     Playwright specs against the production build ─ nothing in src/ imports it
 ```
 
 ## Layers
