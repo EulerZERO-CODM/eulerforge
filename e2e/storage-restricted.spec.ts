@@ -67,13 +67,52 @@ test.describe('a browser that refuses to store anything', () => {
     const uncaught: string[] = [];
     page.on('pageerror', (error) => uncaught.push(`${error.message}\n${error.stack ?? ''}`));
 
+    // TEMPORARY DIAGNOSTIC: the markup the server served for the current document, so a hydration
+    // failure can name the text that differs instead of only reporting React's error code.
+    let served = '';
+    page.on('response', (response) => {
+      if (response.request().resourceType() !== 'document') return;
+      void response
+        .text()
+        .then((body) => {
+          served = body;
+        })
+        .catch(() => undefined);
+    });
+
+    /** Sentences present in only one of the served markup and the DOM the client rendered. */
+    const servedVersusHydrated = (
+      html: string,
+    ): Promise<{ onlyServed: string[]; onlyLive: string[] }> =>
+      page.evaluate((markup) => {
+        const sentences = (text: string): string[] =>
+          text
+            .split(/(?<=[.!?\u00b7])\s+/)
+            .map((sentence) => sentence.trim())
+            .filter((sentence) => sentence.length > 0);
+        const parsed = new DOMParser().parseFromString(markup, 'text/html');
+        const server = sentences(String(parsed.body.textContent));
+        const live = sentences(String(document.body.textContent));
+        const serverSet = new Set(server);
+        const liveSet = new Set(live);
+        return {
+          onlyServed: [...serverSet].filter((sentence) => !liveSet.has(sentence)).slice(0, 10),
+          onlyLive: [...liveSet].filter((sentence) => !serverSet.has(sentence)).slice(0, 10),
+        };
+      }, html);
+
     /**
      * Every full page load has to hydrate, so each step is checked on its own: the assertion names the
      * step, which is what makes a failure here diagnosable. A refused write or a lost project is a
      * reported state, never an exception.
      */
-    const expectNoThrow = (step: string): void => {
-      expect(uncaught.splice(0), `${step} should not have thrown`).toEqual([]);
+    const expectNoThrow = async (step: string): Promise<void> => {
+      if (uncaught.length === 0) return;
+      const diff = served === '' ? null : await servedVersusHydrated(served);
+      expect(
+        uncaught.splice(0),
+        `${step} should not have thrown${diff ? `; served only: ${JSON.stringify(diff.onlyServed)}; client only: ${JSON.stringify(diff.onlyLive)}` : ''}`,
+      ).toEqual([]);
     };
 
     // 1. It starts. The shell renders and nothing threw on the way in.
@@ -99,13 +138,13 @@ test.describe('a browser that refuses to store anything', () => {
         .getByText('Projects are only in memory and will be lost when this page reloads.')
         .first(),
     ).toBeVisible();
-    expectNoThrow('opening the home page with storage refused');
+    await expectNoThrow('opening the home page with storage refused');
 
     // 4. Creating a project works for this session, through the real creation flow.
     await createProject(page, { title: 'Memory-only session', width: 320, height: 240 });
     await expect(page.getByTestId('artboard')).toBeVisible();
     await expect(notice).toBeVisible();
-    expectNoThrow('creating a project in a memory-only session');
+    await expectNoThrow('creating a project in a memory-only session');
 
     // 5. Editing works: a layer is added, it appears in the layer list, and the edit is recorded in
     //    the history rail. Both are read from the interface, not from storage, which the spec must
@@ -123,13 +162,13 @@ test.describe('a browser that refuses to store anything', () => {
     ).toBeVisible();
     // ...and no status anywhere claims a save, because no save happened: the write went to memory.
     await expect(page.getByRole('status').filter({ hasText: /^Saved/ })).toHaveCount(0);
-    expectNoThrow('editing a layer in a memory-only session');
+    await expectNoThrow('editing a layer in a memory-only session');
 
     // 6. A reload loses it, and the workspace says that rather than showing an empty editor or an
     //    error page: the project is genuinely gone, and the app is honest about why.
     await page.reload();
     await expect(page.getByText('Project not found').first()).toBeVisible();
-    expectNoThrow('reloading a project that only ever lived in memory');
+    await expectNoThrow('reloading a project that only ever lived in memory');
     await expect(page.getByText(/may have been deleted/i).first()).toBeVisible();
     await expect(notice).toBeVisible();
 
@@ -138,7 +177,7 @@ test.describe('a browser that refuses to store anything', () => {
     await expect(page.getByText('This list is not stored on this device').first()).toBeVisible();
     await expect(page.getByText('Your library is empty').first()).toBeVisible();
     await expect(page.getByText('Memory-only session')).toHaveCount(0);
-    expectNoThrow('opening the library after the reload lost the project');
+    await expectNoThrow('opening the library after the reload lost the project');
 
     // Nothing along the way threw: a refused write is a reported state, not a crash.
     expect(uncaught).toEqual([]);
