@@ -22,13 +22,17 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   forbidOnly: process.env.CI !== undefined && process.env.CI !== '',
-  retries: process.env.CI === undefined || process.env.CI === '' ? 0 : 1,
+  // No retries anywhere: a browser suite that only passes on the second attempt is not evidence.
+  retries: 0,
   timeout: 90_000,
   expect: { timeout: 15_000 },
+  // The `github` reporter is what turns a failure into a check-run annotation: the run's log and
+  // artifacts live in storage this repository's tooling cannot always fetch, so the failure text is
+  // published through the API instead of only in a screenshot.
   reporter:
     process.env.CI === undefined || process.env.CI === ''
       ? [['list']]
-      : [['list'], ['html', { open: 'never' }]],
+      : [['list'], ['github'], ['html', { open: 'never' }]],
   outputDir: './test-results',
   use: {
     baseURL: BASE_URL,

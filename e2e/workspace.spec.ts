@@ -15,7 +15,6 @@ import {
   setSnapping,
   stored,
   storedWhen,
-  type StoredFrame,
 } from './fixtures';
 
 /**
@@ -47,17 +46,6 @@ async function dragHandle(
   await page.mouse.move(from.x + delta.x * scale, from.y + delta.y * scale, { steps: 10 });
   if (duringDrag) await duringDrag();
   await page.mouse.up();
-}
-
-function framesOf(
-  names: readonly string[],
-  document: {
-    readonly scene: {
-      readonly layers: readonly { readonly name: string; readonly frame: StoredFrame }[];
-    };
-  },
-): StoredFrame[] {
-  return names.map((name) => layerNamed(document as never, name).frame);
 }
 
 test.describe('opening a project', () => {
@@ -192,12 +180,21 @@ test.describe('artboard interaction', () => {
     await addLayerToSelection(page, 'Text');
 
     const before = await stored(page);
-    const box = framesOf(['Rectangle', 'Text'], before);
     const rectangle = layerNamed(before, 'Rectangle').frame;
     const text = layerNamed(before, 'Text').frame;
 
-    // The two frames are 363 wide and 243 tall as a group; a 1.2x handle drag is +72.6 / +48.6.
-    await dragHandle(page, 'handle-se', { x: 72.6, y: 48.6 });
+    // The handle scales the group box, so the delta is a fifth of that box: a 1.2x scale in both
+    // directions, derived from the document rather than from numbers copied into the test.
+    const box = {
+      x: Math.min(rectangle.x, text.x),
+      y: Math.min(rectangle.y, text.y),
+      right: Math.max(rectangle.x + rectangle.width, text.x + text.width),
+      bottom: Math.max(rectangle.y + rectangle.height, text.y + text.height),
+    };
+    await dragHandle(page, 'handle-se', {
+      x: (box.right - box.x) * 0.2,
+      y: (box.bottom - box.y) * 0.2,
+    });
 
     const after = await storedWhen(
       page,
@@ -206,19 +203,17 @@ test.describe('artboard interaction', () => {
     );
     const scaledRectangle = layerNamed(after, 'Rectangle').frame;
     const scaledText = layerNamed(after, 'Text').frame;
-    const originX = Math.min(rectangle.x, text.x);
-    const originY = Math.min(rectangle.y, text.y);
     const factor = scaledRectangle.width / rectangle.width;
 
-    expect(box).toEqual([rectangle, text]);
     expect(factor).toBeCloseTo(1.2, 2);
-    // One transform for the whole selection: every edge scaled about the pinned top-left corner.
-    expect(scaledRectangle.x).toBeCloseTo(originX + (rectangle.x - originX) * factor, 1);
-    expect(scaledRectangle.y).toBeCloseTo(originY + (rectangle.y - originY) * factor, 1);
+    // One transform for the whole selection: every edge scaled about the pinned top-left corner, so
+    // both layers keep their position within the box and their proportions.
+    expect(scaledRectangle.x).toBeCloseTo(box.x + (rectangle.x - box.x) * factor, 1);
+    expect(scaledRectangle.y).toBeCloseTo(box.y + (rectangle.y - box.y) * factor, 1);
     expect(scaledRectangle.height / rectangle.height).toBeCloseTo(factor, 2);
-    expect(scaledText.x).toBeCloseTo(originX + (text.x - originX) * factor, 1);
+    expect(scaledText.x).toBeCloseTo(box.x + (text.x - box.x) * factor, 1);
+    expect(scaledText.y).toBeCloseTo(box.y + (text.y - box.y) * factor, 1);
     expect(scaledText.width / text.width).toBeCloseTo(factor, 2);
-    expect(scaledText.y).toBeCloseTo(originY + (text.y - originY) * factor, 1);
     expect(await historyLabels(page)).toEqual(['Resize 2 layers']);
 
     // One undo restores both layers: the group is a single history entry, not one per layer.
@@ -289,9 +284,15 @@ test.describe('artboard interaction', () => {
     // Select both from the list: nothing can be transformed, so nothing promises to be.
     await selectLayerFromList(page, 'Rectangle');
     await addLayerToSelection(page, 'Text');
-    await expect(page.getByLabel('Selection X')).toBeVisible();
-    await expect(page.getByTestId('handle-se')).toHaveCount(0);
+
+    // The selection is still visible, the handles are absent, and both the artboard and the rail say
+    // why rather than leaving a dead-looking selection behind.
     await expect(page.getByTestId('selection-overlay')).toBeVisible();
+    await expect(page.getByTestId('handle-se')).toHaveCount(0);
+    await expect(
+      page.locator('p', { hasText: /Every selected layer is locked/i }).first(),
+    ).toBeVisible();
+    await expect(page.getByLabel('Selection X')).toHaveCount(0);
   });
 
   test('leaves a locked layer out of a group gesture made in the layer list', async ({ page }) => {
