@@ -49,7 +49,7 @@ test.describe('raster export', () => {
     const rectangle = layerNamed(await stored(page), 'Rectangle');
     await clickInDocument(page, centreOf(rectangle.frame));
 
-    const format = page.getByLabel('Format');
+    const format = page.getByLabel('Format', { exact: true });
 
     // PNG first: the default export scale is 1x, so 400x300 document pixels become 400x300 pixels.
     await format.selectOption({ label: 'PNG (.png)' });
@@ -89,7 +89,7 @@ test.describe('raster export', () => {
     await createProject(page, { width: 200, height: 150 });
     await addLayer(page, 'Ellipse');
 
-    await page.getByLabel('Format').selectOption({ label: 'PNG (.png)' });
+    await page.getByLabel('Format', { exact: true }).selectOption({ label: 'PNG (.png)' });
     await page.getByLabel('Output scale').selectOption('2');
 
     const [download] = await Promise.all([
@@ -107,7 +107,7 @@ test.describe('raster export', () => {
   test('records the whole export history, one labelled step per action', async ({ page }) => {
     await createProject(page, { width: 200, height: 150 });
     await addLayer(page, 'Rectangle');
-    await page.getByLabel('Format').selectOption({ label: 'PNG (.png)' });
+    await page.getByLabel('Format', { exact: true }).selectOption({ label: 'PNG (.png)' });
 
     await Promise.all([
       page.waitForEvent('download'),

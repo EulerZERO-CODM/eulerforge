@@ -3,16 +3,17 @@ import { expect, test, type Page } from '@playwright/test';
 import {
   addLayer,
   addLayerToSelection,
+  artboardFixture,
   artboardScale,
   centreOf,
   clickInDocument,
   createProject,
   dragInDocument,
+  FIXTURE_LABELS,
   historyLabels,
   layerNamed,
   renameSelectedLayer,
   selectLayerFromList,
-  setSnapping,
   stored,
   storedWhen,
 } from './fixtures';
@@ -70,10 +71,7 @@ test.describe('opening a project', () => {
 
 test.describe('artboard interaction', () => {
   test.beforeEach(async ({ page }) => {
-    await createProject(page);
-    await setSnapping(page, false);
-    await addLayer(page, 'Rectangle');
-    await addLayer(page, 'Text');
+    await artboardFixture(page);
   });
 
   test('selects one layer, modifier-selects another, and removes it again', async ({ page }) => {
@@ -88,7 +86,8 @@ test.describe('artboard interaction', () => {
     // Shift-click adds the text layer without moving anything.
     await clickInDocument(page, text, { modifier: 'Shift' });
     await expect(page.getByLabel('Selection X')).toBeVisible();
-    expect(await historyLabels(page)).toEqual([]);
+    // Selecting is not an edit: the fixture's own steps are still all the history holds.
+    expect(await historyLabels(page)).toEqual([...FIXTURE_LABELS]);
 
     // Shift-clicking the same layer removes it again, leaving the shape selected.
     await clickInDocument(page, text, { modifier: 'Shift' });
@@ -149,7 +148,7 @@ test.describe('artboard interaction', () => {
       width: text.width,
       height: text.height,
     });
-    expect(await historyLabels(page)).toEqual(['Move 2 layers']);
+    expect(await historyLabels(page)).toEqual(['Move 2 layers', ...FIXTURE_LABELS]);
   });
 
   test('resizes a single object through its handle, in one commit', async ({ page }) => {
@@ -172,7 +171,7 @@ test.describe('artboard interaction', () => {
       height: rectangle.height + 30,
     });
     expect(layerNamed(after, 'Text').frame).toEqual(text);
-    expect(await historyLabels(page)).toEqual(['Resize “Rectangle”']);
+    expect(await historyLabels(page)).toEqual(['Resize “Rectangle”', ...FIXTURE_LABELS]);
   });
 
   test('resizes a group as one transform, and undo restores every layer', async ({ page }) => {
@@ -214,7 +213,7 @@ test.describe('artboard interaction', () => {
     expect(scaledText.x).toBeCloseTo(box.x + (text.x - box.x) * factor, 1);
     expect(scaledText.y).toBeCloseTo(box.y + (text.y - box.y) * factor, 1);
     expect(scaledText.width / text.width).toBeCloseTo(factor, 2);
-    expect(await historyLabels(page)).toEqual(['Resize 2 layers']);
+    expect(await historyLabels(page)).toEqual(['Resize 2 layers', ...FIXTURE_LABELS]);
 
     // One undo restores both layers: the group is a single history entry, not one per layer.
     await page.getByRole('button', { name: 'Undo' }).click();
@@ -224,7 +223,7 @@ test.describe('artboard interaction', () => {
       'undo should restore the group',
     );
     expect(layerNamed(undone, 'Text').frame).toEqual(text);
-    expect(await historyLabels(page)).toEqual([]);
+    expect(await historyLabels(page)).toEqual([...FIXTURE_LABELS]);
   });
 
   test('cancels a gesture with Escape and commits nothing', async ({ page }) => {
@@ -243,7 +242,8 @@ test.describe('artboard interaction', () => {
     await dragHandle(page, 'handle-se', { x: 40, y: 40 }, () => page.keyboard.press('Escape'));
 
     expect(layerNamed(await stored(page), 'Rectangle').frame).toEqual(rectangle);
-    expect(await historyLabels(page)).toEqual([]);
+    // Nothing was committed by either cancelled gesture.
+    expect(await historyLabels(page)).toEqual([...FIXTURE_LABELS]);
   });
 
   test('never transforms a locked layer from the artboard', async ({ page }) => {
@@ -266,7 +266,7 @@ test.describe('artboard interaction', () => {
     await clickInDocument(page, centreOf(frame));
 
     expect(layerNamed(await stored(page), 'Rectangle').frame).toEqual(frame);
-    expect(await historyLabels(page)).toEqual(['Lock “Rectangle”']);
+    expect(await historyLabels(page)).toEqual(['Lock “Rectangle”', ...FIXTURE_LABELS]);
     await expect(page.getByTestId('artboard-surface')).toHaveAttribute('title', /locked/i);
   });
 
@@ -317,7 +317,11 @@ test.describe('artboard interaction', () => {
       'the unlocked layer should have moved',
     );
     expect(layerNamed(after, 'Rectangle').frame).toEqual(frame);
-    expect(await historyLabels(page)).toEqual(['Lock “Rectangle”', 'Move “Text”']);
+    expect(await historyLabels(page)).toEqual([
+      'Move “Text”',
+      'Lock “Rectangle”',
+      ...FIXTURE_LABELS,
+    ]);
   });
 
   test('duplicates and reorders a multi-layer selection in single steps', async ({ page }) => {
@@ -365,6 +369,7 @@ test.describe('artboard interaction', () => {
       'Duplicate 2 layers',
       'Rename layer to “Headline”',
       'Rename layer to “Panel”',
+      ...FIXTURE_LABELS,
     ]);
   });
 
@@ -403,7 +408,11 @@ test.describe('artboard interaction', () => {
       'the arrow keys should have nudged the selection',
     );
     expect(layerNamed(after, 'Rectangle').frame.y).toBe(rectangle.y + 10);
-    expect(await historyLabels(page)).toEqual(['Move “Rectangle”', 'Move “Rectangle”']);
+    expect(await historyLabels(page)).toEqual([
+      'Move “Rectangle”',
+      'Move “Rectangle”',
+      ...FIXTURE_LABELS,
+    ]);
   });
 
   test('clears the selection with Escape on the surface', async ({ page }) => {
@@ -414,7 +423,7 @@ test.describe('artboard interaction', () => {
     await page.getByTestId('artboard-surface').focus();
     await page.keyboard.press('Escape');
     await expect(page.getByLabel('Layer name')).toBeHidden();
-    expect(await historyLabels(page)).toEqual([]);
+    expect(await historyLabels(page)).toEqual([...FIXTURE_LABELS]);
   });
 
   test('selects with a marquee, adding when the marquee is modified', async ({ page }) => {
@@ -445,6 +454,7 @@ test.describe('artboard interaction', () => {
     );
     await expect(page.getByLabel('Selection X')).toBeVisible();
 
-    expect(await historyLabels(page)).toEqual([]);
+    // Every one of those marquees selected without editing.
+    expect(await historyLabels(page)).toEqual([...FIXTURE_LABELS]);
   });
 });

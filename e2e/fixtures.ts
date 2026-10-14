@@ -115,6 +115,27 @@ export async function addLayer(page: Page, kind: 'Text' | 'Rectangle' | 'Ellipse
   );
 }
 
+/**
+ * The history the artboard fixture leaves behind, newest first.
+ *
+ * Adding a layer is a real edit, so it stays in the history. Specs spread this into their
+ * expectations instead of pretending the fixture was free: the assertion then says both what the
+ * interaction added *and* that nothing else appeared.
+ */
+export const FIXTURE_LABELS = ['Add text layer', 'Add rectangle layer'] as const;
+
+/**
+ * The standard artboard fixture: a fresh 800x500 project holding a Rectangle and, on top of it, a
+ * Text layer far enough up the canvas that every pointer target is unambiguous. Snapping is off so a
+ * drag lands on exact document pixels.
+ */
+export async function artboardFixture(page: Page): Promise<void> {
+  await createProject(page);
+  await setSnapping(page, false);
+  await addLayer(page, 'Rectangle');
+  await addLayer(page, 'Text');
+}
+
 /** Snapping is on by default; the geometry specs turn it off so a drag lands on exact numbers. */
 export async function setSnapping(page: Page, enabled: boolean): Promise<void> {
   const toggle = page.getByRole('button', { name: /^Snapping (on|off)$/ });
