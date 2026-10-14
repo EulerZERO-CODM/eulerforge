@@ -92,8 +92,10 @@ describe('capability ledger', () => {
     expect(design?.status).toBe('partial');
     // The editing tools exist and are described as existing...
     expect(design?.description).toMatch(/artboard/i);
-    // ...and the gap names what a jsdom suite cannot cover rather than staying silent.
-    // A gap has to be specific about what is *not* covered, so it names the uncovered behaviour.
-    expect(design?.gap).toMatch(/snapping is asserted in document space/i);
+    // ...and the gap names what the browser suite cannot cover rather than staying silent.
+    // Snapping, wrapping and the storage refusal are asserted in Chromium now, so the honest gap is
+    // about what still is not: other browsers, and editing performance.
+    expect(design?.gap).toMatch(/chromium only/i);
+    expect(design?.gap).toMatch(/30-layer|responsiveness/i);
   });
 });

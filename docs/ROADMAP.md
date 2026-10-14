@@ -54,31 +54,51 @@ styling, custom font uploads, reusable styles, templates and brand kits, vector 
 ### What the browser suite covers, and what it does not
 
 `e2e/*.spec.ts` drives the production build in a real Chromium on every push, as a separate CI job
-(`Browser (Chromium)`), so pointer capture, the browser's own rasteriser and file downloads are
-verified by a passing test rather than described as a manual step. The suite opens a project, adds
-text and shape layers, selects and modifier-selects, moves a selection, drags an unselected layer
+(`Browser (Chromium)`), so pointer capture, the browser's own rasteriser, file downloads and the
+screens' honesty about storage are verified by a passing test rather than described as a manual
+step. The suite opens a project, adds text and shape layers, selects and modifier-selects, moves a
+selection, drags an unselected layer
 without dragging the previous selection along, resizes a single object and a group (with undo),
 cancels gestures with Escape, confirms locked layers are never transformed,
 checks bulk duplicate and reorder, exercises the keyboard-only path (focusing the layer list,
 editing the inspector fields, nudging with the arrow keys, and resizing from a focused handle), and
 exports a PNG and a JPEG whose downloaded bytes are inspected (signature plus declared pixel size,
 at 1x and 2x). One export spec decodes the PNG it downloaded and reads pixels out of it: a drawn
-layer's fill is present, and after the layer is hidden every pixel inside its frame is the canvas
-background again. The suite also checks that the artboard's rendered box and the canvas backing store
-match the zoom percentage at 100%, 200% and 25%, and that an export whose graphic cannot load is
+layer's fill is present, after the layer is hidden every pixel inside its frame is the canvas
+background again, and turning the editing guides off changes neither the bytes nor the pixels where a
+guide had been drawn. The suite also checks that the artboard's rendered box and the canvas backing
+store match the zoom percentage at 100%, 200% and 25%, and that an export whose graphic cannot load is
 blocked with the reason shown instead of writing a file.
 
-What it does *not* cover, and is therefore still a manual check:
+Four scenarios are asserted in the browser rather than by hand:
 
-1. Snapping against rendered guide pixels. The suite asserts snapping in document space; that a
-   guide line is drawn on the right screen pixel is not asserted anywhere.
-2. Which words land on which line under real font metrics at each zoom level. The zoom *box* and the
-   drawing buffer are asserted; the wrapped glyphs are not.
-3. Storage refusal in a private window, and reload-and-reopen of a placed graphic with its
-   attribution row.
+1. Snapping against the rendered guide. `e2e/snapping.spec.ts` drags a layer so its centre stops three
+   screen pixels short of the canvas centre line, at 25%, 100% and 200% zoom, and checks that the saved
+   frame landed exactly on the target, that the guide element is drawn at the screen position the
+   document implies (measured from the artboard's own box, never from a viewport offset), and that the
+   strongest vertical line in a screenshot of the artboard - in rows the layer and its selection chrome
+   do not occupy - is that guide.
+2. Text wrapping under real font metrics. `e2e/text-wrapping.spec.ts` reads the ink rows back out of
+   the artboard's own canvas at every zoom and compares the line groups, so a zoom level that rewrapped
+   the text fails; narrowing the box adds lines, and a text layer taller than its box is clipped to it,
+   which is what the export report has always told the user.
+3. Storage refusal in a private window. `e2e/storage-restricted.spec.ts` makes browser storage refuse
+   reads and writes before the application initialises: the app starts, says it is holding work in
+   memory, never claims a durable save, keeps editing for the session, and loses the project on reload
+   while saying so.
+4. Attribution after reopening. `e2e/attribution.spec.ts` places a catalogue graphic through the
+   picker, leaves the project, reopens it from the library, reselects the layer, and compares every
+   value the panel shows with the record saved in the document and with the catalogue it came from.
 
-Run these by hand before claiming them; nothing in the roadmap depends on them, and the gaps are
-recorded against the items they belong to.
+What is still *not* covered automatically, and therefore stays a manual check:
+
+- Browsers other than Chromium: the job runs headless Chromium only.
+- Editing a 30-layer document on a mid-range laptop, the Phase 2 exit criterion about responsiveness.
+- Absolute font metrics: the wrapping spec asserts that one browser puts the same words on the same
+  lines at every zoom, not that those line breaks match a reference font on another machine.
+
+Run these by hand before claiming them; the roadmap items that depend on automated evidence cite the
+spec files directly, and the gaps are recorded against the items they belong to.
 
 ## Planned after Phase 2
 
