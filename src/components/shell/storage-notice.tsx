@@ -3,7 +3,7 @@
 import { ShieldAlert } from 'lucide-react';
 import Link from 'next/link';
 
-import { useForgeServices } from '../../state/forge-provider';
+import { useStorageStatus } from '../../state/hooks';
 import { isVolatile } from '../../state/storage-status';
 import { cn } from '../../lib/cn';
 import { InlineNote } from '../ui/states';
@@ -20,7 +20,7 @@ import { InlineNote } from '../ui/states';
  * simply not been asked yet, and a warning would be contradicted on hydration.
  */
 export function StorageNotice({ className }: { readonly className?: string | undefined }) {
-  const { storageStatus } = useForgeServices();
+  const storageStatus = useStorageStatus();
 
   if (!isVolatile(storageStatus)) return null;
 

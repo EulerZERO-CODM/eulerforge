@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 import {
   addLayer,
-  artboardIsClipped,
+  artboardScale,
   createProject,
   layerNamed,
   readNumberField,
@@ -154,7 +154,12 @@ test.describe('text wrapping with real browser metrics', () => {
     // centres line by line and the counts exactly, so a zoom that rewrapped the text fails here.
     for (const zoom of [25, 200] as const) {
       await setZoom(page, zoom);
-      await expect.poll(() => artboardIsClipped(page)).toBe(false);
+      // The surface under test is the canvas, not the scroll area around it: at 200% a 400x300
+      // document is wider than the pane, and what matters is that the artboard really re-rendered at
+      // the new scale. The canvas keeps a buffer of the whole document whatever the pane is showing,
+      // which is why the reading is taken from its pixels rather than from a screenshot.
+      const { scale } = await artboardScale(page);
+      expect(scale).toBeCloseTo(zoom / 100, 6);
       const reading = await readInkBands(page, columnOf(canvas, frame));
       expect(reading.bands.length, `the number of lines at ${String(zoom)}%`).toBe(
         base.bands.length,

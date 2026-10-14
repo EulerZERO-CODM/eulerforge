@@ -15,7 +15,7 @@ import { IconButton } from '../ui/icon-button';
 import { PageHeader } from '../ui/section';
 import { EmptyState, ErrorState, InlineNote, SkeletonCard } from '../ui/states';
 import { useForgeServices } from '../../state/forge-provider';
-import { useDocumentSession } from '../../state/hooks';
+import { useDocumentSession, useStorageStatus } from '../../state/hooks';
 import { storageBadge } from '../../state/storage-status';
 import type { Result } from '../../core/result';
 import type { DocumentPatch } from '../../state/document-session';
@@ -39,7 +39,8 @@ const EMPTY_SCENE: Scene = { layers: [] };
  */
 export function WorkspaceView({ documentId }: { readonly documentId: string }) {
   const router = useRouter();
-  const { documents, toasts, storageStatus } = useForgeServices();
+  const { documents, toasts } = useForgeServices();
+  const storageStatus = useStorageStatus();
   const badge = storageBadge(storageStatus);
   const { session, state, library } = useDocumentSession(documentId);
   const [deleteOpen, setDeleteOpen] = useState(false);

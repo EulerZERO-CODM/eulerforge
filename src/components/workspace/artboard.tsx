@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import type { ForgeDocument } from '../../core/documents/types';
 import type { Layer, LayerId, Scene } from '../../core/documents/layer-types';
@@ -115,7 +115,22 @@ export function Artboard({
   // the gesture the last keydown produced, whatever React has re-rendered in between.
   const keyResizeRef = useRef<{ gesture: GestureState; point: Point } | null>(null);
 
-  const dpr = pixelRatio ?? (typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1);
+  /**
+   * Device pixel ratio to rasterise at.
+   *
+   * The server cannot know the display density, and reading the browser's value during hydration
+   * would change the canvas' own width and height attributes under React: a hydration error, and a
+   * second paint of the whole page. `useSyncExternalStore` gets both halves right - the hydration
+   * render uses the server's answer, one device pixel per CSS pixel, and the next render uses the
+   * display's real density, which the paint effect below picks up. The renderer is resolution
+   * independent, so nothing about the document or its geometry depends on this.
+   */
+  const displayRatio = useSyncExternalStore(
+    subscribeToDisplayDensity,
+    readDevicePixelRatio,
+    serverDevicePixelRatio,
+  );
+  const dpr = pixelRatio ?? displayRatio;
   const width = Math.max(1, Math.round(doc.canvas.width * zoom));
   const height = Math.max(1, Math.round(doc.canvas.height * zoom));
 
@@ -683,6 +698,33 @@ function box(rect: Rect): React.CSSProperties {
     width: `${String(rect.width)}px`,
     height: `${String(rect.height)}px`,
   };
+}
+
+/**
+ * The density a server render has to assume: one device pixel per CSS pixel.
+ *
+ * It is not a guess about the display - it is the only answer that cannot contradict what the browser
+ * reports during hydration. The client resolves the real value straight afterwards.
+ */
+function serverDevicePixelRatio(): number {
+  return 1;
+}
+
+/** The display's density, or one when the browser does not report a usable number. */
+function readDevicePixelRatio(): number {
+  const ratio = window.devicePixelRatio;
+  return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+}
+
+/**
+ * Density can change while a page is open - a window dragged onto a different display - and is
+ * otherwise fixed for a session, so the subscription is a media query on the current ratio.
+ */
+function subscribeToDisplayDensity(onChange: () => void): () => void {
+  if (typeof window.matchMedia !== 'function') return () => undefined;
+  const query = window.matchMedia(`(resolution: ${String(readDevicePixelRatio())}dppx)`);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
 }
 
 function handleStyle(handle: TransformHandle, screen: Rect): React.CSSProperties {

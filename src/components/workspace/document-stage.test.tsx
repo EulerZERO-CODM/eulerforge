@@ -1,6 +1,8 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useState } from 'react';
+import { act, useState } from 'react';
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { DocumentStage } from './document-stage';
@@ -48,7 +50,7 @@ function canvasBox(): HTMLElement {
 }
 
 /** Guides and snapping are workspace preferences, so the stage takes them as props. */
-function renderStage(canvas: Canvas, services?: TestForgeServices): void {
+function stageElement(canvas: Canvas, services?: TestForgeServices): React.ReactElement {
   const doc = documentWith(canvas);
   const forge = services ?? createTestServices();
   const images: SceneImages = {
@@ -89,11 +91,15 @@ function renderStage(canvas: Canvas, services?: TestForgeServices): void {
     );
   }
 
-  render(
+  return (
     <ForgeProvider services={forge}>
       <Harness />
-    </ForgeProvider>,
+    </ForgeProvider>
   );
+}
+
+function renderStage(canvas: Canvas, services?: TestForgeServices): void {
+  render(stageElement(canvas, services));
 }
 
 /** Makes the measured viewport deterministic; jsdom reports zero for every element by default. */
@@ -301,5 +307,64 @@ describe('DocumentStage zoom', () => {
     expect(
       screen.getByText(/one CSS pixel is drawn with more than one device pixel/i),
     ).toBeInTheDocument();
+  });
+});
+
+/**
+ * Canvas density.
+ *
+ * The defect these tests pin down: the canvas' own width and height attributes were computed from
+ * `window.devicePixelRatio` during render. A server render cannot know the display density, so a
+ * browser that reports anything other than one - every high-density display - got different markup
+ * from the server and React tore the page down and had to re-render it in the browser (its hydration
+ * error #418). The canvas is now sized from the server's answer during hydration and from the real
+ * density immediately afterwards, which the assertions below separate.
+ */
+describe('DocumentStage canvas density', () => {
+  const original = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
+
+  function reportDensity(value: number): void {
+    Object.defineProperty(window, 'devicePixelRatio', { configurable: true, get: () => value });
+  }
+
+  afterEach(() => {
+    if (original) Object.defineProperty(window, 'devicePixelRatio', original);
+    document.body.innerHTML = '';
+  });
+
+  it('hydrates a high-density display without a mismatch, then resizes the canvas to it', async () => {
+    reportDensity(2);
+
+    // The server's markup: one device pixel per CSS pixel, because that is the only answer a server
+    // can honestly give.
+    const html = renderToString(stageElement(landscape));
+    expect(html).toContain('width="1600"');
+    expect(html).toContain('height="900"');
+
+    const container = window.document.createElement('div');
+    container.innerHTML = html;
+    window.document.body.append(container);
+
+    const recovered: unknown[] = [];
+    await act(async () => {
+      hydrateRoot(container, stageElement(landscape), {
+        onRecoverableError: (error) => {
+          recovered.push(error);
+        },
+      });
+    });
+
+    // Nothing to recover: the browser's first render agreed with the server's markup.
+    expect(recovered).toEqual([]);
+
+    // ...and the canvas is then painted at the display's real density, still the same size on screen.
+    const canvas = container.querySelector<HTMLCanvasElement>('[data-testid="document-canvas"]');
+    if (!canvas) throw new Error('the hydrated stage has no canvas');
+    await waitFor(() => {
+      expect(canvas.width).toBe(3200);
+    });
+    expect(canvas.height).toBe(1800);
+    expect(canvas.style.width).toBe('1600px');
+    expect(canvas.style.height).toBe('900px');
   });
 });

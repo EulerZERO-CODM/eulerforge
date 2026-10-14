@@ -8,7 +8,7 @@ import { DOCUMENT_STATUS_LABELS, type DocumentStatus } from '../../core/document
 import { getStudio } from '../../core/studios';
 import { truncate } from '../../lib/format';
 import { useForgeServices } from '../../state/forge-provider';
-import { useDocuments } from '../../state/hooks';
+import { useDocuments, useStorageStatus } from '../../state/hooks';
 import { isVolatile } from '../../state/storage-status';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -26,7 +26,8 @@ type SortKey = 'updated' | 'name' | 'size';
  * this browser's storage — including the count, which is why the header never implies cloud backup.
  */
 export function ProjectLibrary() {
-  const { documents, toasts, storageStatus } = useForgeServices();
+  const { documents, toasts } = useForgeServices();
+  const storageStatus = useStorageStatus();
   const volatile = isVolatile(storageStatus);
   const state = useDocuments();
   const [query, setQuery] = useState('');

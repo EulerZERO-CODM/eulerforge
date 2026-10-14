@@ -75,7 +75,10 @@ test.describe('attribution after reopening a project', () => {
     await createProject(page, { title: 'Attribution check', width: 400, height: 300 });
     await placeGraphic(page, PLACED);
 
-    // The panel is showing right after placement; capture what it says before leaving the project.
+    // Placing a graphic adds the layer but does not select it, so the spec selects it the way a person
+    // would, from the layer list, before capturing what the panel says. The layer carries the
+    // catalogue's own name, which is how it can be found again after a reopen.
+    await selectLayerFromList(page, PLACED);
     const placedPanel = page.getByTestId('attribution-panel');
     await expect(placedPanel).toBeVisible();
     const placedText = (await placedPanel.innerText()).replace(/\s+/g, ' ').trim();
