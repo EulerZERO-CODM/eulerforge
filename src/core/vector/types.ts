@@ -151,3 +151,36 @@ export function createContour(nodes: readonly PathNode[], closed: boolean): Cont
 export function createPath(contours: readonly Contour[]): VectorPath {
   return Object.freeze({ contours: Object.freeze([...contours]) });
 }
+
+/**
+ * Deep-frozen copy of a path.
+ *
+ * Paths live inside documents, and documents are frozen so that a stored scene cannot be mutated
+ * behind the history's back. `createPath` only freezes the outermost array, so anything crossing that
+ * boundary goes through here: a frozen node is what makes "the document is immutable" true rather
+ * than aspirational.
+ */
+export function freezePath(path: VectorPath): VectorPath {
+  return Object.freeze({
+    contours: Object.freeze(
+      path.contours.map((contour) =>
+        Object.freeze({
+          closed: contour.closed,
+          nodes: Object.freeze(
+            contour.nodes.map((node) =>
+              Object.freeze({
+                point: Object.freeze({ x: node.point.x, y: node.point.y }),
+                handleIn: node.handleIn
+                  ? Object.freeze({ x: node.handleIn.x, y: node.handleIn.y })
+                  : null,
+                handleOut: node.handleOut
+                  ? Object.freeze({ x: node.handleOut.x, y: node.handleOut.y })
+                  : null,
+              }),
+            ),
+          ),
+        }),
+      ),
+    ),
+  });
+}

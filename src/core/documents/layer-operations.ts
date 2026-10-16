@@ -13,6 +13,15 @@
 
 import { err, forgeError, ok, type Result } from '../result';
 import { brand } from '../types/brand';
+import {
+  boundsOfPath,
+  freezePath,
+  nodeCount,
+  normaliseVectorStyle,
+  MAX_NODES_TOTAL,
+  type VectorPath,
+  type VectorStyle,
+} from '../vector';
 import { createRect, type Rect } from './geometry';
 import { asLayerId } from './layer-types';
 import type {
@@ -23,11 +32,13 @@ import type {
   Layer,
   LayerId,
   LayerType,
+  PathLayer,
   RectLayer,
   Scene,
   ShapeSettings,
   TextLayer,
   TextSettings,
+  VectorContent,
 } from './layer-types';
 import { MAX_ATTRIBUTION_RECORDS, MAX_LAYERS, MAX_LAYER_NAME_LENGTH } from './layer-types';
 import { DEFAULT_LAYER_OPACITY, defaultNameFor, layerDefaultsFor } from './layer-defaults';
@@ -86,7 +97,47 @@ export function freezeLayer(layer: Layer): Layer {
         frame: Object.freeze(layer.frame),
         image: Object.freeze(layer.image),
       });
+    case 'path':
+      return Object.freeze({
+        ...layer,
+        frame: Object.freeze(layer.frame),
+        vector: freezeVectorContent(layer.vector),
+      });
   }
+}
+
+/** Deep-frozen path + style, so no caller can mutate geometry that is already in a document. */
+export function freezeVectorContent(content: VectorContent): VectorContent {
+  return Object.freeze({
+    path: freezePath(content.path),
+    style: Object.freeze({
+      ...content.style,
+      dashArray: Object.freeze([...content.style.dashArray]),
+    }),
+  });
+}
+
+/**
+ * The frame a path layer's geometry implies.
+ *
+ * Path geometry is stored in document coordinates, so the frame is *derived*: it is the bounding box
+ * of the artwork, kept in sync by every operation that changes the geometry. A degenerate path (a
+ * horizontal line, a single node) legitimately has a zero-height box, and the schema allows that for
+ * path layers only.
+ */
+export function pathFrameOf(path: VectorPath, fallback: Rect): Rect {
+  const bounds = boundsOfPath(path);
+  if (!bounds) return createRect(fallback.x, fallback.y, Math.max(0, fallback.width), Math.max(0, fallback.height));
+  return createRect(bounds.minX, bounds.minY, bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+}
+
+/** A path layer with its frame recomputed. The single place the frame invariant is maintained. */
+export function withFrozenVector(layer: PathLayer): PathLayer {
+  return Object.freeze({
+    ...layer,
+    frame: pathFrameOf(layer.vector.path, layer.frame),
+    vector: freezeVectorContent(layer.vector),
+  });
 }
 
 export type CreateLayerOptions = {
@@ -135,6 +186,14 @@ export type NewLayerInput =
       readonly type: 'image';
       readonly frame: Rect;
       readonly image: Partial<ImageSettings> & { href: string };
+    }
+  | {
+      readonly type: 'path';
+      readonly frame: Rect;
+      readonly vector: {
+        readonly path: VectorPath;
+        readonly style?: Partial<VectorStyle> | undefined;
+      };
     };
 
 /**
@@ -190,6 +249,31 @@ export function createLayer(input: NewLayerInput, options: CreateLayerOptions = 
         },
       };
       return finalise(layer, 'image', options);
+    }
+    case 'path': {
+      if (nodeCount(input.vector.path) > MAX_NODES_TOTAL) {
+        return err(
+          forgeError(
+            'validation-failed',
+            `That artwork has more than ${String(MAX_NODES_TOTAL)} nodes, which is the limit for one layer.`,
+            { retryable: false },
+          ),
+        );
+      }
+      const vector: VectorContent = {
+        path: input.vector.path,
+        style: normaliseVectorStyle(input.vector.style ?? defaults.vectorStyle),
+      };
+      const layer: PathLayer = {
+        ...base,
+        id: brand<'LayerId'>('pending'),
+        name: '',
+        type: 'path',
+        vector,
+        // The frame follows the geometry rather than the caller's guess.
+        frame: pathFrameOf(vector.path, base.frame),
+      };
+      return finalise(layer, 'path', options);
     }
   }
 }
@@ -262,25 +346,17 @@ export type LayerPatch = {
   readonly text?: TextSettings;
   readonly shape?: ShapeSettings;
   readonly image?: ImageSettings;
+  /** Path geometry and paint. The frame is recomputed from the geometry, so it is not patched here. */
+  readonly vector?: VectorContent;
 };
 
 /** Settings a patch may carry, checked against the layer's type before the patch is applied. */
-const PATCH_PROPERTY_TYPES = {
-  text: 'text',
-  shape: 'shape',
-  image: 'image',
-} as const;
-
 function patchMatchesLayerType(layer: Layer, patch: LayerPatch): boolean {
-  for (const property of ['text', 'shape', 'image'] as const) {
-    if (patch[property] === undefined) continue;
-    const expects = PATCH_PROPERTY_TYPES[property];
-    if (property === 'shape') {
-      if (layer.type !== 'rect' && layer.type !== 'ellipse') return false;
-      continue;
-    }
-    if (layer.type !== expects) return false;
-  }
+  if (patch.text !== undefined && layer.type !== 'text') return false;
+  if (patch.image !== undefined && layer.type !== 'image') return false;
+  if (patch.shape !== undefined && layer.type !== 'rect' && layer.type !== 'ellipse') return false;
+  if (patch.vector !== undefined && layer.type !== 'path') return false;
+  if (patch.vector !== undefined && nodeCount(patch.vector.path) > MAX_NODES_TOTAL) return false;
   return true;
 }
 
@@ -345,6 +421,7 @@ export function updateLayerSettings(
     readonly text?: Partial<TextSettings> | undefined;
     readonly shape?: Partial<ShapeSettings> | undefined;
     readonly image?: Partial<ImageSettings> | undefined;
+    readonly style?: Partial<VectorStyle> | undefined;
   },
 ): Result<Scene> {
   const existing = scene.layers.find((layer) => layer.id === id);
@@ -353,7 +430,8 @@ export function updateLayerSettings(
   const mismatched =
     (patch.text !== undefined && existing.type !== 'text') ||
     (patch.image !== undefined && existing.type !== 'image') ||
-    (patch.shape !== undefined && existing.type !== 'rect' && existing.type !== 'ellipse');
+    (patch.shape !== undefined && existing.type !== 'rect' && existing.type !== 'ellipse') ||
+    (patch.style !== undefined && existing.type !== 'path');
   if (mismatched) {
     return err(
       forgeError('validation-failed', 'That setting does not apply to this layer type.', {
@@ -377,7 +455,36 @@ export function updateLayerSettings(
       return patch.image
         ? updateLayer(scene, id, { image: { ...existing.image, ...patch.image } })
         : ok(scene);
+    case 'path':
+      return patch.style
+        ? updateLayer(scene, id, {
+            vector: { path: existing.vector.path, style: normaliseVectorStyle({ ...existing.vector.style, ...patch.style }) },
+          })
+        : ok(scene);
   }
+}
+
+/**
+ * Replaces a path layer's geometry, keeping its frame truthful.
+ *
+ * Any edit that moves nodes, applies a transform or runs a boolean operation goes through here, so
+ * there is exactly one place where "the frame is the geometry's bounding box" is maintained.
+ */
+export function updatePathGeometry(
+  scene: Scene,
+  id: LayerId | string,
+  path: VectorPath,
+): Result<Scene> {
+  const existing = scene.layers.find((layer) => layer.id === id);
+  if (!existing) return err(forgeError('not-found', 'That layer is no longer in the document.'));
+  if (existing.type !== 'path') {
+    return err(
+      forgeError('validation-failed', `Layer "${existing.name}" is a ${existing.type} layer, not a vector path.`, {
+        retryable: false,
+      }),
+    );
+  }
+  return updateLayer(scene, id, { vector: { path, style: existing.vector.style } });
 }
 
 export function deleteLayer(scene: Scene, id: LayerId | string): Result<Scene> {
@@ -679,6 +786,17 @@ export function defaultFrameFor(
     case 'rect':
     case 'ellipse': {
       const size = Math.round(Math.max(80, shortest * 0.33));
+      return createRect(
+        Math.round((canvas.width - size) / 2),
+        Math.round((canvas.height - size) / 2),
+        size,
+        size,
+      );
+    }
+    case 'path': {
+      // An empty path layer has no geometry to take a frame from, so it starts as a centred square
+      // that the first stroke replaces.
+      const size = Math.round(Math.max(64, shortest * 0.25));
       return createRect(
         Math.round((canvas.width - size) / 2),
         Math.round((canvas.height - size) / 2),

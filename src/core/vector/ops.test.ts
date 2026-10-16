@@ -221,7 +221,9 @@ describe('simplifying and scaling', () => {
   it('drops collinear and duplicate nodes from polygonal geometry', () => {
     const noisy = parsed('M0 0 L10 0 L20 0 L20 10 L20 20 L10 20 L0 20 L0 10 L0 0 Z');
     const simplified = simplifyPath(noisy);
-    expect(noisy.contours[0]?.nodes.length).toBe(9);
+    // Nine nodes as written, eight after parsing: the final `L0 0` repeats the start point that `Z`
+    // already implies, so the parser folds the pair into one node (see `mergeClosingNode`).
+    expect(noisy.contours[0]?.nodes.length).toBe(8);
     expect(simplified.contours[0]?.nodes.length).toBe(4);
     // The shape is unchanged: the corner nodes are still exactly where they were.
     expect(boundsOfPath(simplified)).toEqual(boundsOfPath(noisy));

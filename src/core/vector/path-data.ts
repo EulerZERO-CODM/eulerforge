@@ -27,7 +27,7 @@ import {
   type VectorPoint,
 } from './types';
 import { err, forgeError, ok, type Result } from '../result';
-import { roundCoordinate } from './tolerance';
+import { TOLERANCE, roundCoordinate } from './tolerance';
 import { boundsOfPath } from './bounds';
 
 export type PathDataError = {
@@ -258,6 +258,30 @@ function currentLastNode(state: BuildState): PathNode | null {
  * produces an error with the position, and no geometry is returned. Silently skipping a command
  * would drop part of a shape, which is exactly what an importer must never do.
  */
+/**
+ * Folds a repeated start point into the contour it closes.
+ *
+ * SVG writers disagree about how to close a curved contour: some end with `Z` after a curve back to
+ * the start point (so the last node's coordinates equal the first node's), others rely on the curve
+ * itself. Left alone, the first form would import as an extra zero-length node — a duplicate the
+ * user never drew, which then shows up in the node count, in the handles and in every later export.
+ *
+ * When `Z` arrives and the last node sits exactly on the first, the two describe one node: the
+ * curve arriving at the start point becomes the closing segment, so its incoming handle moves onto
+ * the first node and the duplicate is dropped.
+ */
+function mergeClosingNode(state: BuildState): void {
+  const nodes = state.nodes;
+  if (nodes.length < 3) return;
+  const first = nodes[0];
+  const last = nodes[nodes.length - 1];
+  if (!first || !last) return;
+  if (Math.abs(first.point.x - last.point.x) > TOLERANCE.point) return;
+  if (Math.abs(first.point.y - last.point.y) > TOLERANCE.point) return;
+  nodes[0] = { point: first.point, handleIn: last.handleIn, handleOut: first.handleOut };
+  nodes.pop();
+}
+
 export function parsePathData(source: string): Result<ParsedPathData> {
   if (typeof source !== 'string' || source.trim().length === 0) {
     return err(forgeError('validation-failed', 'Path data is empty.', { retryable: false }));
@@ -533,6 +557,7 @@ export function parsePathData(source: string): Result<ParsedPathData> {
         if (!state.started) return fail('"Z" appears before any move command');
         if (state.nodes.length > 0) {
           state.closed = true;
+          mergeClosingNode(state);
           flush(state);
         }
         state.current = state.subpathStart;

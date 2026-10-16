@@ -15,9 +15,14 @@
  * 4. **Orientation** — in a compound path, outer rings wind one way and holes the other. Two outer
  *    rings with opposite windings would cancel each other under a non-zero fill and produce a
  *    visually empty shape from a "successful" union.
- * 5. **Containment** — every hole lies inside an outer ring. A hole outside every outer ring is
- *    lost geometry: it is drawn as a filled island instead of a void. (An outer ring *inside* a hole
- *    is not a defect: that is an island in a void, which is what a non-zero fill draws.)
+ * 5. **Containment** — every hole lies inside an outer ring. A ring wound as a hole but sitting
+ *    outside every outer ring is reported as a *warning*, not a defect: under a non-zero fill it
+ *    still paints its own interior, as a filled island rather than as a void. It is a warning
+ *    because "this was meant to subtract from something and is not subtracting" is worth knowing,
+ *    and it is not an error because the geometry does render as drawn. A single negatively wound
+ *    contour is therefore perfectly valid artwork — which is what an imported file often contains,
+ *    since SVG does not require outer rings to wind clockwise until you ask for even-odd. (An outer
+ *    ring *inside* a hole is the same situation mirrored, and is equally fine.)
  * 6. **Degenerate contours** — a contour enclosing no area draws nothing and should not be part of a
  *    "valid" result. Reported separately from self-intersection because the fix is different.
  *
@@ -266,9 +271,9 @@ export function checkTopology(path: VectorPath, options: TopologyOptions = {}): 
       issues.push(
         issue(
           'hole-outside-outer',
-          `Contour ${holeIndex} winds as a hole but lies outside every outer contour, so its area is not subtracted from anything.`,
+          `Contour ${holeIndex} winds as a hole but lies outside every outer contour, so it paints its own interior as an island instead of subtracting from another shape.`,
           holeIndex,
-          true,
+          false,
         ),
       );
     }

@@ -10,6 +10,7 @@
  */
 
 import type { Rect } from '../documents/geometry';
+import { stylePaintsSomething, type VectorPath, type VectorStyle } from '../vector';
 import type {
   ImageFit,
   ImageLayer,
@@ -95,7 +96,18 @@ export type TextOp = {
   readonly opacity: number;
 };
 
-export type DrawOp = BackgroundOp | RectOp | EllipseOp | ImageOp | TextOp;
+export type PathOp = {
+  readonly kind: 'path';
+  readonly layerId: string;
+  readonly layerName: string;
+  readonly frame: Rect;
+  /** Geometry in the layer's own coordinates; the painter maps it through `frame`. */
+  readonly path: VectorPath;
+  readonly style: VectorStyle;
+  readonly opacity: number;
+};
+
+export type DrawOp = BackgroundOp | RectOp | EllipseOp | ImageOp | TextOp | PathOp;
 
 export type RenderPlan = {
   /** Full document size in document pixels, before any output scale. */
@@ -171,6 +183,26 @@ export function buildRenderPlan(document: ForgeDocument, options: BuildPlanOptio
 
 function opFor(layer: Layer, options: BuildPlanOptions, issues: RenderIssue[]): DrawOp | null {
   switch (layer.type) {
+    case 'path': {
+      if (!stylePaintsSomething(layer.vector.style)) {
+        issues.push({
+          kind: 'empty-layer',
+          layerId: layer.id,
+          layerName: layer.name,
+          message: `"${layer.name}" has neither a fill nor a stroke, so it draws nothing.`,
+          blocking: false,
+        });
+      }
+      return {
+        kind: 'path',
+        layerId: layer.id,
+        layerName: layer.name,
+        frame: layer.frame,
+        path: layer.vector.path,
+        style: layer.vector.style,
+        opacity: layer.opacity,
+      };
+    }
     case 'rect':
     case 'ellipse': {
       const shape = layer.shape;

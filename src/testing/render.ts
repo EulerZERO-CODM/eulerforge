@@ -49,6 +49,7 @@ export function createRecordingContext(): {
     globalCompositeOperation: 'source-over',
     lineWidth: 1,
     lineJoin: 'miter',
+    lineCap: 'butt',
     imageSmoothingEnabled: true,
     font: '',
     textAlign: 'left',
@@ -94,6 +95,12 @@ export function createRecordingContext(): {
     set lineJoin(value: string) {
       proxyState.lineJoin = value;
     },
+    get lineCap() {
+      return proxyState.lineCap;
+    },
+    set lineCap(value: string) {
+      proxyState.lineCap = value;
+    },
     get imageSmoothingEnabled() {
       return proxyState.imageSmoothingEnabled;
     },
@@ -133,10 +140,12 @@ export function createRecordingContext(): {
     strokeRect: record('strokeRect') as PainterContext['strokeRect'],
     beginPath: record('beginPath'),
     closePath: record('closePath'),
-    fill: record('fill'),
+    fill: record('fill') as PainterContext['fill'],
     stroke: record('stroke'),
     moveTo: record('moveTo') as PainterContext['moveTo'],
     lineTo: record('lineTo') as PainterContext['lineTo'],
+    bezierCurveTo: record('bezierCurveTo') as PainterContext['bezierCurveTo'],
+    setLineDash: record('setLineDash') as PainterContext['setLineDash'],
     rect: record('rect'),
     clip: record('clip'),
     roundRect: record('roundRect') as PainterContext['roundRect'],

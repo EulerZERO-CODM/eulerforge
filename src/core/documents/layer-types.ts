@@ -12,11 +12,12 @@
  */
 
 import { brand, type Branded } from '../types/brand';
+import type { VectorPath, VectorStyle } from '../vector';
 import type { Rect } from './geometry';
 
 export type LayerId = Branded<string, 'LayerId'>;
 
-export const LAYER_TYPES = ['text', 'rect', 'ellipse', 'image'] as const;
+export const LAYER_TYPES = ['text', 'rect', 'ellipse', 'image', 'path'] as const;
 export type LayerType = (typeof LAYER_TYPES)[number];
 
 export const LAYER_TYPE_LABELS: Readonly<Record<LayerType, string>> = {
@@ -24,6 +25,7 @@ export const LAYER_TYPE_LABELS: Readonly<Record<LayerType, string>> = {
   rect: 'Rectangle',
   ellipse: 'Ellipse',
   image: 'Graphic',
+  path: 'Vector path',
 };
 
 /**
@@ -173,7 +175,26 @@ export type ImageLayer = BaseLayerFields & {
   readonly image: ImageSettings;
 };
 
-export type Layer = TextLayer | RectLayer | EllipseLayer | ImageLayer;
+/**
+ * A vector path on the artboard.
+ *
+ * Geometry is stored in **document coordinates**, not relative to `frame`: a node drag, a boolean
+ * operation and an import all work in the space the user sees, and the frame is recomputed from the
+ * geometry rather than being the thing that positions it. `frame` therefore always equals the
+ * bounds of `path` (the schema checks this), which keeps selection, hit testing, reordering and the
+ * layer tree working exactly as they do for the other layer types.
+ */
+export type PathLayer = BaseLayerFields & {
+  readonly type: 'path';
+  readonly vector: VectorContent;
+};
+
+export type VectorContent = {
+  readonly path: VectorPath;
+  readonly style: VectorStyle;
+};
+
+export type Layer = TextLayer | RectLayer | EllipseLayer | ImageLayer | PathLayer;
 
 /**
  * The ordered scene. Index 0 is the bottom-most layer.
@@ -227,6 +248,10 @@ export function isShapeLayer(layer: Layer): layer is RectLayer | EllipseLayer {
 
 export function isImageLayer(layer: Layer): layer is ImageLayer {
   return layer.type === 'image';
+}
+
+export function isPathLayer(layer: Layer): layer is PathLayer {
+  return layer.type === 'path';
 }
 
 /** Narrowing helper used by the shape inspector, which treats rectangles specially. */

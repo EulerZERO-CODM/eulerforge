@@ -15,7 +15,7 @@ import { formatIssues, forgeDocumentSchema } from './schema';
 import type { ForgeDocument } from './types';
 import { SCREEN_DPI } from './units';
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 export type Migration = {
   readonly from: number;
@@ -105,7 +105,22 @@ const migrateV1ToV2: Migration = {
   },
 };
 
-export const MIGRATIONS: readonly Migration[] = [migrateV0ToV1, migrateV1ToV2];
+/**
+ * v2 → v3: documents can hold vector path layers.
+ *
+ * Nothing has to be rewritten: a v2 document simply has no path layers, and every field it carries
+ * means the same thing. The version is still bumped, because a v3 *writer* can produce documents a
+ * v2 build cannot read, and the rule in ADR-0005 is that a reader must be able to tell. Stamping an
+ * explicit step here means the migration chain is complete and testable rather than implicit.
+ */
+const migrateV2ToV3: Migration = {
+  from: 2,
+  to: 3,
+  description: 'Documents may contain vector path layers; existing content is preserved unchanged.',
+  migrate: (raw) => ({ ...raw, schemaVersion: 3 }),
+};
+
+export const MIGRATIONS: readonly Migration[] = [migrateV0ToV1, migrateV1ToV2, migrateV2ToV3];
 
 export function readSchemaVersion(raw: unknown): number | undefined {
   const record = asRecord(raw);

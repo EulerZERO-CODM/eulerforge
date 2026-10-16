@@ -12,7 +12,8 @@
 
 import type { Rect } from '../documents/geometry';
 import { alignmentOffset, lineBaseline, paintTextLine } from './text-layout';
-import type { DrawOp, EllipseOp, ImageOp, RectOp, RenderPlan, TextOp } from './plan';
+import { segmentsOf, stylePaintsSomething } from '../vector';
+import type { DrawOp, EllipseOp, ImageOp, PathOp, RectOp, RenderPlan, TextOp } from './plan';
 
 export type PainterContext = {
   fillStyle: string | CanvasGradient | CanvasPattern;
@@ -21,6 +22,7 @@ export type PainterContext = {
   globalCompositeOperation: string;
   lineWidth: number;
   lineJoin: string;
+  lineCap: string;
   imageSmoothingEnabled: boolean;
   save(): void;
   restore(): void;
@@ -31,10 +33,20 @@ export type PainterContext = {
   strokeRect(x: number, y: number, width: number, height: number): void;
   beginPath(): void;
   closePath(): void;
-  fill(): void;
+  /** `rule` is the SVG fill rule name; the DOM's own `fill(fillRule?)` matches this. */
+  fill(rule?: string): void;
   stroke(): void;
   moveTo(x: number, y: number): void;
   lineTo(x: number, y: number): void;
+  bezierCurveTo(
+    control1X: number,
+    control1Y: number,
+    control2X: number,
+    control2Y: number,
+    x: number,
+    y: number,
+  ): void;
+  setLineDash(segments: readonly number[]): void;
   rect(x: number, y: number, width: number, height: number): void;
   clip(): void;
   roundRect(x: number, y: number, width: number, height: number, radii: number): void;
@@ -149,7 +161,73 @@ export function paintOp(context: PainterContext, op: DrawOp): void {
     case 'text':
       paintText(context, op);
       return;
+    case 'path':
+      paintPath(context, op);
+      return;
   }
+}
+
+/**
+ * Draws a vector path with a canvas context.
+ *
+ * Contours are walked segment by segment, so curves are drawn as curves rather than as a polygonal
+ * approximation: the renderer a user sees and the SVG file they export describe the same shape.
+ */
+export function paintPath(context: PainterContext, op: PathOp): void {
+  const { style } = op;
+  if (!stylePaintsSomething(style)) return;
+
+  context.save();
+  context.globalAlpha = op.opacity;
+  context.globalCompositeOperation = 'source-over';
+
+  // The same segment derivation the kernel uses, so a curve is painted exactly where the geometry
+  // says it is and not according to a second, parallel reading of the node data.
+  const trace = (): void => {
+    for (const contour of op.path.contours) {
+      const first = contour.nodes[0];
+      if (!first) continue;
+      context.moveTo(first.point.x, first.point.y);
+      for (const segment of segmentsOf(contour)) {
+        if (segment.kind === 'cubic' && segment.control1 && segment.control2) {
+          context.bezierCurveTo(
+            segment.control1.x,
+            segment.control1.y,
+            segment.control2.x,
+            segment.control2.y,
+            segment.to.x,
+            segment.to.y,
+          );
+          continue;
+        }
+        context.lineTo(segment.to.x, segment.to.y);
+      }
+      if (contour.closed) context.closePath();
+    }
+  };
+
+  if (style.fill !== null && style.fillOpacity > 0) {
+    context.globalAlpha = op.opacity * style.fillOpacity;
+    context.beginPath();
+    trace();
+    context.fillStyle = style.fill;
+    context.fill(style.fillRule);
+  }
+
+  if (style.stroke !== null && style.strokeWidth > 0 && style.strokeOpacity > 0) {
+    context.globalAlpha = op.opacity * style.strokeOpacity;
+    context.beginPath();
+    trace();
+    context.strokeStyle = style.stroke;
+    context.lineWidth = style.strokeWidth;
+    context.lineJoin = style.lineJoin;
+    context.lineCap = style.lineCap;
+    context.setLineDash(style.dashArray);
+    context.stroke();
+    context.setLineDash([]);
+  }
+
+  context.restore();
 }
 
 function paintShape(context: PainterContext, op: RectOp | EllipseOp, path: () => void): void {

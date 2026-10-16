@@ -68,9 +68,18 @@ function freezePatch(patch: DocumentPatch): DocumentPatch {
 /* Creating                                                                                      */
 /* -------------------------------------------------------------------------------------------- */
 
+/**
+ * Toolbar-creatable layer types.
+ *
+ * `path` is excluded because a path layer is created by drawing with a tool, not by pressing
+ * "add a blank path": an empty vector layer with a frame and no geometry is not something a user can
+ * do anything with, and offering the button would be a control that does not do what it says.
+ */
+export type CreatableLayerType = Exclude<LayerType, 'path'>;
+
 export function addLayerCommand(
   document: ForgeDocument,
-  type: LayerType,
+  type: CreatableLayerType,
   generateId?: () => string,
 ): Result<SceneCommand> {
   const frame = defaultFrameFor(type, document.canvas);

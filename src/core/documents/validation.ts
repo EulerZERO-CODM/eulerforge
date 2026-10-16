@@ -6,8 +6,16 @@
  * about whether a canvas is valid.
  */
 
+import { validatePath, VECTOR_STYLE_LIMITS } from '../vector';
 import type { Rect } from './geometry';
-import type { ImageSettings, Layer, Scene, ShapeSettings, TextSettings } from './layer-types';
+import type {
+  ImageSettings,
+  Layer,
+  Scene,
+  ShapeSettings,
+  TextSettings,
+  VectorContent,
+} from './layer-types';
 import {
   FONT_STACKS,
   FONT_WEIGHTS,
@@ -266,8 +274,36 @@ export function validateLayer(layer: Layer): readonly FieldValidation[] {
     case 'image':
       issues.push(...validateImageSettings(layer.image));
       break;
+    case 'path':
+      issues.push(...validateVectorContent(layer.vector));
+      break;
   }
 
+  return issues;
+}
+
+/**
+ * Structural and geometric checks for a vector layer's content.
+ *
+ * The same properties the storage schema checks, evaluated here as well because the editor reaches
+ * this function *before* a change is committed: telling a user "that node would fall outside the
+ * supported range" while they drag beats rejecting their document on the next reload.
+ */
+export function validateVectorContent(content: VectorContent): readonly FieldValidation[] {
+  const issues: FieldValidation[] = [];
+  for (const issue of validatePath(content.path)) {
+    issues.push({ field: 'vector.path', message: issue.message });
+  }
+  const { style } = content;
+  if (style.strokeWidth < 0 || style.strokeWidth > VECTOR_STYLE_LIMITS.maxStrokeWidth) {
+    issues.push({
+      field: 'vector.style.strokeWidth',
+      message: `Stroke width must be between 0 and ${String(VECTOR_STYLE_LIMITS.maxStrokeWidth)}.`,
+    });
+  }
+  if (style.fillOpacity < 0 || style.fillOpacity > 1 || style.strokeOpacity < 0 || style.strokeOpacity > 1) {
+    issues.push({ field: 'vector.style.opacity', message: 'Opacity must be between 0 and 1.' });
+  }
   return issues;
 }
 

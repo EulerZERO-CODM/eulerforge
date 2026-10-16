@@ -9,10 +9,22 @@
 import { z } from 'zod';
 
 import { brand, type Branded } from '../types/brand';
+import {
+  boundsOfPath,
+  MAX_CONTOURS,
+  MAX_NODES_PER_CONTOUR,
+  MAX_NODES_TOTAL,
+  STROKE_LINE_CAPS,
+  STROKE_LINE_JOINS,
+  VECTOR_STYLE_LIMITS,
+  type VectorPath,
+  type VectorStyle,
+} from '../vector';
 import type {
   AttributionRecord,
   ImageLayer,
   Layer,
+  PathLayer,
   RectLayer,
   Scene,
   TextLayer,
@@ -215,11 +227,134 @@ export const imageLayerSchema = z.object({
   image: imageSettingsSchema,
 });
 
+/* -------------------------------------------------------------------------------------------- */
+/* Vector paths                                                                                   */
+/* -------------------------------------------------------------------------------------------- */
+
+/**
+ * A path coordinate, in document pixels.
+ *
+ * Bounded by the same limit as a layer frame: a node the user cannot see, select or scroll to is
+ * data a stored document would carry forever without ever being reachable.
+ */
+const pathCoordinate = finiteNumber('coordinate')
+  .min(-MAX_FRAME_COORDINATE)
+  .max(MAX_FRAME_COORDINATE);
+
+const pointSchema = z.object({ x: pathCoordinate, y: pathCoordinate });
+
+export const pathNodeSchema = z.object({
+  point: pointSchema,
+  handleIn: pointSchema.nullable(),
+  handleOut: pointSchema.nullable(),
+});
+
+/**
+ * One subpath.
+ *
+ * The first node is never repeated at the end — a stored path is a canonical description, so two
+ * documents that describe the same shape are the same bytes.
+ */
+export const pathContourSchema = z.object({
+  nodes: z
+    .array(pathNodeSchema)
+    .min(1, 'a contour needs at least one node')
+    .max(MAX_NODES_PER_CONTOUR, `a contour may hold at most ${MAX_NODES_PER_CONTOUR} nodes`),
+  closed: z.boolean(),
+});
+
+export const vectorPathSchema = z
+  .object({
+    contours: z.array(pathContourSchema).max(MAX_CONTOURS, `a path may hold at most ${MAX_CONTOURS} contours`),
+  })
+  .superRefine((path, ctx) => {
+    const total = path.contours.reduce((sum, contour) => sum + contour.nodes.length, 0);
+    if (total > MAX_NODES_TOTAL) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['contours'],
+        message: `a path may hold at most ${MAX_NODES_TOTAL} nodes (found ${total})`,
+      });
+    }
+  }) satisfies z.ZodType<VectorPath>;
+
+export const vectorStyleSchema = z.object({
+  fill: hexColorSchema.nullable(),
+  fillRule: z.enum(['nonzero', 'evenodd']),
+  fillOpacity: finiteNumber('fillOpacity').min(0).max(1),
+  stroke: hexColorSchema.nullable(),
+  strokeWidth: finiteNumber('strokeWidth').min(0).max(VECTOR_STYLE_LIMITS.maxStrokeWidth),
+  strokeOpacity: finiteNumber('strokeOpacity').min(0).max(1),
+  lineCap: z.enum(STROKE_LINE_CAPS),
+  lineJoin: z.enum(STROKE_LINE_JOINS),
+  dashArray: z
+    .array(finiteNumber('dash').min(0).max(VECTOR_STYLE_LIMITS.maxDashLength))
+    .max(VECTOR_STYLE_LIMITS.maxDashEntries)
+    .readonly(),
+}) satisfies z.ZodType<VectorStyle>;
+
+/** A path layer's frame may legitimately be degenerate: a straight line is one pixel tall? No — zero. */
+export const pathLayerFrameSchema = z.object({
+  x: finiteNumber('x').min(-MAX_FRAME_COORDINATE).max(MAX_FRAME_COORDINATE),
+  y: finiteNumber('y').min(-MAX_FRAME_COORDINATE).max(MAX_FRAME_COORDINATE),
+  width: finiteNumber('width').min(0).max(MAX_LAYER_SIZE),
+  height: finiteNumber('height').min(0).max(MAX_LAYER_SIZE),
+});
+
+/**
+ * A vector path layer.
+ *
+ * The frame is the bounding box of the geometry and every operation keeps it that way, so the two
+ * are validated together: a stored layer whose frame disagrees with its geometry would make
+ * selection, hit testing and the layer tree point at a box that is not where the artwork is.
+ */
+export const pathLayerSchema = z
+  .object({
+    id: idSchema('LayerId'),
+    name: layerNameSchema,
+    visible: z.boolean(),
+    locked: z.boolean(),
+    opacity: finiteNumber('opacity')
+      .min(0, 'opacity cannot be below 0')
+      .max(1, 'opacity cannot exceed 1'),
+    frame: pathLayerFrameSchema,
+    type: z.literal('path'),
+    vector: z.object({ path: vectorPathSchema, style: vectorStyleSchema }),
+  })
+  .superRefine((layer, ctx) => {
+    const bounds = boundsOfPath(layer.vector.path);
+    const expected = bounds
+      ? { x: bounds.minX, y: bounds.minY, width: bounds.maxX - bounds.minX, height: bounds.maxY - bounds.minY }
+      : null;
+    if (!expected) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['vector', 'path'],
+        message: 'a vector layer must contain at least one node',
+      });
+      return;
+    }
+    const drift = Math.max(
+      Math.abs(layer.frame.x - expected.x),
+      Math.abs(layer.frame.y - expected.y),
+      Math.abs(layer.frame.width - expected.width),
+      Math.abs(layer.frame.height - expected.height),
+    );
+    if (drift > 1e-6) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['frame'],
+        message: `the frame must match the geometry's bounds (off by ${drift.toFixed(6)}px)`,
+      });
+    }
+  });
+
 export const layerSchema = z.discriminatedUnion('type', [
   textLayerSchema,
   rectLayerSchema,
   ellipseLayerSchema,
   imageLayerSchema,
+  pathLayerSchema,
 ]);
 
 /**
@@ -352,6 +487,10 @@ export type _RectLayerSchemaMatchesDomain = Assignable<z.infer<typeof rectLayerS
 export type _ImageLayerSchemaMatchesDomain = Assignable<
   z.infer<typeof imageLayerSchema>,
   ImageLayer
+>;
+export type _PathLayerSchemaMatchesDomain = Assignable<
+  z.infer<typeof pathLayerSchema>,
+  PathLayer
 >;
 export type _AttributionSchemaMatchesDomain = Assignable<
   z.infer<typeof attributionRecordSchema>,

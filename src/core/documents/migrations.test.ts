@@ -187,7 +187,7 @@ describe('migrateDocument — v1 to v2', () => {
   });
 
   it('rejects a document from a newer schema instead of dropping its scene', () => {
-    const result = migrateDocument({ ...versionOneRecord, schemaVersion: 3 });
+    const result = migrateDocument({ ...versionOneRecord, schemaVersion: CURRENT_SCHEMA_VERSION + 1 });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('unsupported');
   });
@@ -195,8 +195,16 @@ describe('migrateDocument — v1 to v2', () => {
 
 describe('pendingMigrations', () => {
   it('lists the steps a version still has to pass through', () => {
-    expect(pendingMigrations(0)).toHaveLength(2);
-    expect(pendingMigrations(1)).toHaveLength(1);
+    // One step per published version, so a version-0 record walks the whole documented chain.
+    expect(pendingMigrations(0)).toHaveLength(CURRENT_SCHEMA_VERSION);
+    expect(pendingMigrations(1)).toHaveLength(CURRENT_SCHEMA_VERSION - 1);
+    expect(pendingMigrations(CURRENT_SCHEMA_VERSION - 1)).toHaveLength(1);
     expect(pendingMigrations(CURRENT_SCHEMA_VERSION)).toHaveLength(0);
+  });
+
+  it('adds the vector-layer step as the last step, so nothing older is rewritten', () => {
+    const steps = pendingMigrations(2);
+    expect(steps.map((step) => `${String(step.from)}->${String(step.to)}`)).toEqual(['2->3']);
+    expect(steps[0]?.description).toMatch(/vector path layers/i);
   });
 });

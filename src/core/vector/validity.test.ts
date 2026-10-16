@@ -103,13 +103,18 @@ describe('defects', () => {
     expect(report.valid).toBe(false);
   });
 
-  it('detects a hole that lies outside every outer contour', () => {
-    // Clockwise square (outer), then a counter-clockwise square far away: a hole in nothing.
+  it('flags a hole that lies outside every outer contour without calling the path invalid', () => {
+    // Clockwise square (outer), then a counter-clockwise square far away: a hole in nothing. Under a
+    // non-zero fill it still paints its own interior, so this is a warning: the drawing is not what
+    // the author of a *boolean* probably intended, but it is not lost geometry either.
     const report = checkTopology(
       parsed('M0 0 L10 0 L10 10 L0 10 Z M100 100 L100 110 L110 110 L110 100 Z'),
     );
-    expect(report.issues.some((entry) => entry.code === 'hole-outside-outer')).toBe(true);
-    expect(report.valid).toBe(false);
+    const issue = report.issues.find((entry) => entry.code === 'hole-outside-outer');
+    expect(issue).toBeDefined();
+    expect(issue?.invalid).toBe(false);
+    expect(report.valid).toBe(true);
+    expect(report.holeContours).toEqual([1]);
   });
 
   it('reports structural failures separately from topological ones', () => {
@@ -149,5 +154,28 @@ describe('tolerance reporting', () => {
   it('is a pure predicate: repeated checks agree', () => {
     const path = parsed('M0 0 L10 0 L10 10 L0 10 Z M20 20 L20 30 L30 30 L30 20 Z');
     expect(isTopologicallyValid(path)).toBe(isTopologicallyValid(path));
+  });
+});
+
+describe('winding is interpretive, not destructive', () => {
+  it('treats a lone negatively wound contour as valid artwork, with a warning', () => {
+    // Screenshot-clockwise is positive in this kernel, so this square is wound "backwards".
+    const counterClockwise = parsed('M0 0 L0 100 L100 100 L100 0 Z');
+    const report = checkTopology(counterClockwise);
+    expect(report.valid).toBe(true);
+    expect(report.holeContours).toEqual([0]);
+    expect(report.outerContours).toEqual([]);
+    const issue = report.issues.find((entry) => entry.code === 'hole-outside-outer');
+    expect(issue?.invalid).toBe(false);
+    expect(issue?.message).toContain('island');
+  });
+
+  it('still refuses geometry that cannot be rendered deterministically', () => {
+    const figureEight = parsed('M0 0 L10 10 L10 0 L0 10 Z');
+    const report = checkTopology(figureEight);
+    expect(report.valid).toBe(false);
+    expect(report.issues.some((entry) => entry.code === 'self-intersection' && entry.invalid)).toBe(
+      true,
+    );
   });
 });
