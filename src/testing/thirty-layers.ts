@@ -1,19 +1,28 @@
 /**
- * Test support: the deterministic thirty-layer document.
+ * A deterministic thirty-layer document, built with the editor's own commands.
  *
- * The Phase 2 acceptance criterion is that editing a thirty-layer document stays responsive, and the
- * only honest way to check that is to drive a real one. This builder produces that document through
- * the *real editor commands* — the same `addLayerCommand`, `placeAssetCommand` and settings commands
- * the toolbar and inspector run — so the fixture cannot drift away from what the application can
- * actually create, and the graphics carry genuine catalogue attribution records.
+ * Phase 2 claims that editing a thirty-layer document stays responsive. Measuring that claim needs a
+ * document that exercises the real render and edit path — text that wraps, graphics that must be
+ * decoded, shapes with strokes and radii — rather than thirty identical rectangles. This module
+ * builds one, once, and hands the same document to the unit tests and to the browser benchmark.
  *
- * Everything is deterministic: fixed ids, a fixed clock, a fixed layout. Two runs of the browser
- * benchmark therefore measure the same picture.
+ * Nothing here is a hand-written object literal: every layer is created by the same command the
+ * toolbar runs (`addLayerCommand`, `placeAssetCommand`) and then moved, named and styled by the same
+ * commands the inspector runs. A fixture built by bypassing the commands could be a shape the
+ * editors can never produce, and the benchmark would then be measuring the wrong thing. The clock
+ * and the id generator are injected, so the result is byte-identical on every run.
+ *
+ * It is test support only: the shipped application never imports this module.
  */
 
 import { SAMPLE_ASSETS } from '../core/assets/data';
+import { brand } from '../core/types/brand';
 import { isPlaceable } from '../core/assets/types';
+import type { AssetRecord } from '../core/assets/types';
+import { applyDocumentPatch, createDocument, DEFAULT_CANVAS } from '../core/documents/factories';
 import { createRect, type Rect } from '../core/documents/geometry';
+import type { ImageSettings, ShapeSettings, TextSettings } from '../core/documents/layer-types';
+import type { Canvas, ForgeDocument } from '../core/documents/types';
 import {
   addLayerCommand,
   placeAssetCommand,
@@ -23,287 +32,327 @@ import {
   setLayersOpacityCommand,
   setShapeSettingsCommand,
   setTextSettingsCommand,
+  type SceneCommand,
 } from '../core/editor/commands';
-import { createDocument, applyDocumentPatch, DEFAULT_CANVAS } from '../core/documents/factories';
-import type { SceneCommand } from '../core/editor/commands';
-import type { ImageSettings, ShapeSettings, TextSettings } from '../core/documents/layer-types';
-import type { Canvas, ForgeDocument } from '../core/documents/types';
 import type { Result } from '../core/result';
-import { brand } from '../core/types/brand';
+import { sequentialLayerIds, TEST_DOCUMENT_TYPE } from './layers';
 
-/** The number of layers the criterion names. */
+/** How many layers the responsiveness criterion names. */
 export const RESPONSIVE_LAYER_COUNT = 30;
 
-/** Every layer the fixture builds. Order is paint order: first entry is the bottom-most layer. */
-export type FixtureLayer =
-  | {
-      readonly kind: 'text';
-      readonly name: string;
-      readonly frame: Rect;
-      readonly text: Partial<TextSettings>;
-    }
-  | {
-      readonly kind: 'rect' | 'ellipse';
-      readonly name: string;
-      readonly frame: Rect;
-      readonly shape?: Partial<ShapeSettings>;
-    }
-  | {
-      readonly kind: 'image';
-      /** Index into the placeable catalogue records; the graphic and its licence come from there. */
-      readonly assetIndex: number;
-      readonly frame: Rect;
-      readonly image?: Partial<ImageSettings>;
-    };
+/**
+ * The document id the fixture is saved under, so a browser spec can open it directly.
+ *
+ * `createDocument` takes a `DocumentIdGenerator`, which is how the workspace's own creation flow
+ * injects the id it will persist under.
+ */
+export const THIRTY_LAYER_DOCUMENT_ID = brand<'DocumentId'>('doc-thirty-layers');
 
-function frame(x: number, y: number, width: number, height: number): Rect {
-  return createRect(x, y, width, height);
-}
+/** The canvas the fixture is laid out on: a square poster, the shape most of the samples use. */
+export const THIRTY_LAYER_CANVAS: Canvas = {
+  ...DEFAULT_CANVAS,
+  width: 1080,
+  height: 1080,
+  dpi: 96,
+};
+
+/** A fixed moment, so two runs of the builder produce the same document. */
+const FIXTURE_TIME = new Date('2026-02-01T12:00:00.000Z');
+
+type TextEntry = {
+  readonly kind: 'text';
+  readonly name: string;
+  readonly frame: Rect;
+  readonly text: Partial<TextSettings>;
+};
+
+type ShapeEntry = {
+  readonly kind: 'rect' | 'ellipse';
+  readonly name: string;
+  readonly frame: Rect;
+  readonly shape?: Partial<ShapeSettings>;
+};
+
+type GraphicEntry = {
+  readonly kind: 'graphic';
+  readonly name: string;
+  readonly frame: Rect;
+  /** Index into the placeable catalogue records, in catalogue order. */
+  readonly asset: number;
+  readonly image?: Partial<ImageSettings>;
+};
+
+type Entry = (TextEntry | ShapeEntry | GraphicEntry) & {
+  /** Defaults to fully opaque. */
+  readonly opacity?: number;
+};
 
 /**
- * The fixture's composition: bands and panels underneath, ten placed catalogue graphics, and ten text
- * layers on top — the mix a real poster or thumbnail ends up with. Frames stay inside the 1080x1080
- * canvas, and every text layer wraps (or is short enough that it does not), exactly as the renderer
- * lays it out at run time.
+ * The picture, bottom layer first: bands, then cards and marks, then the decided-on-top content.
+ *
+ * Frames are laid out so layers overlap the way a real poster overlaps — text over bands, graphics
+ * inside a strip — while keeping every layer's own area reachable, which is what lets the benchmark
+ * grab a layer at a point that the hit test agrees belongs to it.
  */
-export const THIRTY_LAYER_LAYOUT: readonly FixtureLayer[] = [
-  { kind: 'rect', name: 'Header band', frame: frame(0, 0, 1080, 210), shape: { fill: '#171a21' } },
+const LAYOUT: readonly Entry[] = [
+  {
+    kind: 'rect',
+    name: 'Header band',
+    frame: createRect(0, 0, 1080, 210),
+    shape: { fill: '#171a21' },
+  },
   {
     kind: 'rect',
     name: 'Footer band',
-    frame: frame(0, 960, 1080, 120),
+    frame: createRect(0, 960, 1080, 120),
     shape: { fill: '#12141a' },
   },
-  { kind: 'ellipse', name: 'Halo', frame: frame(900, 60, 140, 140), shape: { fill: '#23303f' } },
+  {
+    kind: 'ellipse',
+    name: 'Halo',
+    frame: createRect(900, 60, 140, 140),
+    shape: { fill: '#23303f' },
+    opacity: 0.7,
+  },
+  {
+    kind: 'rect',
+    name: 'Card A',
+    frame: createRect(450, 220, 580, 200),
+    shape: { fill: '#1b1f27', stroke: '#2b3240', strokeWidth: 2, cornerRadius: 18 },
+  },
   {
     kind: 'ellipse',
     name: 'Accent dot',
-    frame: frame(980, 20, 56, 56),
+    frame: createRect(980, 20, 56, 56),
     shape: { fill: '#e2833a' },
-  },
-  { kind: 'rect', name: 'Divider', frame: frame(48, 216, 380, 4), shape: { fill: '#e2833a' } },
-  {
-    kind: 'rect',
-    name: 'Card',
-    frame: frame(450, 220, 580, 200),
-    shape: { fill: '#1b1f27', stroke: '#2b3240', strokeWidth: 2, cornerRadius: 18 },
   },
   {
     kind: 'rect',
     name: 'Panel',
-    frame: frame(450, 440, 580, 300),
+    frame: createRect(450, 440, 580, 300),
     shape: { fill: '#151922', cornerRadius: 18 },
   },
   {
     kind: 'rect',
-    name: 'Badge plate',
-    frame: frame(740, 680, 280, 90),
-    shape: { fill: '#e2833a', cornerRadius: 12 },
+    name: 'Tile',
+    frame: createRect(48, 340, 200, 200),
+    shape: { fill: '#1d2530', cornerRadius: 10 },
   },
   {
     kind: 'rect',
-    name: 'Logo strip',
-    frame: frame(48, 500, 380, 130),
-    shape: { fill: null, stroke: '#2b3240', strokeWidth: 2, cornerRadius: 10 },
+    name: 'Divider',
+    frame: createRect(48, 216, 380, 4),
+    shape: { fill: '#e2833a', cornerRadius: 2 },
   },
-  { kind: 'ellipse', name: 'Marker', frame: frame(48, 460, 26, 26), shape: { fill: '#7dd3fc' } },
-  ...Array.from({ length: 10 }, (_, index): FixtureLayer => {
-    const column = index % 5;
-    const row = Math.floor(index / 5);
-    return {
-      kind: 'image',
-      assetIndex: index,
-      frame: frame(60 + column * 74, 512 + row * 58, 64, 48),
-      ...(index === 3 ? { image: { fit: 'cover' as const } } : {}),
-      ...(index === 7 ? { image: { tint: '#e2833a' as const } } : {}),
-    };
-  }),
+  {
+    kind: 'ellipse',
+    name: 'Marker',
+    frame: createRect(48, 460, 26, 26),
+    shape: { fill: '#7dd3fc' },
+  },
+  {
+    kind: 'rect',
+    name: 'Badge plate',
+    frame: createRect(740, 700, 280, 90),
+    shape: { fill: '#e2833a', cornerRadius: 12 },
+  },
   {
     kind: 'text',
     name: 'Headline',
-    frame: frame(48, 40, 620, 88),
+    frame: createRect(48, 40, 700, 92),
     text: { content: 'Launch night: new work, live', fontSize: 64, fontWeight: 700 },
   },
   {
     kind: 'text',
     name: 'Subhead',
-    frame: frame(48, 136, 520, 62),
-    text: { content: 'Two nights of talks, screenings and workshops.', fontSize: 24 },
-  },
-  {
-    kind: 'text',
-    name: 'Intro copy',
-    frame: frame(48, 240, 380, 180),
+    frame: createRect(48, 140, 560, 64),
     text: {
-      content:
-        'Doors open at seven, and the first session starts on the hour. Everything shown tonight was made in the studio this season, from the first sketches to the final exports.',
-      fontSize: 22,
-      lineHeight: 1.4,
+      content: 'Two evenings of talks, screenings and workshops with the people who made it.',
+      fontSize: 24,
+      lineHeight: 1.3,
     },
   },
   {
     kind: 'text',
     name: 'Sponsors label',
-    frame: frame(48, 640, 300, 40),
-    text: { content: 'SPONSORS', fontSize: 18, letterSpacing: 3, color: '#9aa4b2' },
+    frame: createRect(48, 468, 240, 40),
+    text: {
+      content: 'Partners',
+      fontSize: 18,
+      fontWeight: 500,
+      letterSpacing: 3,
+      color: '#9aa4b2',
+    },
+  },
+  {
+    kind: 'text',
+    name: 'Intro copy',
+    frame: createRect(48, 240, 380, 190),
+    text: {
+      content:
+        'Every project in this room started as a drawing on a wall. Come and see what it became, and meet the studios that kept going when the first draft did not work.',
+      fontSize: 22,
+      lineHeight: 1.45,
+    },
   },
   {
     kind: 'text',
     name: 'Programme heading',
-    frame: frame(470, 240, 260, 48),
+    frame: createRect(470, 240, 300, 48),
     text: { content: 'Programme', fontSize: 30, fontWeight: 600 },
   },
   {
     kind: 'text',
     name: 'Programme copy',
-    frame: frame(470, 296, 320, 150),
+    frame: createRect(470, 300, 320, 170),
     text: {
-      content: '19:00 doors. 19:30 first look. 20:15 a conversation with the makers.',
+      content:
+        'Thursday: doors, first look, and a short talk from the studio floor. Friday: workshops in pairs, then the long table.',
       fontSize: 20,
-      lineHeight: 1.5,
+      lineHeight: 1.4,
     },
   },
   {
     kind: 'text',
     name: 'Quote',
-    frame: frame(600, 460, 400, 120),
+    frame: createRect(600, 480, 400, 130),
     text: {
-      content: 'A whole evening of first looks, and every piece started in this workspace.',
+      content: 'A whole evening of first looks, and nobody checking their phone.',
       fontSize: 26,
+      lineHeight: 1.35,
       align: 'right',
     },
   },
   {
     kind: 'text',
     name: 'Badge label',
-    frame: frame(760, 700, 240, 44),
-    text: { content: 'Free entry', fontSize: 22, align: 'center', color: '#1b1f27' },
-  },
-  {
-    kind: 'text',
-    name: 'Caption',
-    frame: frame(48, 1000, 460, 32),
-    text: { content: 'forge.example/launch · doors 19:00', fontSize: 16 },
+    frame: createRect(760, 723, 240, 44),
+    text: { content: 'Free entry', fontSize: 22, align: 'center', color: '#12141a' },
   },
   {
     kind: 'text',
     name: 'Footer note',
-    frame: frame(600, 1000, 420, 32),
-    text: { content: "Made with Euler's Forge", fontSize: 16, align: 'right' },
+    frame: createRect(600, 1000, 420, 34),
+    text: {
+      content: 'forge.example/launch',
+      fontSize: 16,
+      align: 'right',
+      color: '#9aa4b2',
+    },
   },
+  {
+    kind: 'text',
+    name: 'Caption',
+    frame: createRect(48, 1000, 420, 34),
+    text: { content: 'Doors 19:00 · Studio 4', fontSize: 16, color: '#9aa4b2' },
+  },
+  ...graphicStrip(),
 ];
 
-export type ThirtyLayerOptions = {
-  readonly canvas?: Canvas;
-  readonly title?: string;
-  /** Clock used for `updatedAt` and the attribution `placedAt` values. */
-  readonly now?: () => Date;
-};
+/** Ten placed catalogue graphics laid out as a two-row strip inside the logo panel. */
+function graphicStrip(): readonly Entry[] {
+  const placeable = placeableRecords();
+  return placeable.slice(0, 10).map((record, index) => ({
+    kind: 'graphic' as const,
+    name: record.name,
+    frame: createRect(60 + (index % 5) * 76, 512 + Math.floor(index / 5) * 56, 64, 48),
+    asset: index,
+  }));
+}
 
-/**
- * Builds the thirty-layer document.
- *
- * Throws when a command refuses: a fixture that could not be created would otherwise make the
- * benchmark measure a smaller document than it claims.
- */
-export function thirtyLayerDocument(options: ThirtyLayerOptions = {}): ForgeDocument {
-  const now = options.now ?? (() => new Date('2026-02-01T12:00:00.000Z'));
-  const created = createDocument(
-    {
-      title: options.title ?? 'Thirty layer stress document',
-      studioId: 'design',
-      documentTypeId: brand<'DocumentTypeId'>('design.canvas'),
-      canvas: options.canvas ?? DEFAULT_CANVAS,
-    },
-    { generateId: () => 'doc-thirty-layers', now },
-  );
-  if (!created.ok) throw new Error(`thirty-layer document is invalid: ${created.error.message}`);
-
-  const placeable = SAMPLE_ASSETS.filter((record) => isPlaceable(record));
-  const graphics = THIRTY_LAYER_LAYOUT.filter((layer) => layer.kind === 'image');
-  if (placeable.length < graphics.length) {
+/** The catalogue's placeable records, in catalogue order: what "place a graphic" can choose. */
+export function placeableRecords(): readonly AssetRecord[] {
+  const records = SAMPLE_ASSETS.filter((record) => isPlaceable(record));
+  if (records.length < 10) {
     throw new Error(
-      `the catalogue offers ${String(placeable.length)} placeable graphics, the fixture needs ${String(graphics.length)}`,
+      `the sample catalogue has ${String(records.length)} placeable records; the thirty-layer fixture needs 10`,
     );
   }
+  return records;
+}
 
-  let counter = 0;
-  const generateId = (): string => {
-    counter += 1;
-    return `lyr-perf-${String(counter)}`;
-  };
+/** Applies a command's patch, so the fixture moves through exactly the states a user would create. */
+function apply(document: ForgeDocument, command: Result<SceneCommand>): ForgeDocument {
+  if (!command.ok) {
+    throw new Error(`the thirty-layer fixture command was refused: ${command.error.message}`);
+  }
+  return applyDocumentPatch(document, command.value.patch, FIXTURE_TIME);
+}
+
+function addEntry(document: ForgeDocument, entry: Entry, id: string): ForgeDocument {
+  const next =
+    entry.kind === 'graphic'
+      ? apply(
+          document,
+          placeAssetCommand(
+            document,
+            placeableRecords()[entry.asset] as AssetRecord,
+            () => id,
+            FIXTURE_TIME.toISOString(),
+          ),
+        )
+      : apply(
+          document,
+          addLayerCommand(document, entry.kind, () => id),
+        );
+
+  let current = apply(next, renameLayerCommand(next, id, entry.name));
+  current = apply(
+    current,
+    setLayerFramesCommand(current, [{ id, frame: entry.frame }], `Place “${entry.name}”`),
+  );
+
+  if (entry.kind === 'text') {
+    current = apply(current, setTextSettingsCommand(current, id, entry.text));
+  } else if (entry.kind === 'graphic') {
+    if (entry.image) current = apply(current, setImageSettingsCommand(current, id, entry.image));
+  } else if (entry.shape) {
+    current = apply(current, setShapeSettingsCommand(current, id, entry.shape));
+  }
+
+  if (entry.opacity !== undefined) {
+    current = apply(current, setLayersOpacityCommand(current, [id], entry.opacity));
+  }
+
+  // The layer must exist under the name the fixture asked for, or every later lookup is a lie.
+  const created = current.scene.layers.find((layer) => String(layer.id) === id);
+  if (!created || created.name !== entry.name) {
+    throw new Error(`the fixture could not create “${entry.name}”`);
+  }
+  return current;
+}
+
+/**
+ * The thirty-layer document.
+ *
+ * Deterministic: fixed ids, a fixed clock, and a layout defined in this file. `createDocument` is
+ * given a fixed id generator so the document id is stable too.
+ */
+export function thirtyLayerDocument(): ForgeDocument {
+  const nextId = sequentialLayerIds('lyr-perf');
+  const created = createDocument(
+    {
+      title: 'Launch night poster',
+      studioId: 'design',
+      documentTypeId: TEST_DOCUMENT_TYPE,
+      canvas: { ...THIRTY_LAYER_CANVAS },
+      tags: ['benchmark', 'thirty layers'],
+    },
+    { generateId: () => THIRTY_LAYER_DOCUMENT_ID, now: () => FIXTURE_TIME },
+  );
+  if (!created.ok) {
+    throw new Error(`the thirty-layer fixture document is invalid: ${created.error.message}`);
+  }
 
   let document = created.value;
-  const errors: string[] = [];
-
-  const apply = (command: Result<SceneCommand>, what: string): void => {
-    if (!command.ok) {
-      errors.push(`${what}: ${command.error.message}`);
-      return;
-    }
-    document = applyDocumentPatch(document, command.value.patch, now());
-  };
-
-  /** The layer a command just added: `addNewLayer` puts it on top, so it is the last one. */
-  const topLayerId = (): string => {
-    const layer = document.scene.layers[document.scene.layers.length - 1];
-    if (!layer) throw new Error('the fixture added no layer');
-    return String(layer.id);
-  };
-
-  for (const [index, spec] of THIRTY_LAYER_LAYOUT.entries()) {
-    const where = `layer ${String(index + 1)}`;
-    if (spec.kind === 'image') {
-      const record = placeable[spec.assetIndex];
-      if (!record)
-        throw new Error(`${where}: no catalogue record at index ${String(spec.assetIndex)}`);
-      apply(placeAssetCommand(document, record, generateId, now().toISOString()), `${where} place`);
-    } else {
-      apply(addLayerCommand(document, spec.kind, generateId), `${where} add`);
-    }
-
-    const id = topLayerId();
-    // Placed graphics keep the catalogue name, so the layer tree and every history label name the
-    // graphic a person chose (that is what `placeAssetCommand` does in the application).
-    if (spec.kind !== 'image') {
-      apply(renameLayerCommand(document, id, spec.name), `${where} rename`);
-    }
-    apply(setLayerFramesCommand(document, [{ id, frame: spec.frame }], 'Fixture placement'), where);
-
-    if (spec.kind === 'text') {
-      apply(setTextSettingsCommand(document, id, spec.text), `${where} typography`);
-    } else if (spec.kind === 'image') {
-      if (spec.image) apply(setImageSettingsCommand(document, id, spec.image), `${where} graphic`);
-    } else if (spec.shape) {
-      apply(setShapeSettingsCommand(document, id, spec.shape), `${where} shape`);
-    }
+  for (const entry of LAYOUT) {
+    document = addEntry(document, entry, nextId());
   }
 
-  if (errors.length > 0) {
-    throw new Error(`the thirty-layer fixture could not be built:\n${errors.join('\n')}`);
-  }
   if (document.scene.layers.length !== RESPONSIVE_LAYER_COUNT) {
     throw new Error(
-      `the fixture built ${String(document.scene.layers.length)} layers, not ${String(RESPONSIVE_LAYER_COUNT)}`,
+      `the fixture holds ${String(document.scene.layers.length)} layers, not ${String(RESPONSIVE_LAYER_COUNT)}`,
     );
   }
   return document;
-}
-
-/** Layers of one kind in the fixture, for assertions that it is a realistic mix. */
-export function fixtureLayerCounts(document: ForgeDocument): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const layer of document.scene.layers) {
-    counts[layer.type] = (counts[layer.type] ?? 0) + 1;
-  }
-  return counts;
-}
-
-/** Applies an opacity to a named fixture layer; used by specs that need a starting value. */
-export function withOpacity(document: ForgeDocument, name: string, opacity: number): ForgeDocument {
-  const layer = document.scene.layers.find((candidate) => candidate.name === name);
-  if (!layer) throw new Error(`no fixture layer named ${name}`);
-  const command = setLayersOpacityCommand(document, [layer.id], opacity);
-  if (!command.ok) throw new Error(command.error.message);
-  return applyDocumentPatch(document, command.value.patch);
 }
