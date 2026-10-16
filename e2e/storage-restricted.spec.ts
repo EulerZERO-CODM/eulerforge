@@ -97,12 +97,19 @@ test.describe('a browser that refuses to store anything', () => {
 
     type HydrationWindow = Window & { readonly __forgeSnapshot?: string | null };
 
+    // The storage copy is *expected* to change here: the server says storage has not been checked and
+    // the browser then reports the refusal. Comparing it would bury the mismatch under the one change
+    // the spec is about, so both sides leave it out of the flattening.
+    const storageCopy =
+      /checking storage|stored in this browser|only in memory|not being saved to (this device|the device)|held in memory for this tab only/i;
+
     const describeDifference = (markup: string): Promise<string> =>
       page.evaluate((html) => {
         const skip = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT', 'LINK', 'META', 'TITLE']);
         const flatten = (root: Element): string[] => {
           const lines: string[] = [];
           const walk = (node: Element, path: string): void => {
+            if (storageCopy.test(node.textContent)) return;
             const own = [...node.childNodes]
               .filter((child) => child.nodeType === Node.TEXT_NODE)
               .map((child) => (child.textContent ?? '').trim())
@@ -141,7 +148,7 @@ test.describe('a browser that refuses to store anything', () => {
               found.push(
                 `#${String(index)} server ${server ?? '(absent)'} | client ${client ?? '(absent)'}`,
               );
-              if (found.length >= 3) break;
+              if (found.length >= 10) break;
             }
           }
           report.push(`${label} differences=${String(found.length)} ${found.join(' ;; ')}`);

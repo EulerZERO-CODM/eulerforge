@@ -52,6 +52,14 @@ export class ToastStore {
     return this.store.getState();
   }
 
+  /**
+   * The state a server render saw: the store is created with this value and may load afterwards, and
+   * React needs the first of the two to hydrate against the markup the server sent (see `useStore`).
+   */
+  public get initialState(): ToastState {
+    return this.store.initialState;
+  }
+
   public push(input: ToastInput): Toast {
     this.counter += 1;
     const toast: Toast = {

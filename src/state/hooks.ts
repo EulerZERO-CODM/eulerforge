@@ -145,8 +145,12 @@ export function useDocumentSession(documentId: string | null): DocumentSessionHa
     [session],
   );
   const getSnapshot = useCallback(() => (session ? session.getState() : null), [session]);
+  // The server render had no session at all: it cannot read this device's storage. Hydration
+  // therefore has to start from the same "no session yet" answer and let the live state follow, or a
+  // direct load of `/workspace/<id>` would hydrate an editor against "Project not found".
+  const getServerSnapshot = useCallback(() => (session ? session.initialState : null), [session]);
 
-  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const state = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   return { session, state, library, preset: undefined };
 }

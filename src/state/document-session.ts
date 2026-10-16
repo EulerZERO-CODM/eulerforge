@@ -80,6 +80,14 @@ export class DocumentSession {
   }
 
   /**
+   * The state a server render saw: the store is created with this value and may load afterwards, and
+   * React needs the first of the two to hydrate against the markup the server sent (see `useStore`).
+   */
+  public get initialState(): DocumentSessionState {
+    return this.store.initialState;
+  }
+
+  /**
    * Applies a labelled change: validate → record in history → persist.
    * @returns the persisted document, or an error explaining why nothing changed.
    */

@@ -36,6 +36,14 @@ export class PreferencesStore {
     return this.store.getState();
   }
 
+  /**
+   * The state a server render saw: the store is created with this value and may load afterwards, and
+   * React needs the first of the two to hydrate against the markup the server sent (see `useStore`).
+   */
+  public get initialState(): PreferencesState {
+    return this.store.initialState;
+  }
+
   /** Applies a partial update and persists it. Returns false when persistence failed. */
   public update(patch: Partial<Preferences>): boolean {
     const next = { ...this.store.getState().preferences, ...patch };
