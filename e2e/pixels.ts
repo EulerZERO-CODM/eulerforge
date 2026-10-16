@@ -152,6 +152,70 @@ export async function readInkBands(page: Page, region: DocumentRect): Promise<In
   );
 }
 
+export type ColourReading = {
+  /** How many distinct RGB values the region contains. */
+  readonly distinct: number;
+  /** The share of the region taken by its most common colour, 0-1. */
+  readonly dominantShare: number;
+  /** The most common colour as `[r, g, b]`, for a readable failure message. */
+  readonly dominant: readonly number[];
+};
+
+/**
+ * How much colour variation a region of the artboard really contains.
+ *
+ * This is how the benchmark tells "the placed artwork is on the canvas" from "a flat rectangle is on
+ * the canvas": a placement with inner structure (strokes, halftone, a ring) antialiases into dozens
+ * of distinct RGB values, where a flat shape has one, plus whatever its edges contribute. Counting
+ * colours is a property of what was painted, so it cannot pass on an empty canvas or a stale frame.
+ */
+export async function countColours(page: Page, region: DocumentRect): Promise<ColourReading> {
+  return page.evaluate(
+    ({ region }) => {
+      const artboard = document.querySelector('[data-testid="artboard"]');
+      const canvas = document.querySelector('[data-testid="document-canvas"]');
+      if (!(artboard instanceof HTMLElement)) throw new Error('the artboard is not on the page');
+      if (!(canvas instanceof HTMLCanvasElement)) throw new Error('the canvas is not on the page');
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('the document canvas has no 2d context');
+
+      const documentWidth = Number(artboard.dataset.canvasWidth);
+      if (!Number.isFinite(documentWidth) || documentWidth <= 0) {
+        throw new Error('the artboard does not report its document width');
+      }
+      const scale = canvas.width / documentWidth;
+
+      const x0 = Math.max(0, Math.floor(region.x * scale));
+      const y0 = Math.max(0, Math.floor(region.y * scale));
+      const x1 = Math.min(canvas.width, Math.ceil((region.x + region.width) * scale));
+      const y1 = Math.min(canvas.height, Math.ceil((region.y + region.height) * scale));
+      if (x1 - x0 <= 0 || y1 - y0 <= 0) throw new Error('the requested region is empty');
+
+      const pixels = context.getImageData(x0, y0, x1 - x0, y1 - y0).data;
+      const tally = new Map<string, number>();
+      const total = pixels.length / 4;
+      for (let index = 0; index < pixels.length; index += 4) {
+        const key = `${String(pixels[index] ?? 0)},${String(pixels[index + 1] ?? 0)},${String(pixels[index + 2] ?? 0)}`;
+        tally.set(key, (tally.get(key) ?? 0) + 1);
+      }
+      let dominantKey = '0,0,0';
+      let dominantCount = 0;
+      for (const [key, count] of tally) {
+        if (count > dominantCount) {
+          dominantKey = key;
+          dominantCount = count;
+        }
+      }
+      return {
+        distinct: tally.size,
+        dominantShare: total === 0 ? 0 : dominantCount / total,
+        dominant: dominantKey.split(',').map((value) => Number(value)),
+      };
+    },
+    { region },
+  );
+}
+
 export type LineHit = {
   /** Column the strongest vertical line sits in, in image pixels from the left of the image. */
   readonly column: number;

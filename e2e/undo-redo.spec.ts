@@ -1,3 +1,20 @@
+/**
+ * Undo/redo in the browser: keystrokes, persistence and what must *not* create a step.
+ *
+ * The unit and component matrices (see docs/undo-redo-matrix.md) check the transition itself — one
+ * action, one label, the previous document back byte for byte. This spec covers the parts only a
+ * real browser can answer:
+ *
+ * - the global Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z shortcuts, including not firing while a text field
+ *   has the caret;
+ * - what is actually in `localStorage` after an undo and a redo, compared with the saved bytes, so
+ *   "the document came back" means the *persisted* document and not just the screen;
+ * - a placed graphic's licence record surviving an undo and a redo;
+ * - refused, unchanged, cancelled and transient actions leaving no step behind;
+ * - a reload keeping the edit and starting a fresh history, because history is a session, not a
+ *   saved document field.
+ */
+
 import { expect, test, type Page } from '@playwright/test';
 
 import {
@@ -7,7 +24,6 @@ import {
   clickInDocument,
   createProject,
   historyLabels,
-  layerButton,
   layerNamed,
   placeGraphic,
   readNumberField,
@@ -21,82 +37,31 @@ import {
 } from './fixtures';
 
 /**
- * Undo and redo, integrated with storage and the keyboard.
+ * The document's content, with the two fields every edit rewrites neutralised.
  *
- * The unit and component halves of the action-to-test matrix (see docs/undo-redo-matrix.md) check
- * labels and transitions deterministically. This spec covers the three things only a browser can
- * answer:
- *
- *   1. **Persistence end to end.** After an edit and after every undo/redo, the document *in
- *      localStorage* is byte-for-byte the state that step should restore — not just the copy the
- *      interface is showing. Attribution and layer order are part of that comparison.
- *   2. **The real keyboard.** `Ctrl+Z` / `Ctrl+Shift+Z` through the browser's own event pipeline,
- *      including the rule that a focused text field keeps native undo instead of the document's.
- *   3. **What the interface says.** The history panel's labels and the enablement of its two buttons
- *      at each end of the stack, so "undo, save state and the UI can never disagree" is checked
- *      against the running product rather than against the session object.
- *
- * One documented limitation is asserted rather than glossed over: history is session-scoped, so
- * reopening a project keeps the saved edit but not the steps (the last spec).
- */
-
-/** Headline graphic used wherever a placed catalogue graphic is needed. */
-const PLACED = 'Aurora mesh';
-
-/** The history panel, the one surface that is unambiguously about undo and redo. */
-function historyPanel(page: Page) {
-  return page.locator('section[aria-labelledby="history-panel-heading"]');
-}
-
-function undoButton(page: Page) {
-  return historyPanel(page).getByRole('button', { name: 'Undo', exact: true });
-}
-
-function redoButton(page: Page) {
-  return historyPanel(page).getByRole('button', { name: 'Redo', exact: true });
-}
-
-/**
- * A saved document reduced to what a history step must restore.
- *
- * `revision`, `createdAt` and `updatedAt` move whenever the document is written, so they are not part
- * of "the same document"; everything else is compared as serialised text, which is the strictest
- * comparison available and the one that catches a reordered layer list or a dropped attribution
- * record.
+ * `revision` and `updatedAt` move on every commit, including the ones an undo performs, so they say
+ * nothing about whether the *edit* came back. Everything else — scene, attribution, canvas, guides,
+ * palette, metadata and the layer order — has to match exactly.
  */
 function content(document: StoredDocument): string {
-  const rest = { ...(document as unknown as Record<string, unknown>) };
-  delete rest['revision'];
-  delete rest['createdAt'];
-  delete rest['updatedAt'];
-  return JSON.stringify(rest);
+  const copy: Record<string, unknown> = { ...document };
+  copy.revision = 0;
+  copy.updatedAt = '';
+  return JSON.stringify(copy);
 }
 
-/**
- * A point on the canvas that no layer covers, so a click there is a click on empty space.
- *
- * Scanned from the bottom-right corner because default frames are centred: a hard-coded "empty"
- * coordinate would start silently hitting a layer the moment a default changes.
- */
-function emptyPoint(document: StoredDocument): { x: number; y: number } {
-  const { width, height } = document.canvas;
-  for (let row = 1; row <= 20; row += 1) {
-    for (let column = 1; column <= 20; column += 1) {
-      const point = { x: (width * (20 - column)) / 20, y: (height * (20 - row)) / 20 };
-      const inside = document.scene.layers.some(
-        (layer) =>
-          point.x >= layer.frame.x - 8 &&
-          point.x <= layer.frame.x + layer.frame.width + 8 &&
-          point.y >= layer.frame.y - 8 &&
-          point.y <= layer.frame.y + layer.frame.height + 8,
-      );
-      if (!inside) return point;
-    }
-  }
-  throw new Error('every point of the canvas is covered by a layer');
-}
+/* ------------------------------------------------------------------ locators, scoped to the UI */
 
-/** The document's own undo shortcut, through the browser's keyboard. */
+const historyPanel = (page: Page) =>
+  page.locator('section[aria-labelledby="history-panel-heading"]');
+
+/** The panel's own Undo, not the toolbar's "Undo (Cmd/Ctrl + Z)". */
+const undoButton = (page: Page) =>
+  historyPanel(page).getByRole('button', { name: 'Undo', exact: true });
+const redoButton = (page: Page) =>
+  historyPanel(page).getByRole('button', { name: 'Redo', exact: true });
+
+/** The keyboard shortcuts the workspace listens for, as a person presses them. */
 async function keyboardUndo(page: Page): Promise<void> {
   await page.keyboard.press('Control+z');
 }
@@ -105,185 +70,215 @@ async function keyboardRedo(page: Page): Promise<void> {
   await page.keyboard.press('Control+Shift+z');
 }
 
-test.describe('undo and redo in the workspace', () => {
-  test('walks the document back and forward from the keyboard, in storage and in the panel', async ({
-    page,
-  }) => {
+/** Focuses the artboard, so a key press reaches the canvas rather than a text field. */
+async function focusArtboard(page: Page): Promise<void> {
+  await page.getByTestId('artboard-surface').focus();
+}
+
+test.describe('undo and redo in the browser', () => {
+  test('walks edits back and forward with the keyboard, and storage agrees', async ({ page }) => {
     await artboardFixture(page);
     await selectLayerFromList(page, 'Rectangle');
+    const startX = await readNumberField(page, 'Layer X');
 
-    const start = await stored(page);
-    const x = await readNumberField(page, 'Layer X');
-    await setNumberField(page, 'Layer X', x + 40);
-    const afterField = await storedWhen(
-      page,
-      (document) => layerNamed(document, 'Rectangle').frame.x === x + 40,
-      'the inspector edit should be saved',
-    );
+    const start = content(await stored(page));
 
-    // A second edit from the keyboard, on the surface rather than in a field.
-    await page.getByTestId('artboard-surface').focus();
+    // Edit one: an inspector field, committed with Enter.
+    await setNumberField(page, 'Layer X', startX + 40);
+    const afterField = content(await stored(page));
+
+    // Edits two and three: single arrow-key nudges of the same layer, one step each.
+    await focusArtboard(page);
     await page.keyboard.press('ArrowRight');
-    const afterNudge = await storedWhen(
-      page,
-      (document) => layerNamed(document, 'Rectangle').frame.x === x + 41,
-      'the arrow-key move should be saved',
-    );
+    const afterFirstNudge = content(await stored(page));
+    await page.keyboard.press('ArrowDown');
+    const afterSecondNudge = content(await stored(page));
 
-    // One label per edit, newest first, and nothing else was recorded.
+    expect(afterSecondNudge).not.toBe(afterFirstNudge);
     expect(await historyLabels(page)).toEqual([
-      'Move \u201cRectangle\u201d',
-      `Move \u201cRectangle\u201d to x ${String(x + 40)}`,
+      'Move “Rectangle”',
+      'Move “Rectangle”',
+      `Move “Rectangle” to x ${String(startX + 40)}`,
       ...FIXTURE_LABELS,
     ]);
+
+    // Back, one keystroke at a time, with the panel's own buttons agreeing at every stop.
+    await keyboardUndo(page);
+    await expect.poll(async () => content(await stored(page))).toBe(afterFirstNudge);
+    await keyboardUndo(page);
+    await expect.poll(async () => content(await stored(page))).toBe(afterField);
+    await keyboardUndo(page);
+    await expect.poll(async () => content(await stored(page))).toBe(start);
+    /* Back at the document this test started from — which is not the floor of the history: the
+       fixture created its two layers through the workspace, and creating a layer is an edit like any
+       other. What is left behind is exactly those two steps. */
+    expect(await historyLabels(page)).toEqual([...FIXTURE_LABELS]);
     await expect(undoButton(page)).toBeEnabled();
+    await expect(redoButton(page)).toBeEnabled();
+    // The field the keyboard walk passed through is showing the restored value, not a stale draft.
+    expect(await readNumberField(page, 'Layer X')).toBe(startX);
 
+    // Walk the rest of the way down: the fixture's own steps come off one at a time, and only then
+    // is there nothing behind the document.
     await keyboardUndo(page);
-    await storedWhen(
-      page,
-      (document) => layerNamed(document, 'Rectangle').frame.x === x + 40,
-      'undo should put the layer back where the inspector edit left it',
-    );
-    expect(content(await stored(page))).toBe(content(afterField));
-    // The panel follows the document: the field shows the value that step restored.
-    await expect(page.getByLabel('Layer X', { exact: true })).toHaveValue(String(x + 40));
-
+    await expect.poll(async () => (await stored(page)).scene.layers.length).toBe(1);
     await keyboardUndo(page);
-    await storedWhen(
-      page,
-      (document) => layerNamed(document, 'Rectangle').frame.x === x,
-      'the second undo should return to the original frame',
-    );
-    expect(content(await stored(page))).toBe(content(start));
+    await expect.poll(async () => (await stored(page)).scene.layers.length).toBe(0);
     await expect(undoButton(page)).toBeDisabled();
 
-    // A third undo has nothing behind it: no error, no change, no lost edit.
+    // And forward again over both, which rebuilds the same document the fixture left.
+    await keyboardRedo(page);
+    await keyboardRedo(page);
+    await expect.poll(async () => content(await stored(page))).toBe(start);
+    await expect(redoButton(page)).toBeEnabled();
+    // The selection is transient and was dropped when those layers went away, so it is chosen again
+    // the way a person would — and that records nothing.
+    await selectLayerFromList(page, 'Rectangle');
+
+    // Forward again, and the post-edit document comes back rather than a re-made approximation.
+    await keyboardRedo(page);
+    await expect.poll(async () => content(await stored(page))).toBe(afterField);
+    await keyboardRedo(page);
+    await expect.poll(async () => content(await stored(page))).toBe(afterFirstNudge);
+    await keyboardRedo(page);
+    await expect.poll(async () => content(await stored(page))).toBe(afterSecondNudge);
+    await expect(redoButton(page)).toBeDisabled();
+    expect(await readNumberField(page, 'Layer X')).toBe(startX + 40);
+
+    // A new edit after undoing forgets the redo branch, as a single linear history must.
     await keyboardUndo(page);
-    expect(content(await stored(page))).toBe(content(start));
-
-    await keyboardRedo(page);
-    await storedWhen(
-      page,
-      (document) => layerNamed(document, 'Rectangle').frame.x === x + 40,
-      'redo should reapply the inspector edit',
-    );
-    expect(content(await stored(page))).toBe(content(afterField));
-
-    await keyboardRedo(page);
-    await storedWhen(
-      page,
-      (document) => layerNamed(document, 'Rectangle').frame.x === x + 41,
-      'the second redo should reapply the keyboard move',
-    );
-    expect(content(await stored(page))).toBe(content(afterNudge));
+    await expect(redoButton(page)).toBeEnabled();
+    await focusArtboard(page);
+    await page.keyboard.press('ArrowLeft');
     await expect(redoButton(page)).toBeDisabled();
   });
 
-  test('takes a placed graphic\u2019s licence record with it through undo and redo', async ({
-    page,
-  }) => {
-    await createProject(page, { title: 'Graphic undo', width: 600, height: 400 });
-    const empty = await stored(page);
+  test('leaves the shortcuts alone while a text field has the caret', async ({ page }) => {
+    await artboardFixture(page);
+    await selectLayerFromList(page, 'Rectangle');
+    const startX = await readNumberField(page, 'Layer X');
+    const start = content(await stored(page));
+    const labels = await historyLabels(page);
 
-    await placeGraphic(page, PLACED);
-    const placed = await storedWhen(
-      page,
-      (document) => document.scene.layers.length === 1 && document.attribution.length === 1,
-      'placing the graphic should add the layer and its licence record',
-    );
-    expect(await historyLabels(page)).toEqual([`Place graphic \u201c${PLACED}\u201d`]);
+    // A caret press of Ctrl+Z in a text field is not the workspace's undo.
+    const field = page.getByLabel('Layer X', { exact: true });
+    await field.click();
+    await page.keyboard.press('Control+z');
 
-    // Selecting the placed layer is transient: it must not add a step of its own.
-    await selectLayerFromList(page, PLACED);
-    expect(await historyLabels(page)).toEqual([`Place graphic \u201c${PLACED}\u201d`]);
+    await expect(field).toHaveValue(String(startX));
+    await field.press('Escape');
+    await expect.poll(async () => content(await stored(page))).toBe(start);
+    expect(await historyLabels(page)).toEqual(labels);
+    expect(await readNumberField(page, 'Layer X')).toBe(startX);
+  });
+
+  test('undoes and redoes a placed graphic with its licence record', async ({ page }) => {
+    await createProject(page);
+    const empty = content(await stored(page));
+
+    await placeGraphic(page, 'Aurora mesh');
+    const placed = await stored(page);
+    expect(placed.attribution).toHaveLength(1);
+    expect(await historyLabels(page)).toEqual(['Place graphic “Aurora mesh”']);
 
     await undoButton(page).click();
-    await storedWhen(
+    const undone = await storedWhen(
       page,
       (document) => document.scene.layers.length === 0,
-      'undo should remove the placed layer',
+      'undo should take the placed graphic back out',
     );
-    expect(content(await stored(page))).toBe(content(empty));
-    expect((await stored(page)).attribution).toHaveLength(0);
+    // Both halves of the edit are gone: the layer *and* the licence record it brought with it.
+    expect(undone.attribution).toEqual([]);
+    expect(content(undone)).toBe(empty);
 
     await redoButton(page).click();
     const redone = await storedWhen(
       page,
-      (document) => document.scene.layers.length === 1,
-      'redo should put the layer back',
+      (document) => document.attribution.length === 1,
+      'redo should put the placed graphic back',
     );
-    expect(content(await stored(page))).toBe(content(placed));
-    // The licence, the asset and the placement moment all came back with it.
+    // The record's own timestamp is part of what comes back, which is why this compares bytes.
     expect(redone.attribution).toEqual(placed.attribution);
+    expect(layerNamed(redone, 'Aurora mesh').type).toBe('image');
+    expect(content(redone)).toBe(content(placed));
   });
 
-  test('records nothing for an edit that is refused or changes nothing', async ({ page }) => {
+  test('leaves no step behind for refused, unchanged or cancelled edits', async ({ page }) => {
     await artboardFixture(page);
-    await selectLayerFromList(page, 'Text');
-
-    const before = await stored(page);
-    const labels = await historyLabels(page);
+    await selectLayerFromList(page, 'Rectangle');
     const width = await readNumberField(page, 'Layer width');
-    const field = page.getByLabel('Layer width', { exact: true });
+    const start = content(await stored(page));
+    const labels = await historyLabels(page);
+    expect(labels).toEqual([...FIXTURE_LABELS]);
 
-    // Refused: below the smallest frame the model allows. The field explains itself rather than
-    // committing something the canvas cannot hold.
-    await field.fill('0');
-    await field.press('Enter');
-    await expect(page.getByRole('alert')).toHaveText('Width must be at least 1px.');
+    // Refused: a width the document model does not allow. The field says so and nothing is recorded.
+    const widthField = page.getByLabel('Layer width', { exact: true });
+    await widthField.fill('0');
+    await widthField.press('Enter');
+    // The field's own message, named exactly: the page has other live regions (Next's route
+    // announcer is one), so an unqualified `role="alert"` is ambiguous.
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'Width must be at least 1px.' }),
+    ).toBeVisible();
     expect(await historyLabels(page)).toEqual(labels);
+    expect(content(await stored(page))).toBe(start);
 
-    // Unchanged: committing the value that is already there is not an edit.
-    await field.fill(String(width));
-    await field.press('Enter');
+    // Unchanged: the same value typed again is not an edit.
+    await setNumberField(page, 'Layer width', width);
     expect(await historyLabels(page)).toEqual(labels);
-    await expect(page.getByRole('alert')).toHaveCount(0);
-    await expect
-      .poll(async () => content(await stored(page)), {
-        message: 'a refused or unchanged edit must not be written',
-      })
-      .toBe(content(before));
+    expect(content(await stored(page))).toBe(start);
+
+    // Cancelled: a typed value abandoned with Escape is discarded, not recorded.
+    await widthField.fill(String(width + 120));
+    await widthField.press('Escape');
+    await focusArtboard(page);
+    expect(await historyLabels(page)).toEqual(labels);
+    expect(content(await stored(page))).toBe(start);
+    expect(await readNumberField(page, 'Layer width')).toBe(width);
   });
 
-  test('adds no step for selection, zoom, guides or snapping', async ({ page }) => {
+  test('records nothing for selection, zoom, guides, snapping or the export panel', async ({
+    page,
+  }) => {
     await artboardFixture(page);
-    const before = await stored(page);
+    const start = content(await stored(page));
     const labels = await historyLabels(page);
 
-    // View and selection state, every one of which the product documents as transient.
-    await selectLayerFromList(page, 'Text');
-    await addLayerToSelection(page, 'Rectangle');
-    await clickInDocument(page, emptyPoint(before));
-    await expect(layerButton(page, 'Text')).not.toHaveAttribute('aria-current', 'true');
+    // Selection: one layer, then two, then cleared by a click on empty canvas.
+    await selectLayerFromList(page, 'Rectangle');
+    await addLayerToSelection(page, 'Text');
+    await clickInDocument(page, { x: 20, y: 460 });
+
+    // View-only controls on the stage and in the export panel.
     await setZoom(page, 200);
-    await page.getByRole('button', { name: 'Hide guides', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Show guides', exact: true })).toBeVisible();
-    await setSnapping(page, false);
     await setSnapping(page, true);
+    await page.getByRole('button', { name: /^(Hide|Show) guides$/ }).click();
+    // Export settings are preferences about a file that does not exist yet, not document edits.
+    await page.getByLabel('Format', { exact: true }).selectOption('jpg');
 
     expect(await historyLabels(page)).toEqual(labels);
-    expect(content(await stored(page))).toBe(content(before));
-    // The two real edits the fixture made are still undoable; nothing was added on top of them.
+    expect(content(await stored(page))).toBe(start);
     await expect(undoButton(page)).toBeEnabled();
   });
 
-  test('keeps the saved edit across a reload and starts a fresh history', async ({ page }) => {
+  test('keeps the edit over a reload, and starts a fresh history', async ({ page }) => {
     await artboardFixture(page);
     await selectLayerFromList(page, 'Rectangle');
-    const x = await readNumberField(page, 'Layer X');
-    await setNumberField(page, 'Layer X', x + 30);
-    const saved = await storedWhen(
-      page,
-      (document) => layerNamed(document, 'Rectangle').frame.x === x + 30,
-      'the edit should be saved before the reload',
-    );
+    const startX = await readNumberField(page, 'Layer X');
+    await setNumberField(page, 'Layer X', startX + 40);
+    const edited = content(await stored(page));
+    expect(await historyLabels(page)).toHaveLength(FIXTURE_LABELS.length + 1);
 
     await page.reload();
     await expect(page.getByTestId('artboard')).toBeVisible();
-    await expect(layerButton(page, 'Rectangle')).toBeVisible();
+    await selectLayerFromList(page, 'Rectangle');
 
-    // The document came back exactly, and the interface does not pretend an old history still exists.
-    expect(content(await stored(page))).toBe(content(saved));
+    // The saved document is the edited one, and the field shows it.
+    expect(await readNumberField(page, 'Layer X')).toBe(startX + 40);
+    expect(content(await stored(page))).toBe(edited);
+
+    // A session history is not part of the saved document, so the panel starts empty and both
+    // controls are disabled until the next edit.
     expect(await historyLabels(page)).toEqual([]);
     await expect(undoButton(page)).toBeDisabled();
     await expect(redoButton(page)).toBeDisabled();

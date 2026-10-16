@@ -4,12 +4,12 @@
  * Phase 2's exit criterion says editing a thirty-layer document stays responsive. To check that
  * claim, this spec:
  *
- * 1. opens a **real thirty-layer document** — ten placed catalogue graphics with their attribution
+ * 1. opens a **real thirty-layer document** — ten placed catalogue records with their licence
  *    records, ten wrapping text layers and ten shapes — built by the editor's own commands
  *    (`src/testing/thirty-layers.ts`) and proves the browser really painted it;
  * 2. drives **real interactions** through the production build: selecting one layer and a group,
- *    dragging a layer and a group, resizing from a handle, committing inspector values, changing
- *    opacity from the keyboard, hiding and locking a layer, and undo/redo;
+ *    dragging a layer and a three-layer selection, resizing from a handle, committing inspector
+ *    values, changing opacity from the keyboard, hiding and locking a layer, and undo/redo;
  * 3. measures the two things a person actually feels — how long the result took to appear after the
  *    input, and how evenly the frames kept coming during a drag — after a warm-up pass, in a
  *    **controlled CPU-slowdown phase** that the budget is checked against, and again unthrottled for
@@ -18,6 +18,11 @@
  * The budget below was written before the first measurement and is not adjusted to fit results: a
  * benchmark whose threshold moves with the numbers proves nothing. Method, thresholds, measured
  * results, the proxy's limitations and how to read the report are in docs/PERFORMANCE.md.
+ *
+ * One scenario failing does not abort the run. Every scenario is measured inside its own guard, a
+ * broken selector records a failure row and the benchmark carries on with the next scenario, and the
+ * report is written to disk after every row — so a red run still publishes the evidence, and the
+ * reason for the red run is in the check-run annotation.
  */
 
 import { cpus } from 'node:os';
@@ -27,7 +32,12 @@ import { expect, test, type Page } from '@playwright/test';
 import { CURRENT_SCHEMA_VERSION, migrateDocument } from '../src/core/documents/migrations';
 import { hitTestScene } from '../src/core/documents/scene-geometry';
 import type { Scene } from '../src/core/documents/layer-types';
-import { thirtyLayerDocument } from '../src/testing/thirty-layers';
+import {
+  THIRTY_LAYER_COUNTS,
+  THIRTY_LAYER_DOCUMENT_ID,
+  THIRTY_LAYER_TOTAL,
+  thirtyLayerDocument,
+} from '../src/testing/thirty-layers';
 import { STORAGE_KEY, layerButton, pointInDocument } from './fixtures';
 import {
   PerfReport,
@@ -37,13 +47,12 @@ import {
   measureInteraction,
   percentile,
   resetPerfRecorder,
-  takeLongTasks,
-  takeSlowEvents,
+  takeObserved,
   throttleCpu,
   type FrameStats,
   type InteractionSample,
 } from './perf';
-import { readInkBands } from './pixels';
+import { countColours, readInkBands } from './pixels';
 
 /**
  * The document every measurement runs on. Deterministic: the builder is fixed, so two runs describe
@@ -52,7 +61,7 @@ import { readInkBands } from './pixels';
 const DOCUMENT = thirtyLayerDocument();
 const ENVELOPE = {
   schemaVersion: CURRENT_SCHEMA_VERSION,
-  savedAt: '2026-02-01T12:00:00.000Z',
+  savedAt: '2026-03-01T09:00:00.000Z',
   documents: [DOCUMENT],
 };
 
@@ -63,17 +72,21 @@ const ENVELOPE = {
  *   document is a few milliseconds of work; at a four-fold CPU slowdown that is still an order of
  *   magnitude inside the budget, so anything that trips it is a real regression rather than noise.
  *   (For scale: Web Vitals calls 200 ms a *good* response on unmodified hardware.)
- * - **100 ms p95 / 500 ms worst** between frames during a drag, and at most a fifth of frames slower
+ * - **100 ms p95 / 400 ms worst** between frames during a drag, and at most a fifth of frames slower
  *   than 50 ms. A drag that paints every 100 ms is visibly jerky; 16 ms would be a false precision at
  *   a 4x slowdown.
  * - **600 ms** for the longest single main-thread block in a phase. That is where "slow" becomes
  *   "frozen", and it is the one number that must not be traded away.
+ *
+ * A future maintainer should only ever *tighten* these with evidence from a run that passed: a
+ * failure here is a finding about the product, and widening the budget to make it green would delete
+ * the only thing the benchmark exists to say.
  */
 const BUDGET = {
   interactionP95: 200,
   interactionWorst: 500,
   frameP95: 100,
-  frameWorst: 500,
+  frameWorst: 400,
   frameOver50Share: 0.2,
   longTaskWorst: 600,
 } as const;
@@ -90,15 +103,15 @@ const SAMPLES = {
 /**
  * Bound on a single Playwright action in this spec.
  *
- * The suite default is "wait forever", which turned one wrong selector into a seven-minute timeout.
- * Twenty seconds is far longer than any of these interactions take (the budget allows 500 ms) but
- * short enough that a broken selector fails the scenario, is reported with its measurements, and
- * lets the rest of the benchmark run.
+ * The suite default is "wait forever", which once turned one wrong selector into a seven-minute
+ * timeout. Twenty seconds is far longer than any of these interactions take (the budget allows
+ * 500 ms) but short enough that a broken selector fails the scenario, is reported, and lets the rest
+ * of the benchmark run.
  */
 const ACTION_TIMEOUT = 20_000;
 
-/** Bounded, but long enough for a populated benchmark: two phases over ten scenarios. */
-const TEST_TIMEOUT = 8 * 60_000;
+/** Bounded, but long enough for a populated benchmark: two phases over eleven scenarios. */
+const TEST_TIMEOUT = 10 * 60_000;
 
 type Outcome = InteractionSample | FrameStats;
 
@@ -106,7 +119,7 @@ type Scenario = {
   readonly name: string;
   readonly how: string;
   readonly metric: 'interaction' | 'frames';
-  /** Puts the document and the selection into the state this measurement needs. */
+  /** Puts the document and the selection into the state this measurement needs. Idempotent. */
   readonly prepare: (page: Page) => Promise<void>;
   /** Performs the interaction and returns what the recorder measured. */
   readonly run: (page: Page, sample: number) => Promise<Outcome>;
@@ -132,7 +145,12 @@ function rowToggle(page: Page, name: string, kind: 'Hide' | 'Show' | 'Lock' | 'U
   return page.getByRole('button', { name: `${kind} \u201c${name}\u201d`, exact: true });
 }
 
-/** Leaves a layer visible or hidden, clicking only when the row is not already in that state. */
+/**
+ * Leaves a layer visible or hidden.
+ *
+ * The state is read first and the click is skipped when it is already right, so a scenario can be
+ * prepared any number of times without accumulating edits.
+ */
 async function setVisibility(page: Page, name: string, visible: boolean): Promise<void> {
   const visibleToggle = rowToggle(page, name, 'Hide');
   const hiddenToggle = rowToggle(page, name, 'Show');
@@ -169,8 +187,8 @@ async function extendSelection(page: Page, name: string): Promise<void> {
 /**
  * A point inside a layer that the application's own hit test says belongs to that layer.
  *
- * Layers overlap in a thirty-layer document, so "drag the Tile" needs a grab point where the Tile is
- * really on top. Scanning and asking `hitTestScene` — the same function the pointer handler runs —
+ * Layers overlap in a thirty-layer document, so "drag the Quote" needs a grab point where the Quote
+ * is really on top. Scanning and asking `hitTestScene` — the same function the pointer handler runs —
  * keeps that honest: a miss is reported rather than silently measuring a drag of the wrong layer.
  */
 function grabPoint(scene: Scene, name: string): { readonly x: number; readonly y: number } {
@@ -223,6 +241,7 @@ async function dragWithFrames(
         start.x + (end.x - start.x) * progress,
         start.y + (end.y - start.y) * progress,
       );
+      // Long enough that the page really repaints between moves, short enough to keep the drag short.
       await page.waitForTimeout(6);
     }
     await page.mouse.up();
@@ -269,7 +288,7 @@ const SCENARIOS: readonly Scenario[] = [
     },
     run: async (page) => {
       return measureInteraction(page, 'select-group', ['click'], async () => {
-        await extendSelection(page, 'Card A');
+        await extendSelection(page, 'Plate A');
       });
     },
   },
@@ -278,13 +297,13 @@ const SCENARIOS: readonly Scenario[] = [
     how: 'click Hide on a layer row',
     metric: 'interaction',
     prepare: async (page) => {
-      await setVisibility(page, 'Subhead', true);
+      await setVisibility(page, 'Dateline', true);
     },
     run: async (page) => {
       const measured = await measureInteraction(page, 'hide-layer', ['click'], async () => {
-        await rowToggle(page, 'Subhead', 'Hide').click();
+        await rowToggle(page, 'Dateline', 'Hide').click();
       });
-      await setVisibility(page, 'Subhead', true);
+      await setVisibility(page, 'Dateline', true);
       return measured;
     },
   },
@@ -293,13 +312,13 @@ const SCENARIOS: readonly Scenario[] = [
     how: 'click Lock on a layer row',
     metric: 'interaction',
     prepare: async (page) => {
-      await setLocked(page, 'Halo', false);
+      await setLocked(page, 'Footer stamp', false);
     },
     run: async (page) => {
       const measured = await measureInteraction(page, 'lock-layer', ['click'], async () => {
-        await rowToggle(page, 'Halo', 'Lock').click();
+        await rowToggle(page, 'Footer stamp', 'Lock').click();
       });
-      await setLocked(page, 'Halo', false);
+      await setLocked(page, 'Footer stamp', false);
       return measured;
     },
   },
@@ -340,7 +359,7 @@ const SCENARIOS: readonly Scenario[] = [
     how: 'press an arrow key on the opacity slider',
     metric: 'interaction',
     prepare: async (page) => {
-      await selectOnlyLayer(page, 'Halo');
+      await selectOnlyLayer(page, 'Accent dot');
       await page.getByLabel('Layer opacity').focus();
     },
     run: async (page, sample) => {
@@ -355,18 +374,17 @@ const SCENARIOS: readonly Scenario[] = [
     how: 'undo an edit from the history panel',
     metric: 'interaction',
     prepare: async (page) => {
-      await setVisibility(page, 'Tile', true);
+      await setVisibility(page, 'Footer note', true);
     },
     run: async (page) => {
       // A real edit first, so there is something to step back to; then the measured step back.
-      await rowToggle(page, 'Tile', 'Hide').click();
+      await rowToggle(page, 'Footer note', 'Hide').click();
       await expect(historyButton(page, 'Undo')).toBeEnabled();
       const measured = await measureInteraction(page, 'undo', ['click'], async () => {
         await historyButton(page, 'Undo').click();
       });
-      await expect(historyButton(page, 'Redo')).toBeEnabled();
-      await historyButton(page, 'Redo').click();
-      await setVisibility(page, 'Tile', true);
+      // Put the document back into the state the undo produced, whichever way it ended up.
+      await setVisibility(page, 'Footer note', false);
       return measured;
     },
   },
@@ -375,29 +393,29 @@ const SCENARIOS: readonly Scenario[] = [
     how: 'redo an edit from the history panel',
     metric: 'interaction',
     prepare: async (page) => {
-      await setVisibility(page, 'Caption', true);
+      await setVisibility(page, 'Quote', true);
     },
     run: async (page) => {
-      await rowToggle(page, 'Caption', 'Hide').click();
+      await rowToggle(page, 'Quote', 'Hide').click();
       await historyButton(page, 'Undo').click();
       await expect(historyButton(page, 'Redo')).toBeEnabled();
       const measured = await measureInteraction(page, 'redo', ['click'], async () => {
         await historyButton(page, 'Redo').click();
       });
-      await setVisibility(page, 'Caption', true);
+      await setVisibility(page, 'Quote', true);
       return measured;
     },
   },
   {
     name: 'drag-layer',
-    how: 'drag one selected layer across the canvas',
+    how: 'drag one text layer across the canvas',
     metric: 'frames',
     prepare: async (page) => {
-      await selectOnlyLayer(page, 'Tile');
+      await selectOnlyLayer(page, 'Quote');
     },
     run: async (page, sample) => {
       const direction = sample % 2 === 0 ? 1 : -1;
-      return dragLayer(page, 'Tile', { x: 40 * direction, y: 30 * direction });
+      return dragLayer(page, 'Quote', { x: 40 * direction, y: 30 * direction });
     },
   },
   {
@@ -406,12 +424,12 @@ const SCENARIOS: readonly Scenario[] = [
     metric: 'frames',
     prepare: async (page) => {
       await selectOnlyLayer(page, 'Intro copy');
-      await extendSelection(page, 'Programme copy');
-      await extendSelection(page, 'Quote');
+      await extendSelection(page, 'Offer line');
+      await extendSelection(page, 'Notes');
     },
     run: async (page, sample) => {
       const direction = sample % 2 === 0 ? 1 : -1;
-      const from = grabPoint(await storedScene(page), 'Programme copy');
+      const from = grabPoint(await storedScene(page), 'Intro copy');
       return dragWithFrames(page, from, {
         x: from.x + 30 * direction,
         y: from.y + 20 * direction,
@@ -423,7 +441,7 @@ const SCENARIOS: readonly Scenario[] = [
     how: 'drag the bottom-right handle to resize a layer',
     metric: 'frames',
     prepare: async (page) => {
-      await selectOnlyLayer(page, 'Panel');
+      await selectOnlyLayer(page, 'Content card');
     },
     run: async (page, sample) => {
       const handle = page.getByRole('button', { name: 'Resize bottom right' });
@@ -459,13 +477,15 @@ async function openFixture(page: Page): Promise<void> {
     },
     { key: STORAGE_KEY, envelope: ENVELOPE },
   );
-  await page.goto(`/workspace/${String(DOCUMENT.id)}`);
+  await page.goto(`/workspace/${THIRTY_LAYER_DOCUMENT_ID}`);
   await expect(page.getByTestId('artboard')).toBeVisible();
-  await expect(page.locator('[data-testid^="layer-row-"]')).toHaveCount(
-    DOCUMENT.scene.layers.length,
-  );
-  // Every graphic finished decoding: the stage only shows this note while one is outstanding.
-  await expect(page.getByText('Graphics are still loading')).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.locator('[data-testid^="layer-row-"]')).toHaveCount(THIRTY_LAYER_TOTAL);
+  /* Every placed graphic finished decoding *and* none of them failed. The stage shows one note for
+     both cases ("Graphics are still loading" / "A graphic could not be loaded"), and asserting on
+     both is what stops the benchmark from quietly measuring a canvas with ten missing images. */
+  await expect(
+    page.getByText(/Graphics are still loading|A graphic could not be loaded/),
+  ).toHaveCount(0, { timeout: 30_000 });
 }
 
 /* ------------------------------------------------------------------ running the benchmark */
@@ -480,8 +500,12 @@ type PhaseName = 'throttled' | 'unthrottled';
  */
 async function warmUp(page: Page): Promise<void> {
   for (const scenario of SCENARIOS) {
-    await scenario.prepare(page);
-    await scenario.run(page, 0);
+    try {
+      await scenario.prepare(page);
+      await scenario.run(page, 0);
+    } catch {
+      // A broken scenario is reported by the measured pass; the warm-up carries on regardless.
+    }
   }
 }
 
@@ -498,115 +522,120 @@ async function runPhase(
   await warmUp(page);
   await resetPerfRecorder(page);
 
-  for (const scenario of SCENARIOS) {
-    if (broken.has(scenario.name)) continue;
+  try {
+    for (const scenario of SCENARIOS) {
+      if (broken.has(scenario.name)) continue;
 
-    const interactions: number[] = [];
-    const gaps: number[] = [];
-    const drags: number[] = [];
-    let scenarioError: string | null = null;
+      const interactions: number[] = [];
+      const gaps: number[] = [];
+      const drags: number[] = [];
+      let scenarioError: string | null = null;
 
-    for (
-      let sample = 0;
-      sample < (scenario.metric === 'interaction' ? counts.interaction : counts.frames);
-      sample += 1
-    ) {
-      try {
-        await scenario.prepare(page);
-        const outcome = await scenario.run(page, sample);
-        if ('ms' in outcome) interactions.push(outcome.ms);
-        else {
-          gaps.push(...outcome.gaps);
-          drags.push(outcome.p95);
+      for (
+        let sample = 0;
+        sample < (scenario.metric === 'interaction' ? counts.interaction : counts.frames);
+        sample += 1
+      ) {
+        try {
+          await scenario.prepare(page);
+          const outcome = await scenario.run(page, sample);
+          if ('ms' in outcome) interactions.push(outcome.ms);
+          else {
+            gaps.push(...outcome.gaps);
+            drags.push(outcome.p95);
+          }
+        } catch (error) {
+          // A scenario that cannot complete is reported and abandoned: its remaining samples would
+          // only repeat the same failure, and the rest of the benchmark still has to run.
+          scenarioError = error instanceof Error ? error.message : String(error);
+          await resetPerfRecorder(page);
+          break;
         }
-      } catch (error) {
-        // A scenario that cannot complete is reported and abandoned: its remaining samples would only
-        // repeat the same failure, and the rest of the benchmark still has to run.
-        scenarioError = error instanceof Error ? error.message : String(error);
-        break;
       }
-    }
 
-    const longTasks = await takeLongTasks(page);
-    const slowEvents = await takeSlowEvents(page);
-    const observed = `long tasks ${String(longTasks.count)} (worst ${longTasks.max.toFixed(0)} ms), input events over 16 ms ${String(slowEvents.count)} (worst ${slowEvents.max.toFixed(0)} ms)`;
+      const observed = await takeObserved(page);
+      const longTasks = observed.filter((entry) => entry.kind === 'longtask');
+      const slowEvents = observed.filter((entry) => entry.kind === 'slow-event');
+      const worst = (values: readonly number[]): number =>
+        values.length === 0 ? 0 : Math.max(...values);
+      const observedText = `long tasks ${String(longTasks.length)} (worst ${worst(longTasks.map((entry) => entry.duration)).toFixed(0)} ms), input events over 16 ms ${String(slowEvents.length)} (worst ${worst(slowEvents.map((entry) => entry.duration)).toFixed(0)} ms)`;
+      const longTaskWorst = worst(longTasks.map((entry) => entry.duration));
 
-    if (scenarioError !== null) {
-      broken.add(scenario.name);
-      report.fail(`${phase} ${scenario.name}`, scenarioError);
-      continue;
-    }
+      if (scenarioError !== null) {
+        broken.add(scenario.name);
+        report.fail(`${phase} ${scenario.name}`, scenarioError);
+        continue;
+      }
 
-    if (scenario.metric === 'interaction') {
-      const p95 = percentile(interactions, 0.95);
-      const worst = interactions.length === 0 ? 0 : Math.max(...interactions);
-      const failed =
+      if (scenario.metric === 'interaction') {
+        const p95 = percentile(interactions, 0.95);
+        const slowest = worst(interactions);
+        const short = interactions.length < counts.interaction;
+        const missed =
+          throttled && (short || p95 > BUDGET.interactionP95 || slowest > BUDGET.interactionWorst);
+        report.add({
+          scenario: scenario.name,
+          how: scenario.how,
+          phase,
+          samples: interactions.length,
+          p50: percentile(interactions, 0.5),
+          p95,
+          worst: slowest,
+          observed: observedText,
+          budget: throttled
+            ? `p95 ${String(BUDGET.interactionP95)} ms / worst ${String(BUDGET.interactionWorst)} ms`
+            : 'reported only',
+          verdict: missed ? 'fail' : throttled ? 'pass' : 'reported',
+        });
+        if (missed) {
+          report.note(
+            `${phase} ${scenario.name}: ${describeDistribution(interactions)}${short ? ` (only ${String(interactions.length)} of ${String(counts.interaction)} samples landed)` : ''}. Samples: [${interactions
+              .map((value) => value.toFixed(1))
+              .join(', ')}] ms.`,
+          );
+        }
+        continue;
+      }
+
+      const slowShare = gaps.length === 0 ? 0 : gaps.filter((gap) => gap > 50).length / gaps.length;
+      const p95 = percentile(gaps, 0.95);
+      const slowest = worst(gaps);
+      const missed =
         throttled &&
-        (interactions.length < counts.interaction ||
-          p95 > BUDGET.interactionP95 ||
-          worst > BUDGET.interactionWorst);
+        (gaps.length === 0 ||
+          p95 > BUDGET.frameP95 ||
+          slowest > BUDGET.frameWorst ||
+          slowShare > BUDGET.frameOver50Share);
+      const frozen = throttled && longTaskWorst > BUDGET.longTaskWorst;
       report.add({
         scenario: scenario.name,
-        how: scenario.how,
+        how: `${scenario.how} (${String(gaps.length)} frame gaps over ${String(drags.length)} drags)`,
         phase,
-        samples: interactions.length,
-        p50: percentile(interactions, 0.5),
+        samples: drags.length,
+        p50: percentile(gaps, 0.5),
         p95,
-        worst,
-        observed,
+        worst: slowest,
+        observed: `${observedText}, ${(slowShare * 100).toFixed(0)}% of gaps over 50 ms`,
         budget: throttled
-          ? `p95 ${String(BUDGET.interactionP95)} ms / worst ${String(BUDGET.interactionWorst)} ms`
+          ? `p95 ${String(BUDGET.frameP95)} ms / worst ${String(BUDGET.frameWorst)} ms, ≤ ${String(BUDGET.frameOver50Share * 100)}% over 50 ms`
           : 'reported only',
-        verdict: failed ? 'fail' : throttled ? 'pass' : 'reported',
+        verdict: missed || frozen ? 'fail' : throttled ? 'pass' : 'reported',
       });
-      if (failed) {
+      if (missed) {
         report.note(
-          `${phase} ${scenario.name}: ${describeDistribution(interactions)}. Samples: [${interactions
-            .map((value) => value.toFixed(1))
-            .join(', ')}] ms.`,
+          `${phase} ${scenario.name}: frame gaps ${describeDistribution(gaps)} with ${(slowShare * 100).toFixed(0)}% over 50 ms.`,
         );
       }
-      continue;
+      if (frozen) {
+        report.note(
+          `${phase} ${scenario.name}: the longest main-thread block was ${longTaskWorst.toFixed(0)} ms, over the ${String(BUDGET.longTaskWorst)} ms budget.`,
+        );
+      }
     }
-
-    const slowShare = gaps.length === 0 ? 0 : gaps.filter((gap) => gap > 50).length / gaps.length;
-    const p95 = percentile(gaps, 0.95);
-    const worst = gaps.length === 0 ? 0 : Math.max(...gaps);
-    const failed =
-      throttled &&
-      (gaps.length === 0 ||
-        p95 > BUDGET.frameP95 ||
-        worst > BUDGET.frameWorst ||
-        slowShare > BUDGET.frameOver50Share);
-    const longTaskFailed = throttled && longTasks.max > BUDGET.longTaskWorst;
-    report.add({
-      scenario: scenario.name,
-      how: `${scenario.how} (${String(gaps.length)} frame gaps over ${String(drags.length)} drags)`,
-      phase,
-      samples: drags.length,
-      p50: percentile(gaps, 0.5),
-      p95,
-      worst,
-      observed: `${observed}, ${(slowShare * 100).toFixed(0)}% of gaps over 50 ms`,
-      budget: throttled
-        ? `p95 ${String(BUDGET.frameP95)} ms / worst ${String(BUDGET.frameWorst)} ms, ≤ ${String(BUDGET.frameOver50Share * 100)}% over 50 ms`
-        : 'reported only',
-      verdict: failed || longTaskFailed ? 'fail' : throttled ? 'pass' : 'reported',
-    });
-    if (failed) {
-      report.note(
-        `${phase} ${scenario.name}: frame gaps ${describeDistribution(gaps)} with ${(slowShare * 100).toFixed(0)}% over 50 ms.`,
-      );
-    }
-    if (longTaskFailed) {
-      report.note(
-        `${phase} ${scenario.name}: the longest main-thread block was ${longTasks.max.toFixed(0)} ms, over the ${String(BUDGET.longTaskWorst)} ms budget.`,
-      );
-    }
+  } finally {
+    // Back to full speed before anything else runs in this browser.
+    await throttleCpu(page, 1);
   }
-
-  // Back to full speed before anything else runs in this browser.
-  await throttleCpu(page, 1);
 }
 
 /**
@@ -631,34 +660,47 @@ function environment(): {
 }
 
 test.describe('a thirty-layer document in a real browser', () => {
-  test.describe.configure({ timeout: TEST_TIMEOUT });
-
   test.beforeEach(async ({ page }) => {
     // Bounded per action: a wrong selector must fail one scenario in seconds, not eat the test.
     page.setDefaultTimeout(ACTION_TIMEOUT);
     await installPerfRecorder(page);
   });
 
-  test('paints thirty real layers, graphics included', async ({ page }) => {
+  test('paints thirty real layers, artwork included', async ({ page }) => {
     await openFixture(page);
 
     const layers = DOCUMENT.scene.layers;
-    expect(layers).toHaveLength(30);
+    expect(layers).toHaveLength(THIRTY_LAYER_TOTAL);
     const counts: Record<string, number> = {};
     for (const layer of layers) counts[layer.type] = (counts[layer.type] ?? 0) + 1;
-    expect(counts).toEqual({ rect: 7, ellipse: 3, image: 10, text: 10 });
-    // The graphics are placed catalogue records, so the document carries their licences.
-    expect(DOCUMENT.attribution).toHaveLength(10);
-    await expect(page.getByRole('img', { name: /30 layers/ })).toBeVisible();
+    expect(counts).toEqual({ ...THIRTY_LAYER_COUNTS });
+    // The placed catalogue records carry their licences, and the browser loaded all ten of them.
+    expect(DOCUMENT.attribution).toHaveLength(THIRTY_LAYER_COUNTS.image);
+    await expect(
+      page.getByRole('img', { name: new RegExp(`${String(THIRTY_LAYER_TOTAL)} layers`) }),
+    ).toBeVisible();
 
-    // The browser really drew it: ink where the headline text sits, and where the graphics strip is.
-    const headline = await readInkBands(page, { x: 48, y: 40, width: 700, height: 92 });
-    expect(headline.bands.length, 'the headline text should be painted').toBeGreaterThan(0);
-    const strip = await readInkBands(page, { x: 60, y: 512, width: 380, height: 104 });
-    expect(strip.inkRows, 'the placed graphics should be painted').toBeGreaterThan(10);
+    // The headline is really painted, at the coordinates the document puts it at.
+    const headline = await readInkBands(page, { x: 120, y: 38, width: 900, height: 72 });
+    expect(headline.bands.length, 'the headline should be painted').toBeGreaterThan(0);
+
+    /* And the placed artwork is painted, not merely listed: measured against a flat shape of the same
+       document. The plate under the first graphic is one flat colour, while the graphic draws
+       antialiased strokes over it, so "many more colours inside the graphic's frame than inside the
+       flat plate" is a statement about pixels rather than about the layer list. */
+    const flat = await countColours(page, { x: 84, y: 200, width: 12, height: 200 });
+    expect(flat.dominantShare, `the plate should be one flat colour: ${JSON.stringify(flat)}`).toBe(
+      1,
+    );
+    const artwork = await countColours(page, { x: 120, y: 205, width: 210, height: 70 });
+    expect(
+      artwork.distinct,
+      `the placed graphic should carry real detail: ${JSON.stringify(artwork)}`,
+    ).toBeGreaterThan(flat.distinct * 8);
   });
 
   test('stays inside the recorded budget while editing', async ({ page }) => {
+    test.setTimeout(TEST_TIMEOUT);
     await openFixture(page);
 
     const report = new PerfReport('Thirty-layer responsiveness (production build, in Chromium)', {
@@ -669,19 +711,23 @@ test.describe('a thirty-layer document in a real browser', () => {
       `Gated phase: CDP \`Emulation.setCPUThrottlingRate: ${String(THROTTLE_RATE)}\`, ${String(SAMPLES.throttled.interaction)} interaction samples and ${String(SAMPLES.throttled.frames)} drag samples per scenario, after one unrecorded warm-up pass.`,
     );
     report.note(
-      `Reported phase: the same scenarios at full speed (${String(SAMPLES.unthrottled.interaction)} / ${String(SAMPLES.unthrottled.frames)} samples). GitHub runners vary, so this phase is context rather than a gate.`,
+      `Reported phase: the same scenarios at full speed (${String(SAMPLES.unthrottled.interaction)} / ${String(SAMPLES.unthrottled.frames)} samples). GitHub runners vary, so this phase is context rather than a gate; docs/PERFORMANCE.md says why.`,
     );
     report.note(
       "Latency is measured in the page: from the input event's own timestamp to the second animation frame after it. Frame gaps are the intervals between animation frames while the pointer moves.",
     );
 
     const broken = new Set<string>();
-    await runPhase(page, 'throttled', report, broken);
-    await runPhase(page, 'unthrottled', report, broken);
-
-    // Left in the log for anyone reading the run, and written to test-results/perf-report.md for the
-    // CI job that publishes it onto the pull request.
-    process.stdout.write(`\n${report.markdown()}\n`);
+    try {
+      await runPhase(page, 'throttled', report, broken);
+      await runPhase(page, 'unthrottled', report, broken);
+    } finally {
+      // Left in the log for anyone reading the run, and written to test-results/perf-report.md for the
+      // CI job that publishes it onto the pull request. Written even when a phase threw, because the
+      // numbers already collected are the evidence.
+      report.write();
+      process.stdout.write(`\n${report.markdown()}\n`);
+    }
 
     expect(report.failureLines(), `\n${report.markdown()}`).toEqual([]);
   });

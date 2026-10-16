@@ -20,7 +20,7 @@
  *    single 600ms task is what a person experiences as a freeze.
  *
  * Nothing in this file ships: it is injected into the page by the test, uses no application hooks,
- * and the app never imports it (ADR-0018 keeps the harness outside the product).
+ * and the application never imports it.
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -48,26 +48,21 @@ export type FrameStats = {
   readonly gaps: readonly number[];
 };
 
-export type LongTaskStats = {
-  readonly count: number;
-  readonly total: number;
-  readonly max: number;
-};
-
-export type SlowEventStats = {
-  readonly count: number;
-  readonly max: number;
+/** A main-thread task or a slow input event, as the browser itself reported it. */
+export type ObservedEntry = {
+  readonly kind: 'longtask' | 'slow-event';
+  readonly duration: number;
 };
 
 type PageApi = {
   begin: (name: string, kinds: readonly string[]) => void;
-  /** Whether a measurement has landed yet: the two `requestAnimationFrame` hops are not instant. */
+  /** Whether the sample for this interaction has landed yet. */
   has: (name: string) => boolean;
   take: (name: string) => readonly InteractionSample[];
   startFrames: () => void;
   stopFrames: () => FrameStats;
   /** Drains every observation collected so far: long tasks and slow input events. */
-  takeObserved: () => readonly { readonly name: string; readonly duration: number }[];
+  takeObserved: () => readonly ObservedEntry[];
   reset: () => void;
 };
 
@@ -86,67 +81,63 @@ export async function installPerfRecorder(page: Page): Promise<void> {
   await page.addInitScript(() => {
     type Pending = { readonly name: string; readonly kinds: readonly string[] };
     type Sample = { readonly name: string; readonly ms: number; readonly event: string };
+    type Observed = { readonly kind: 'longtask' | 'slow-event'; readonly duration: number };
 
     const samples: Sample[] = [];
-    const longTasks: { readonly name: string; readonly duration: number }[] = [];
+    const observed: Observed[] = [];
     let pending: Pending | null = null;
     let frameTimes: number[] = [];
-    let openMoves: number[] = [];
     let recordingFrames = false;
     let loop = 0;
 
-    /** One frame loop, used both for gap statistics and to time pointer-move handling. */
-    const tick = (timestamp: number): void => {
-      if (!recordingFrames) return;
-      frameTimes.push(timestamp);
-      for (const moved of openMoves) {
-        samples.push({ name: 'pointermove', ms: timestamp - moved, event: 'pointermove' });
-      }
-      openMoves = [];
-      loop = window.requestAnimationFrame(tick);
-    };
+    /* The events that can start a measurement. `pointermove` is deliberately not among them: a drag
+       is measured by its frame gaps, not by a single move event. */
+    const kinds = ['click', 'keydown', 'pointerdown', 'pointerup', 'change'];
 
     const onInput = (event: Event): void => {
-      if (pending && pending.kinds.includes(event.type)) {
-        const armed = pending;
-        pending = null;
-        const start = event.timeStamp;
-        const kind = event.type;
-        // Two frames: React commits on the first, the canvas repaint lands with it; the second is the
-        // earliest moment the result can honestly be called "on screen".
-        window.requestAnimationFrame(() => {
-          window.requestAnimationFrame((second) => {
-            samples.push({ name: armed.name, ms: second - start, event: kind });
-          });
+      if (pending === null || !pending.kinds.includes(event.type)) return;
+      const armed = pending;
+      pending = null;
+      const start = event.timeStamp;
+      const kind = event.type;
+      // Two frames: React commits on the first, the canvas repaint lands with it; the second is the
+      // earliest moment the result can honestly be called "on screen".
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame((second) => {
+          samples.push({ name: armed.name, ms: second - start, event: kind });
         });
-      }
-      if (recordingFrames && event.type === 'pointermove') openMoves.push(event.timeStamp);
+      });
     };
 
     // Capture phase: the recorder must see the event even if a handler stops propagation.
-    for (const kind of ['click', 'keydown', 'pointerdown', 'change']) {
-      window.addEventListener(kind, onInput, true);
-    }
-    window.addEventListener('pointermove', onInput, true);
+    for (const kind of kinds) window.addEventListener(kind, onInput, true);
 
-    const observer = (entryTypes: readonly string[]): void => {
-      for (const entryType of entryTypes) {
-        try {
-          new PerformanceObserver((list) => {
-            for (const entry of list.getEntries()) {
-              longTasks.push(
-                entryType === 'longtask'
-                  ? { name: 'longtask', duration: entry.duration }
-                  : { name: 'slow-event', duration: entry.duration },
-              );
-            }
-          }).observe({ type: entryType, buffered: true });
-        } catch {
-          // An unsupported entry type simply reports nothing; the measurements above still work.
-        }
+    const observe = (entryType: 'longtask' | 'event'): void => {
+      try {
+        new PerformanceObserver((list) => {
+          for (const entry of list.getEntries()) {
+            observed.push({
+              kind: entryType === 'longtask' ? 'longtask' : 'slow-event',
+              duration: entry.duration,
+            });
+          }
+        }).observe({
+          type: entryType,
+          // The events that matter here are the ones over 16ms; `longtask` has no threshold of its own.
+          ...(entryType === 'event' ? { durationThreshold: 16 } : {}),
+        });
+      } catch {
+        // An unsupported entry type simply reports nothing; the other measurements still work.
       }
     };
-    observer(['longtask', 'event']);
+    observe('longtask');
+    observe('event');
+
+    const tick = (timestamp: number): void => {
+      if (!recordingFrames) return;
+      frameTimes.push(timestamp);
+      loop = window.requestAnimationFrame(tick);
+    };
 
     const read = (sorted: readonly number[], fraction: number): number => {
       if (sorted.length === 0) return 0;
@@ -155,8 +146,8 @@ export async function installPerfRecorder(page: Page): Promise<void> {
     };
 
     window.__forgePerf = {
-      begin(name, kinds) {
-        pending = { name, kinds };
+      begin(name, armedKinds) {
+        pending = { name, kinds: armedKinds };
       },
       has(name) {
         return samples.some((sample) => sample.name === name);
@@ -168,7 +159,6 @@ export async function installPerfRecorder(page: Page): Promise<void> {
       },
       startFrames() {
         frameTimes = [];
-        openMoves = [];
         recordingFrames = true;
         window.cancelAnimationFrame(loop);
         loop = window.requestAnimationFrame(tick);
@@ -194,12 +184,11 @@ export async function installPerfRecorder(page: Page): Promise<void> {
         };
       },
       takeObserved() {
-        return longTasks.splice(0, longTasks.length);
+        return observed.splice(0, observed.length);
       },
       reset() {
         samples.length = 0;
-        longTasks.length = 0;
-        openMoves = [];
+        observed.length = 0;
         frameTimes = [];
         pending = null;
       },
@@ -208,18 +197,25 @@ export async function installPerfRecorder(page: Page): Promise<void> {
 }
 
 /**
+ * How long a measurement may take to land before the recorder says so.
+ *
+ * The clock stops two animation frames after the input, so the sample can arrive a frame or two after
+ * the interaction is over. Waiting for it is what keeps this honest instead of racing it: the
+ * alternative would be to give up quietly and report the *next* interaction's number.
+ */
+const SAMPLE_WAIT_MS = 5_000;
+
+/**
  * Runs one interaction and returns what the page measured for it.
  *
  * @param kinds the event types that may start the clock. Passing the wrong kind is a test defect, so
  *   it fails loudly instead of silently measuring the next interaction.
  */
-const SAMPLE_WAIT_MS = 5_000;
-
 export async function measureInteraction(
   page: Page,
   name: string,
   kinds: readonly string[],
-  run: () => Promise<void>,
+  action: () => Promise<void>,
 ): Promise<InteractionSample> {
   await page.evaluate(
     ({ armedName, armedKinds }) => {
@@ -227,66 +223,49 @@ export async function measureInteraction(
     },
     { armedName: name, armedKinds: kinds },
   );
-  await run();
-  // The clock stops on the second frame after the input, so the sample can arrive a frame or two
-  // after the interaction is over. Waiting for it is what keeps this measurement honest instead of
-  // racing it: the alternative would be to give up quietly and report the *next* interaction.
-  try {
-    await page.waitForFunction((armedName) => window.__forgePerf.has(armedName), name, {
+  await action();
+  const landed = await page
+    .waitForFunction((armedName) => window.__forgePerf.has(armedName), name, {
       timeout: SAMPLE_WAIT_MS,
-    });
-  } catch {
-    // Nothing arrived in time; the message below says so with the detail that matters.
-  }
+    })
+    .then(
+      () => true,
+      // A measurement that never arrives is reported by the explicit error below, with the arming
+      // detail that actually diagnoses it, rather than as a bare wait-for-function timeout.
+      () => false,
+    );
   const taken = await page.evaluate((armedName) => window.__forgePerf.take(armedName), name);
   const sample = taken[0];
   if (!sample) {
     throw new Error(
-      `“${name}” produced no ${kinds.join('/')} event, so nothing could be measured — the interaction never reached the page`,
+      `“${name}” produced no ${kinds.join('/')} event${landed ? '' : ` within ${String(SAMPLE_WAIT_MS)}ms`}, so nothing could be measured — the interaction never reached the page`,
     );
   }
   return sample;
 }
 
-/**
- * Runs a drag with the frame loop watching.
- *
- * The loop is stopped in a `finally`, so a failing drag cannot leave a recorder running into the next
- * measurement.
- */
-export async function measureFrames(page: Page, run: () => Promise<void>): Promise<FrameStats> {
+/** Runs a drag with the frame loop watching, always stopping the loop, even when the drag throws. */
+export async function measureFrames(page: Page, action: () => Promise<void>): Promise<FrameStats> {
   await page.evaluate(() => {
     window.__forgePerf.startFrames();
   });
-  let stats: FrameStats | null = null;
+  let failure: unknown = null;
   try {
-    await run();
-  } finally {
-    // Always, including on failure: a recorder left running would pollute the next measurement.
-    stats = await page.evaluate(() => window.__forgePerf.stopFrames());
+    await action();
+  } catch (error) {
+    failure = error;
   }
+  // A recorder left running would pollute the next measurement, so the loop is stopped before the
+  // failure is re-thrown.
+  const stats = await page.evaluate(() => window.__forgePerf.stopFrames());
+  if (failure instanceof Error) throw failure;
+  if (failure !== null) throw new Error(`the drag failed: ${typeof failure}`);
   return stats;
 }
 
-/** Drains the long-task entries collected since the last drain. */
-export async function takeLongTasks(page: Page): Promise<LongTaskStats> {
-  const entries = await page.evaluate(() => window.__forgePerf.takeObserved());
-  const tasks = entries.filter((entry) => entry.name === 'longtask');
-  return {
-    count: tasks.length,
-    total: tasks.reduce((sum, entry) => sum + entry.duration, 0),
-    max: tasks.reduce((peak, entry) => Math.max(peak, entry.duration), 0),
-  };
-}
-
-/** Drains the browser's own "this input event was slow" entries since the last drain. */
-export async function takeSlowEvents(page: Page): Promise<SlowEventStats> {
-  const entries = await page.evaluate(() => window.__forgePerf.takeObserved());
-  const events = entries.filter((entry) => entry.name === 'slow-event');
-  return {
-    count: events.length,
-    max: events.reduce((peak, entry) => Math.max(peak, entry.duration), 0),
-  };
+/** Drains the long tasks and slow input events observed since the last drain. */
+export async function takeObserved(page: Page): Promise<readonly ObservedEntry[]> {
+  return page.evaluate(() => window.__forgePerf.takeObserved());
 }
 
 export async function resetPerfRecorder(page: Page): Promise<void> {
@@ -331,7 +310,7 @@ export type ScenarioRow = {
   readonly worst: number;
   /** Long-task and slow-event counts observed while the scenario ran. */
   readonly observed: string;
-  /** The budget this row was measured against, or `reported` for an ungated phase. */
+  /** The budget this row was measured against, or `reported only` for the ungated phase. */
   readonly budget: string;
   readonly verdict: 'pass' | 'fail' | 'reported';
 };
@@ -346,7 +325,7 @@ export type EnvironmentFacts = {
 function markdownTable(rows: readonly ScenarioRow[]): string {
   const header =
     '| Scenario | What the user does | Phase | n | p50 | p95 | worst | Observed | Budget | Result |';
-  const divider = '| --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- |';
+  const divider = '| --- | --- | --- | ---: | ---: | ---: | --- | --- | --- |';
   const body = rows.map(
     (row) =>
       `| \`${row.scenario}\` | ${row.how} | ${row.phase} | ${String(row.samples)} | ${row.p50.toFixed(1)} ms | ${row.p95.toFixed(1)} ms | ${row.worst.toFixed(1)} ms | ${row.observed} | ${row.budget} | ${row.verdict} |`,
@@ -377,7 +356,7 @@ export class PerfReport {
     this.rows.push(row);
     if (row.verdict === 'fail') {
       this.failures.push(
-        `${row.scenario}: p95 ${row.p95.toFixed(1)}ms / worst ${row.worst.toFixed(1)}ms against ${row.budget}`,
+        `${row.scenario} (${row.phase}): p95 ${row.p95.toFixed(1)}ms / worst ${row.worst.toFixed(1)}ms against ${row.budget}`,
       );
     }
     this.write();
@@ -390,7 +369,8 @@ export class PerfReport {
 
   /** Records a scenario that threw, so the report says so even if the exception is not a budget miss. */
   public fail(scenario: string, reason: string): void {
-    this.failures.push(`${scenario}: ${reason}`);
+    const first = reason.split('\n')[0] ?? reason;
+    this.failures.push(`${scenario}: ${first.slice(0, 200)}`);
     this.rows.push({
       scenario,
       how: 'the scenario could not be completed',
@@ -399,7 +379,7 @@ export class PerfReport {
       p50: 0,
       p95: 0,
       worst: 0,
-      observed: reason.split('\n')[0]?.slice(0, 160) ?? reason,
+      observed: first.slice(0, 160),
       budget: 'scenario must run',
       verdict: 'fail',
     });

@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
-import type { ForgeDocument, GuideSettings } from '../../core/documents/types';
+import type { Canvas, ForgeDocument, GuideSettings } from '../../core/documents/types';
 import type { Scene } from '../../core/documents/layer-types';
 import { unionRects } from '../../core/documents/geometry';
 import { imageLayer, rectLayer, sceneOf, textLayer } from '../../testing/layers';
@@ -163,6 +163,8 @@ type Row = {
   readonly palette?: readonly string[];
   /** Starting guide settings, for the rows about switching them off. */
   readonly guides?: Partial<GuideSettings>;
+  /** A different starting canvas, for the rows about state that has to be there first. */
+  readonly canvas?: Canvas;
   readonly act: (
     user: ReturnType<typeof userEvent.setup>,
     workspace: MountedWorkspace,
@@ -174,6 +176,7 @@ type Row = {
 async function mountWorkspace(row: Row | null = null): Promise<MountedWorkspace> {
   return mount(row?.scene?.() ?? defaultScene(), {
     snapping: row?.snapping ?? true,
+    ...(row?.canvas ? { canvas: row.canvas } : {}),
     ...(row?.palette ? { palette: row.palette } : {}),
     ...(row?.guides ? { guides: row.guides } : {}),
   });
@@ -971,6 +974,46 @@ const ROWS: readonly Row[] = [
     },
   },
   {
+    name: 'changing the canvas height',
+    label: 'Resize canvas to 1080 \u00d7 900 px',
+    keys: ['canvas'],
+    act: async (user) => {
+      const field = screen.getByLabelText('Height');
+      await user.clear(field);
+      await user.type(field, '900{Enter}');
+    },
+    expect: (_before, after) => {
+      expect(after.canvas.height).toBe(900);
+    },
+  },
+  {
+    name: 'changing the resolution',
+    label: 'Set resolution to 300 dpi',
+    keys: ['canvas'],
+    act: async (user) => {
+      const field = screen.getByLabelText('Resolution');
+      await user.clear(field);
+      await user.type(field, '300{Enter}');
+    },
+    expect: (_before, after) => {
+      expect(after.canvas.dpi).toBe(300);
+    },
+  },
+  {
+    name: 'making the background opaque again',
+    label: 'Add background colour',
+    keys: ['canvas'],
+    // The switch only means anything while the background is transparent, which is why the fixture
+    // starts there.
+    canvas: { ...SQUARE_CANVAS, transparent: true },
+    act: async (user) => {
+      await user.click(screen.getByRole('switch', { name: /transparent background/i }));
+    },
+    expect: (_before, after) => {
+      expect(after.canvas.transparent).toBe(false);
+    },
+  },
+  {
     name: 'changing the bleed',
     label: 'Bleed set to 3 mm',
     keys: ['guides'],
@@ -1092,7 +1135,7 @@ describe('every control that changes the document is one labelled undo step', ()
 
   it('covers the controls the workspace offers, not a sample of them', () => {
     // The matrix is the coverage claim: this fails if a row is dropped during a refactor.
-    expect(ROWS.length).toBeGreaterThanOrEqual(70);
+    expect(ROWS.length).toBeGreaterThanOrEqual(73);
     expect(new Set(ROWS.map((row) => row.name)).size).toBe(ROWS.length);
     // Every row names the history entry it must produce, and no row may claim an empty one.
     expect(ROWS.filter((row) => row.label.trim().length === 0)).toEqual([]);
@@ -1184,6 +1227,16 @@ describe('actions that are not document edits', () => {
   it('opening the export panel and changing its settings', async () => {
     await expectNoEntry('changing export settings', async (user) => {
       await user.selectOptions(screen.getByLabelText('Format', { exact: true }), 'jpg');
+    });
+  });
+
+  it('typing a colour into the palette draft', async () => {
+    // The swatch field and its hex box are local state until Add is pressed: choosing a colour is
+    // not an edit, adding it to the document is.
+    await expectNoEntry('typing a colour to add', async (user) => {
+      const hex = screen.getByLabelText('Colour hex value');
+      await user.clear(hex);
+      await user.type(hex, '#ff00ff');
     });
   });
 });

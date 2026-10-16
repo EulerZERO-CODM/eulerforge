@@ -1,35 +1,37 @@
 /**
- * A deterministic thirty-layer document, built with the editor's own commands.
+ * A thirty-layer document for the responsiveness measurements, built by the editor's own commands.
  *
- * Phase 2 claims that editing a thirty-layer document stays responsive. Measuring that claim needs a
- * document that exercises the real render and edit path — text that wraps, graphics that must be
- * decoded, shapes with strokes and radii — rather than thirty identical rectangles. This module
- * builds one, once, and hands the same document to the unit tests and to the browser benchmark.
+ * The Phase 2 exit criterion is about editing a document with thirty layers, so the document used to
+ * check it has to be one a person could really have made: the same `createDocument` the creation flow
+ * calls, then `addLayerCommand`, `placeAssetCommand`, `renameLayerCommand`, `setLayerFrameCommand`,
+ * `setTextSettingsCommand`, `setShapeSettingsCommand` and `setImageSettingsCommand` — the exact
+ * commands the toolbar and the inspector run. Nothing is written into the document by hand, so the
+ * fixture cannot describe a shape the product could not produce.
  *
- * Nothing here is a hand-written object literal: every layer is created by the same command the
- * toolbar runs (`addLayerCommand`, `placeAssetCommand`) and then moved, named and styled by the same
- * commands the inspector runs. A fixture built by bypassing the commands could be a shape the
- * editors can never produce, and the benchmark would then be measuring the wrong thing. The clock
- * and the id generator are injected, so the result is byte-identical on every run.
+ * It is also deterministic: fixed ids, a fixed `placedAt` for every licence record and a fixed
+ * `updatedAt`, so two builds are byte-identical and two benchmark runs describe the same picture.
+ * `.test.ts` beside this file asserts all of that, and that the document renders without a single
+ * render issue (no empty shape, no text overflowing its box, every graphic resolvable).
  *
- * It is test support only: the shipped application never imports this module.
+ * The composition is a real social post at 1600 x 1100: a header band, a strip of ten placed
+ * catalogue records, a content card holding two columns of wrapped copy, and a footer row. Its
+ * thirty layers are ten text layers, ten placed catalogue records (the seven graphics and three
+ * textures the repository ships files for, each with its licence record) and ten shapes — seven
+ * rectangles and three ellipses.
  */
 
 import { SAMPLE_ASSETS } from '../core/assets/data';
-import { brand } from '../core/types/brand';
-import { isPlaceable } from '../core/assets/types';
-import type { AssetRecord } from '../core/assets/types';
-import { applyDocumentPatch, createDocument, DEFAULT_CANVAS } from '../core/documents/factories';
+import { isPlaceable, type AssetRecord } from '../core/assets/types';
+import { applyDocumentPatch, createDocument } from '../core/documents/factories';
 import { createRect, type Rect } from '../core/documents/geometry';
-import type { ImageSettings, ShapeSettings, TextSettings } from '../core/documents/layer-types';
+import type { ImageFit, TextSettings } from '../core/documents/layer-types';
 import type { Canvas, ForgeDocument } from '../core/documents/types';
 import {
   addLayerCommand,
   placeAssetCommand,
   renameLayerCommand,
   setImageSettingsCommand,
-  setLayerFramesCommand,
-  setLayersOpacityCommand,
+  setLayerFrameCommand,
   setShapeSettingsCommand,
   setTextSettingsCommand,
   type SceneCommand,
@@ -37,322 +39,378 @@ import {
 import type { Result } from '../core/result';
 import { sequentialLayerIds, TEST_DOCUMENT_TYPE } from './layers';
 
-/** How many layers the responsiveness criterion names. */
-export const RESPONSIVE_LAYER_COUNT = 30;
+/** The document id the benchmark opens, so a spec and the fixture cannot drift apart. */
+export const THIRTY_LAYER_DOCUMENT_ID = 'doc-thirty-layers';
 
-/**
- * The document id the fixture is saved under, so a browser spec can open it directly.
- *
- * `createDocument` takes a `DocumentIdGenerator`, which is how the workspace's own creation flow
- * injects the id it will persist under.
- */
-export const THIRTY_LAYER_DOCUMENT_ID = brand<'DocumentId'>('doc-thirty-layers');
-
-/** The canvas the fixture is laid out on: a square poster, the shape most of the samples use. */
+/** Poster-sized, because that is where thirty layers stop being trivially cheap. */
 export const THIRTY_LAYER_CANVAS: Canvas = {
-  ...DEFAULT_CANVAS,
-  width: 1080,
-  height: 1080,
+  width: 1600,
+  height: 1100,
+  unit: 'px',
   dpi: 96,
+  background: '#0f1115',
+  transparent: false,
 };
 
-/** A fixed moment, so two runs of the builder produce the same document. */
-const FIXTURE_TIME = new Date('2026-02-01T12:00:00.000Z');
+/** Everything the benchmark asserts about the fixture's shape, so the numbers have a fixed meaning. */
+export const THIRTY_LAYER_COUNTS = { rect: 7, ellipse: 3, text: 10, image: 10 } as const;
 
-type TextEntry = {
-  readonly kind: 'text';
-  readonly name: string;
-  readonly frame: Rect;
-  readonly text: Partial<TextSettings>;
-};
+export const THIRTY_LAYER_TOTAL =
+  THIRTY_LAYER_COUNTS.rect +
+  THIRTY_LAYER_COUNTS.ellipse +
+  THIRTY_LAYER_COUNTS.text +
+  THIRTY_LAYER_COUNTS.image;
 
-type ShapeEntry = {
+/** A fixed instant: the fixture must not change between two runs. */
+const NOW = new Date('2026-03-01T09:00:00.000Z');
+const PLACED_AT = '2026-03-01T09:00:00.000Z';
+
+/** Ink and paper for the composition, so the layers look like a poster rather than a grey box. */
+const INK = {
+  card: '#171b23',
+  band: '#141821',
+  plate: '#1d2230',
+  rule: '#2b5fd9',
+  accent: '#f97362',
+  amber: '#ffd166',
+  paper: '#f4f6fb',
+  muted: '#b9c2d4',
+} as const;
+
+type ShapePlan = {
   readonly kind: 'rect' | 'ellipse';
   readonly name: string;
   readonly frame: Rect;
-  readonly shape?: Partial<ShapeSettings>;
+  readonly fill: string;
+  readonly cornerRadius?: number;
+  readonly stroke?: string;
+  readonly strokeWidth?: number;
 };
 
-type GraphicEntry = {
-  readonly kind: 'graphic';
+type TextPlan = {
+  readonly kind: 'text';
   readonly name: string;
   readonly frame: Rect;
-  /** Index into the placeable catalogue records, in catalogue order. */
-  readonly asset: number;
-  readonly image?: Partial<ImageSettings>;
+  readonly text: Partial<TextSettings> & { readonly content: string };
 };
 
-type Entry = (TextEntry | ShapeEntry | GraphicEntry) & {
-  /** Defaults to fully opaque. */
-  readonly opacity?: number;
+type ImagePlan = {
+  readonly kind: 'image';
+  readonly name: string;
+  readonly frame: Rect;
+  readonly fit?: ImageFit;
+  readonly tint?: string;
 };
+
+type Plan = ShapePlan | TextPlan | ImagePlan;
 
 /**
- * The picture, bottom layer first: bands, then cards and marks, then the decided-on-top content.
+ * The layout, bottom-most layer first.
  *
- * Frames are laid out so layers overlap the way a real poster overlaps — text over bands, graphics
- * inside a strip — while keeping every layer's own area reachable, which is what lets the benchmark
- * grab a layer at a point that the hit test agrees belongs to it.
+ * Shapes come first so the band, the card and the plates sit behind everything; then the graphics,
+ * then the copy on top. Text frames are sized to their copy: a paragraph that overflowed its box
+ * would be clipped in the product, which is a different document from the one this claims to be.
  */
-const LAYOUT: readonly Entry[] = [
+const PLAN: readonly Plan[] = [
+  // Header band, content card, plates, rules and accents: the shapes.
   {
     kind: 'rect',
     name: 'Header band',
-    frame: createRect(0, 0, 1080, 210),
-    shape: { fill: '#171a21' },
+    frame: createRect(0, 0, 1600, 150),
+    fill: INK.band,
   },
   {
     kind: 'rect',
-    name: 'Footer band',
-    frame: createRect(0, 960, 1080, 120),
-    shape: { fill: '#12141a' },
-  },
-  {
-    kind: 'ellipse',
-    name: 'Halo',
-    frame: createRect(900, 60, 140, 140),
-    shape: { fill: '#23303f' },
-    opacity: 0.7,
-  },
-  {
-    kind: 'rect',
-    name: 'Card A',
-    frame: createRect(450, 220, 580, 200),
-    shape: { fill: '#1b1f27', stroke: '#2b3240', strokeWidth: 2, cornerRadius: 18 },
+    name: 'Content card',
+    frame: createRect(80, 470, 1440, 530),
+    fill: INK.card,
+    cornerRadius: 18,
   },
   {
     kind: 'ellipse',
     name: 'Accent dot',
-    frame: createRect(980, 20, 56, 56),
-    shape: { fill: '#e2833a' },
+    frame: createRect(1480, 34, 64, 64),
+    fill: INK.accent,
   },
   {
     kind: 'rect',
-    name: 'Panel',
-    frame: createRect(450, 440, 580, 300),
-    shape: { fill: '#151922', cornerRadius: 18 },
+    name: 'Plate A',
+    frame: createRect(80, 170, 290, 270),
+    fill: INK.plate,
+    cornerRadius: 16,
   },
   {
     kind: 'rect',
-    name: 'Tile',
-    frame: createRect(48, 340, 200, 200),
-    shape: { fill: '#1d2530', cornerRadius: 10 },
+    name: 'Plate B',
+    frame: createRect(370, 170, 290, 270),
+    fill: INK.plate,
+    cornerRadius: 16,
   },
   {
     kind: 'rect',
-    name: 'Divider',
-    frame: createRect(48, 216, 380, 4),
-    shape: { fill: '#e2833a', cornerRadius: 2 },
+    name: 'Plate C',
+    frame: createRect(660, 170, 290, 270),
+    fill: INK.plate,
+    cornerRadius: 16,
+  },
+  {
+    kind: 'rect',
+    name: 'Plate D',
+    frame: createRect(950, 170, 290, 270),
+    fill: INK.plate,
+    cornerRadius: 16,
   },
   {
     kind: 'ellipse',
-    name: 'Marker',
-    frame: createRect(48, 460, 26, 26),
-    shape: { fill: '#7dd3fc' },
+    name: 'Plate E',
+    frame: createRect(1240, 170, 290, 270),
+    fill: INK.plate,
   },
   {
     kind: 'rect',
-    name: 'Badge plate',
-    frame: createRect(740, 700, 280, 90),
-    shape: { fill: '#e2833a', cornerRadius: 12 },
+    name: 'Rule line',
+    frame: createRect(80, 470, 1440, 6),
+    fill: INK.rule,
   },
+  {
+    kind: 'ellipse',
+    name: 'Footer stamp',
+    frame: createRect(1442, 980, 60, 44),
+    fill: INK.amber,
+    stroke: INK.card,
+    strokeWidth: 3,
+  },
+
+  // Ten placed catalogue records: the repository's own sample files, two rows of five.
+  ...stripPlans(),
+
+  // Ten text layers: the poster's copy, in the header and in two columns inside the card.
   {
     kind: 'text',
     name: 'Headline',
-    frame: createRect(48, 40, 700, 92),
-    text: { content: 'Launch night: new work, live', fontSize: 64, fontWeight: 700 },
+    frame: createRect(120, 38, 900, 72),
+    text: { content: 'Autumn Programme 2026', fontSize: 48, fontWeight: 800, color: INK.paper },
   },
   {
     kind: 'text',
-    name: 'Subhead',
-    frame: createRect(48, 140, 560, 64),
+    name: 'Dateline',
+    frame: createRect(980, 56, 440, 46),
     text: {
-      content: 'Two evenings of talks, screenings and workshops with the people who made it.',
-      fontSize: 24,
-      lineHeight: 1.3,
-    },
-  },
-  {
-    kind: 'text',
-    name: 'Sponsors label',
-    frame: createRect(48, 468, 240, 40),
-    text: {
-      content: 'Partners',
-      fontSize: 18,
+      content: 'Sept 14 – Nov 30',
+      fontSize: 20,
       fontWeight: 500,
-      letterSpacing: 3,
-      color: '#9aa4b2',
+      align: 'right',
+      color: INK.muted,
     },
+  },
+  {
+    kind: 'text',
+    name: 'Section heading',
+    frame: createRect(120, 505, 620, 48),
+    text: { content: 'Programme', fontSize: 30, fontWeight: 700, color: INK.paper },
   },
   {
     kind: 'text',
     name: 'Intro copy',
-    frame: createRect(48, 240, 380, 190),
+    frame: createRect(120, 570, 620, 240),
     text: {
       content:
-        'Every project in this room started as a drawing on a wall. Come and see what it became, and meet the studios that kept going when the first draft did not work.',
-      fontSize: 22,
-      lineHeight: 1.45,
+        'Ten weeks of print, motion and type. Every session runs twice, once in the studio and once over video, so nobody has to choose between being in the room and getting the work finished.',
+      fontSize: 17,
+      lineHeight: 1.55,
+      color: INK.muted,
     },
   },
   {
     kind: 'text',
-    name: 'Programme heading',
-    frame: createRect(470, 240, 300, 48),
-    text: { content: 'Programme', fontSize: 30, fontWeight: 600 },
+    name: 'Offer line',
+    frame: createRect(120, 830, 620, 48),
+    text: {
+      content: 'Doors 19:00 · Studio 4 · £12',
+      fontSize: 20,
+      fontWeight: 600,
+      color: INK.paper,
+    },
   },
   {
     kind: 'text',
-    name: 'Programme copy',
-    frame: createRect(470, 300, 320, 170),
+    name: 'Notes',
+    frame: createRect(120, 890, 620, 90),
     text: {
       content:
-        'Thursday: doors, first look, and a short talk from the studio floor. Friday: workshops in pairs, then the long table.',
-      fontSize: 20,
-      lineHeight: 1.4,
+        'Tickets include materials and a printed riso zine. Concessions are available at the door.',
+      fontSize: 15,
+      lineHeight: 1.5,
+      color: INK.muted,
+    },
+  },
+  {
+    kind: 'text',
+    name: 'Schedule heading',
+    frame: createRect(800, 505, 680, 48),
+    text: { content: 'Schedule', fontSize: 30, fontWeight: 700, color: INK.paper },
+  },
+  {
+    kind: 'text',
+    name: 'Schedule copy',
+    frame: createRect(800, 570, 680, 240),
+    text: {
+      content:
+        'Sep 14 · Type as texture\nSep 21 · Colour separations\nSep 28 · Motion tests\nOct 05 · Print week\nOct 12 · Review and binding',
+      fontSize: 17,
+      lineHeight: 1.6,
+      color: INK.muted,
     },
   },
   {
     kind: 'text',
     name: 'Quote',
-    frame: createRect(600, 480, 400, 130),
+    frame: createRect(800, 830, 680, 110),
     text: {
-      content: 'A whole evening of first looks, and nobody checking their phone.',
+      content: '“The first week redrew how I think about a page.”',
       fontSize: 26,
-      lineHeight: 1.35,
-      align: 'right',
+      fontWeight: 600,
+      color: INK.paper,
     },
-  },
-  {
-    kind: 'text',
-    name: 'Badge label',
-    frame: createRect(760, 723, 240, 44),
-    text: { content: 'Free entry', fontSize: 22, align: 'center', color: '#12141a' },
   },
   {
     kind: 'text',
     name: 'Footer note',
-    frame: createRect(600, 1000, 420, 34),
+    frame: createRect(800, 950, 680, 44),
     text: {
-      content: 'forge.example/launch',
-      fontSize: 16,
+      content: 'Booking closes Sept 8',
+      fontSize: 15,
+      letterSpacing: 0.4,
       align: 'right',
-      color: '#9aa4b2',
+      color: INK.muted,
     },
   },
-  {
-    kind: 'text',
-    name: 'Caption',
-    frame: createRect(48, 1000, 420, 34),
-    text: { content: 'Doors 19:00 · Studio 4', fontSize: 16, color: '#9aa4b2' },
-  },
-  ...graphicStrip(),
 ];
 
-/** Ten placed catalogue graphics laid out as a two-row strip inside the logo panel. */
-function graphicStrip(): readonly Entry[] {
-  const placeable = placeableRecords();
-  return placeable.slice(0, 10).map((record, index) => ({
-    kind: 'graphic' as const,
-    name: record.name,
-    frame: createRect(60 + (index % 5) * 76, 512 + Math.floor(index / 5) * 56, 64, 48),
-    asset: index,
-  }));
-}
-
-/** The catalogue's placeable records, in catalogue order: what "place a graphic" can choose. */
-export function placeableRecords(): readonly AssetRecord[] {
-  const records = SAMPLE_ASSETS.filter((record) => isPlaceable(record));
-  if (records.length < 10) {
-    throw new Error(
-      `the sample catalogue has ${String(records.length)} placeable records; the thirty-layer fixture needs 10`,
-    );
-  }
-  return records;
-}
-
-/** Applies a command's patch, so the fixture moves through exactly the states a user would create. */
-function apply(document: ForgeDocument, command: Result<SceneCommand>): ForgeDocument {
-  if (!command.ok) {
-    throw new Error(`the thirty-layer fixture command was refused: ${command.error.message}`);
-  }
-  return applyDocumentPatch(document, command.value.patch, FIXTURE_TIME);
-}
-
-function addEntry(document: ForgeDocument, entry: Entry, id: string): ForgeDocument {
-  const next =
-    entry.kind === 'graphic'
-      ? apply(
-          document,
-          placeAssetCommand(
-            document,
-            placeableRecords()[entry.asset] as AssetRecord,
-            () => id,
-            FIXTURE_TIME.toISOString(),
-          ),
-        )
-      : apply(
-          document,
-          addLayerCommand(document, entry.kind, () => id),
-        );
-
-  let current = apply(next, renameLayerCommand(next, id, entry.name));
-  current = apply(
-    current,
-    setLayerFramesCommand(current, [{ id, frame: entry.frame }], `Place “${entry.name}”`),
-  );
-
-  if (entry.kind === 'text') {
-    current = apply(current, setTextSettingsCommand(current, id, entry.text));
-  } else if (entry.kind === 'graphic') {
-    if (entry.image) current = apply(current, setImageSettingsCommand(current, id, entry.image));
-  } else if (entry.shape) {
-    current = apply(current, setShapeSettingsCommand(current, id, entry.shape));
-  }
-
-  if (entry.opacity !== undefined) {
-    current = apply(current, setLayersOpacityCommand(current, [id], entry.opacity));
-  }
-
-  // The layer must exist under the name the fixture asked for, or every later lookup is a lie.
-  const created = current.scene.layers.find((layer) => String(layer.id) === id);
-  if (!created || created.name !== entry.name) {
-    throw new Error(`the fixture could not create “${entry.name}”`);
-  }
-  return current;
+/** The ten placed catalogue records, laid out in two rows of five inside the plates. */
+function stripPlans(): readonly ImagePlan[] {
+  const records = catalogueFiles();
+  return records.map((record, index) => {
+    const column = index % 5;
+    const row = Math.floor(index / 5);
+    return {
+      kind: 'image',
+      name: record.name,
+      frame: createRect(100 + column * 290, 190 + row * 120, 250, 100),
+      fit: index % 2 === 0 ? 'cover' : 'contain',
+    };
+  });
 }
 
 /**
- * The thirty-layer document.
+ * The catalogue records that ship a file, in catalogue order.
  *
- * Deterministic: fixed ids, a fixed clock, and a layout defined in this file. `createDocument` is
- * given a fixed id generator so the document id is stable too.
+ * Seven of the ten are graphics and three are textures; all ten are placeable as image layers, and
+ * using the whole file-backed set keeps the fixture honest about what the repository actually
+ * contains. A catalogue that lost its files fails loudly here rather than producing a document full
+ * of broken images.
  */
+export function catalogueFiles(): readonly AssetRecord[] {
+  const placeable = SAMPLE_ASSETS.filter((record) => isPlaceable(record));
+  if (placeable.length < THIRTY_LAYER_COUNTS.image) {
+    throw new Error(
+      `the catalogue ships ${String(placeable.length)} placeable records, but the fixture needs ${String(THIRTY_LAYER_COUNTS.image)}`,
+    );
+  }
+  return placeable.slice(0, THIRTY_LAYER_COUNTS.image);
+}
+
+function applied(
+  document: ForgeDocument,
+  command: Result<SceneCommand>,
+  what: string,
+): ForgeDocument {
+  if (!command.ok) {
+    throw new Error(`${what} was refused while building the fixture: ${command.error.message}`);
+  }
+  return applyDocumentPatch(document, command.value.patch, NOW);
+}
+
+/** Builds the document. Pure: no storage, no DOM, no clock. */
 export function thirtyLayerDocument(): ForgeDocument {
-  const nextId = sequentialLayerIds('lyr-perf');
   const created = createDocument(
     {
-      title: 'Launch night poster',
+      title: 'Autumn programme — thirty layers',
       studioId: 'design',
       documentTypeId: TEST_DOCUMENT_TYPE,
       canvas: { ...THIRTY_LAYER_CANVAS },
-      tags: ['benchmark', 'thirty layers'],
     },
-    { generateId: () => THIRTY_LAYER_DOCUMENT_ID, now: () => FIXTURE_TIME },
+    // A fixed clock as well as fixed ids: `createdAt` is part of the document, so a real clock
+    // would make two builds differ.
+    { generateId: () => THIRTY_LAYER_DOCUMENT_ID, now: () => NOW },
   );
-  if (!created.ok) {
-    throw new Error(`the thirty-layer fixture document is invalid: ${created.error.message}`);
-  }
+  if (!created.ok) throw new Error(`the thirty-layer fixture is invalid: ${created.error.message}`);
 
+  const ids = sequentialLayerIds('lyr-30');
+  const graphics = catalogueFiles();
   let document = created.value;
-  for (const entry of LAYOUT) {
-    document = addEntry(document, entry, nextId());
+  let nextGraphic = 0;
+
+  for (const plan of PLAN) {
+    if (plan.kind === 'image') {
+      const record = graphics[nextGraphic];
+      nextGraphic += 1;
+      if (!record) throw new Error('the fixture ran out of catalogue records');
+      document = applied(
+        document,
+        placeAssetCommand(document, record, ids, PLACED_AT),
+        `placing “${record.name}”`,
+      );
+    } else {
+      document = applied(
+        document,
+        addLayerCommand(document, plan.kind, ids),
+        `adding a ${plan.kind}`,
+      );
+    }
+
+    const id = document.scene.layers[document.scene.layers.length - 1]?.id;
+    if (id === undefined) throw new Error('a layer should have been added');
+
+    document = applied(
+      document,
+      renameLayerCommand(document, id, plan.name),
+      `renaming a layer to “${plan.name}”`,
+    );
+    document = applied(
+      document,
+      setLayerFrameCommand(document, id, plan.frame, `Place “${plan.name}”`),
+      `framing “${plan.name}”`,
+    );
+
+    if (plan.kind === 'text') {
+      document = applied(
+        document,
+        setTextSettingsCommand(document, id, plan.text),
+        `styling “${plan.name}”`,
+      );
+    } else if (plan.kind === 'image') {
+      document = applied(
+        document,
+        setImageSettingsCommand(document, id, {
+          ...(plan.fit === undefined ? {} : { fit: plan.fit }),
+          ...(plan.tint === undefined ? {} : { tint: plan.tint }),
+        }),
+        `fitting “${plan.name}”`,
+      );
+    } else {
+      document = applied(
+        document,
+        setShapeSettingsCommand(document, id, {
+          fill: plan.fill,
+          ...(plan.cornerRadius === undefined ? {} : { cornerRadius: plan.cornerRadius }),
+          ...(plan.stroke === undefined ? {} : { stroke: plan.stroke }),
+          ...(plan.strokeWidth === undefined ? {} : { strokeWidth: plan.strokeWidth }),
+        }),
+        `styling “${plan.name}”`,
+      );
+    }
   }
 
-  if (document.scene.layers.length !== RESPONSIVE_LAYER_COUNT) {
-    throw new Error(
-      `the fixture holds ${String(document.scene.layers.length)} layers, not ${String(RESPONSIVE_LAYER_COUNT)}`,
-    );
-  }
   return document;
 }
