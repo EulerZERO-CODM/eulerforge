@@ -227,5 +227,10 @@ job), because pointer capture, the browser's own canvas output and a real file d
 verified in jsdom. It reads state from the same local storage the application writes, so it asserts
 what the product actually persisted rather than what a test double was told. The application does not
 import anything from `e2e/**`: the only hooks it exposes are inert `data-*` attributes the component
-tests use too. Whatever even that cannot reach — rendered guide pixels, zoom-level text rewrapping —
-is listed as a manual check in `docs/ROADMAP.md` rather than quietly assumed.
+tests use too. The same suite decodes the artboard's own canvas pixels, so the positions the rendered
+snapping guides occupy and the words each line of a text layer lands on are asserted as well, at 25%,
+100% and 200% zoom (`e2e/snapping.spec.ts`, `e2e/text-wrapping.spec.ts`), and a session started with
+browser storage refused is driven through the whole creation-and-edit flow
+(`e2e/storage-restricted.spec.ts`). What even that cannot reach — other browser engines, the
+responsiveness of a 30-layer document, font metrics that would only hold on one machine — is listed as
+a manual check in `docs/ROADMAP.md` rather than quietly assumed.

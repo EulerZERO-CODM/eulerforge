@@ -516,10 +516,13 @@ only ever assert that the code *called* something. That is not evidence for the 
 - **The application does not depend on the harness.** Nothing under `src/**` imports from `e2e/**`.
   The only hooks the tests use are inert `data-*` attributes that the component tests already rely
   on, and they carry geometry the interface genuinely has (canvas size, zoom, layer ids).
-- **Residual gaps are written down, not glossed over.** Whatever the browser suite does not reach —
-  rendered guide pixels, hidden layers in exported pixels, zoom-level text rewrapping — is listed as
-  a manual check in `docs/ROADMAP.md`, and the roadmap items it belongs to carry a `gap` or stay
-  `partial` in the ledger.
+- **Residual gaps are written down, not glossed over.** Whatever the browser suite does not reach is
+  listed as a manual check in `docs/ROADMAP.md`, and the roadmap items it belongs to carry a `gap` or
+  stay `partial` in the ledger. Three gaps this record originally listed — rendered guide pixels,
+  hidden layers in exported pixels, zoom-level text rewrapping — were closed by later specs that
+  decode the canvas the browser drew (`e2e/snapping.spec.ts`, `e2e/export.spec.ts`,
+  `e2e/text-wrapping.spec.ts`); what is left is other browser engines, responsiveness with a 30-layer
+  document, and absolute font metrics that only a reference machine could assert.
 
 **Consequences.** The export, transform and selection claims now have executable evidence from the
 environment they are about. The cost is a build plus a Chromium download on every push, and a suite

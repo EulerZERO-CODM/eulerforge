@@ -172,7 +172,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'No test is skipped to make the pipeline green',
         ],
         evidence: [
-          'Manual check: npm run verify (tsc, eslint, prettier, vitest, build) and a green CI run on Node 22 and 24',
+          'Command evidence rather than a test file: npm run verify (tsc, eslint, prettier, vitest, build) locally, and the Verify job on Node 22 and Node 24 for every push',
         ],
         capabilityIds: ['platform.tooling', 'platform.env-validation'],
       },
