@@ -290,6 +290,44 @@ export const ROADMAP: readonly RoadmapPhase[] = [
         ],
         capabilityIds: ['assets.usable-files'],
       },
+      {
+        id: 'p2.undo-coverage',
+        title: 'Undo/redo coverage for every editing action',
+        description:
+          'Every control and command that changes the document is exactly one labelled, reversible step, with selection and the other transient view state kept out of history entirely.',
+        status: 'done',
+        dependsOn: ['p2.layers'],
+        completionCriteria: [
+          'Each document-changing action produces one non-empty history label',
+          'Undo restores the previous document and redo the post-edit one, including attribution records and layer ordering',
+        ],
+        evidence: [
+          'src/core/editor/undo-redo.test.ts (45 commands: the patch keys, the label, undo and redo compared as content, plus the refused, unchanged and continuous cases)',
+          'src/components/workspace/undo-redo.test.tsx (73 controls through one shared runner: the document, the label, the panel, the store and the saved bytes, plus the blocks for actions that must not create a step)',
+          'e2e/undo-redo.spec.ts (the real shortcuts through the browser key pipeline, storage compared after every step, a placed graphic and its licence record, refused/unchanged/cancelled edits, and a reload that keeps the document and starts a fresh session)',
+          'docs/undo-redo-matrix.md (the action-to-test matrix, the provenance of the enumeration, and the known gaps)',
+        ],
+        capabilityIds: ['core.history', 'studios.design'],
+      },
+      {
+        id: 'p2.responsiveness',
+        title: 'Thirty-layer responsiveness',
+        description:
+          'Interaction cost is measured in a real browser on a thirty-layer document, against a budget fixed before the first measurement.',
+        status: 'partial',
+        dependsOn: ['p2.layers'],
+        completionCriteria: [
+          'A thirty-layer document with real catalogue graphics can be built deterministically for tests',
+          'Selecting, dragging, resizing, inspector edits, visibility, locking and undo/redo are measured in a real browser and gated on a published budget',
+        ],
+        evidence: [
+          "src/testing/thirty-layers.test.ts (the fixture: thirty layers of four types built through the editor's own commands, deterministic ids and timestamps, rendered with real font metrics and the repository's own asset files, zero issues)",
+          'e2e/performance.spec.ts (twelve scenarios, twelve interaction samples and five drags each after a warm-up, in a controlled CPU-slowdown phase and again at full speed, with the report published to the pull request)',
+          'docs/PERFORMANCE.md (method, thresholds, measured results, environment, and what the controlled slowdown can and cannot stand for)',
+        ],
+        gap: 'Responsiveness is measured on CI hardware under a four-fold CPU throttle rather than on a mid-range laptop, so the numbers are a regression gate for this repository and not evidence about a particular machine; the benchmark is Chromium only.',
+        capabilityIds: ['studios.design'],
+      },
     ],
     exitCriteria: [
       'A user can produce a real social post or thumbnail inside the app and export it',

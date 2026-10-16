@@ -47,6 +47,8 @@ laptop; undo/redo covers every editing action with meaningful labels.
 | Selection, move, resize and snapping| `done`     | Selection from the artboard and the tree, visible handles, snapping to guides/grid/siblings, one commit per gesture |
 | Raster export pipeline              | `done`     | PNG and JPEG at the document's pixel size times a scale, transparency preserved, JPEG flattened onto a stated colour; a real browser writes the files and the downloaded bytes are checked |
 | Asset placement                     | `done`     | Ten repository-authored graphics placeable as image layers with licence, author and provenance recorded in the document; metadata-only records stay labelled reference-only |
+| Undo/redo coverage for every editing action | `done` | Every document-changing control is one labelled, reversible step, checked at command, component and browser level; the enumeration, its provenance and the remaining gaps are in `docs/undo-redo-matrix.md` |
+| Thirty-layer responsiveness         | `partial`  | A thirty-layer document can be built deterministically from the editor's own commands and is measured in a real browser against a budget fixed in advance (`e2e/performance.spec.ts`, `docs/PERFORMANCE.md`); it is measured under a four-fold CPU slowdown on CI hardware, not on a mid-range laptop |
 
 Not part of this phase, and not claimed anywhere: multiple artboards per document, per-run text
 styling, custom font uploads, reusable styles, templates and brand kits, vector (SVG/PDF) export.
@@ -90,11 +92,26 @@ Four scenarios are asserted in the browser rather than by hand:
 4. Attribution after reopening. `e2e/attribution.spec.ts` places a catalogue graphic through the
    picker, leaves the project, reopens it from the library, reselects the layer, and compares every
    value the panel shows with the record saved in the document and with the catalogue it came from.
+5. Thirty-layer responsiveness, against a budget fixed before the first measurement.
+   `e2e/performance.spec.ts` opens a document of thirty realistic layers - ten placed catalogue
+   records with their licences, ten wrapping text layers and ten shapes, all placed by the editor's own
+   commands - proves the browser really painted it (ink where the headline sits, and more colours
+   inside a placed graphic than inside a flat plate of the same document), and then measures twelve
+   real interactions: selecting a layer and a group, hiding and locking, committing inspector values,
+   an opacity change from the keyboard, undo, redo, two drags and a resize handle. Latency is measured
+   in the page from the input event's own timestamp to the second animation frame after it, and drags
+   are measured by the gaps between animation frames; long tasks and slow input events are recorded
+   alongside. The gated phase runs with a four-fold CPU slowdown through the DevTools protocol, the
+   documented stand-in for slower hardware, and the same scenarios are reported again at full speed.
+   Method, thresholds, measured results, environment and limitations are in `docs/PERFORMANCE.md`, and
+   every run publishes its table to the pull request.
 
 What is still *not* covered automatically, and therefore stays a manual check:
 
 - Browsers other than Chromium: the job runs headless Chromium only.
-- Editing a 30-layer document on a mid-range laptop, the Phase 2 exit criterion about responsiveness.
+- Responsiveness on a specific class of machine. The benchmark gates a budget on CI hardware under a
+  controlled CPU slowdown; it is a regression gate for this repository, not a measurement of a
+  mid-range laptop, and `docs/PERFORMANCE.md` says exactly what the proxy can and cannot stand for.
 - Absolute font metrics: the wrapping spec asserts that one browser puts the same words on the same
   lines at every zoom, not that those line breaks match a reference font on another machine.
 

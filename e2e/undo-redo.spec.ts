@@ -143,7 +143,8 @@ test.describe('undo and redo in the browser', () => {
     await keyboardRedo(page);
     await expect.poll(async () => content(await stored(page))).toBe(afterSecondNudge);
     await expect(redoButton(page)).toBeDisabled();
-    expect(await readNumberField(page, 'Layer X')).toBe(startX + 40);
+    // The second nudge worked in Y, so X is where the ArrowRight nudge left it.
+    expect(await readNumberField(page, 'Layer X')).toBe(startX + 41);
 
     // A new edit after undoing forgets the redo branch, as a single linear history must.
     await keyboardUndo(page);

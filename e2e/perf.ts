@@ -112,10 +112,16 @@ export async function installPerfRecorder(page: Page): Promise<void> {
     // Capture phase: the recorder must see the event even if a handler stops propagation.
     for (const kind of kinds) window.addEventListener(kind, onInput, true);
 
+    /* Event-timing durations include the wait for the next frame to be presented, so on a slowed
+       renderer nearly every continuous event (a `pointermove` in a drag) crosses the threshold and
+       the count stops describing anything. Only the discrete inputs a person notices are kept. */
+    const observableEvents = ['click', 'dblclick', 'keydown', 'pointerdown', 'pointerup', 'change'];
+
     const observe = (entryType: 'longtask' | 'event'): void => {
       try {
         new PerformanceObserver((list) => {
           for (const entry of list.getEntries()) {
+            if (entryType === 'event' && !observableEvents.includes(entry.name)) continue;
             observed.push({
               kind: entryType === 'longtask' ? 'longtask' : 'slow-event',
               duration: entry.duration,
@@ -322,6 +328,11 @@ export type EnvironmentFacts = {
   readonly commit: string;
 };
 
+/** Shortens a message for the report without hiding that it was shortened. */
+function truncate(text: string, limit: number): string {
+  return text.length <= limit ? text : `${text.slice(0, limit)}…`;
+}
+
 function markdownTable(rows: readonly ScenarioRow[]): string {
   const header =
     '| Scenario | What the user does | Phase | n | p50 | p95 | worst | Observed | Budget | Result |';
@@ -368,18 +379,25 @@ export class PerfReport {
   }
 
   /** Records a scenario that threw, so the report says so even if the exception is not a budget miss. */
-  public fail(scenario: string, reason: string): void {
-    const first = reason.split('\n')[0] ?? reason;
-    this.failures.push(`${scenario}: ${first.slice(0, 200)}`);
+  public fail(scenario: string, phase: string, reason: string): void {
+    /* A Playwright failure says what it expected, what it got and where it was waiting on the first
+       few lines; the rest is a call log. Those lines are what makes a failure diagnosable from the
+       check-run annotation alone, so they are kept rather than reduced to "timed out". */
+    const lines = reason
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    const summary = truncate(lines.slice(0, 4).join(' | '), 320);
+    this.failures.push(`${phase} ${scenario}: ${summary}`);
     this.rows.push({
       scenario,
       how: 'the scenario could not be completed',
-      phase: 'setup',
+      phase,
       samples: 0,
       p50: 0,
       p95: 0,
       worst: 0,
-      observed: first.slice(0, 160),
+      observed: truncate(summary, 220),
       budget: 'scenario must run',
       verdict: 'fail',
     });
@@ -399,15 +417,18 @@ export class PerfReport {
       `- CPU: ${this.environment.cpu}`,
       `- Commit: ${this.environment.commit}`,
       '',
-      markdownTable(this.rows),
-      '',
-      ...this.notes.map((note) => `- ${note}`),
-      '',
+      /* The outcome comes before the table on purpose. This markdown is the failure message of the
+         spec, and a check-run annotation is truncated at a few thousand characters: putting the
+         verdict first is what makes a red run explain itself in the place a reader actually sees. */
       this.failures.length === 0
         ? '**Result: every gated scenario stayed inside its budget.**'
         : ['**Result: budget missed**', '', ...this.failures.map((failure) => `- ${failure}`)].join(
             '\n',
           ),
+      '',
+      markdownTable(this.rows),
+      '',
+      ...this.notes.map((note) => `- ${note}`),
       '',
     ].join('\n');
   }

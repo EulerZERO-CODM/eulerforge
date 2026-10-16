@@ -171,8 +171,23 @@ async function setLocked(page: Page, name: string, locked: boolean): Promise<voi
 }
 
 /** Selects exactly one layer from the list, which is also the keyboard-reachable path to a selection. */
+/**
+ * Prepares the measured interaction: leaves one named layer selected.
+ *
+ * Keyboard, not a pointer click, and deliberately so. This is not the interaction under measurement —
+ * the measured click happens inside the scenario — and a pointer click on a list of thirty rows is
+ * the one thing here that was flaky: Playwright scrolls a row into view, clicks it, and a list that
+ * is still settling can put a neighbouring row under the cursor, which then fails as "the inspector
+ * shows the wrong layer". Focusing the row and pressing Enter is the list's own keyboard path, with
+ * no coordinates to land on, so the preparation is deterministic and the measurement keeps its real
+ * pointer input.
+ */
 async function selectOnlyLayer(page: Page, name: string): Promise<void> {
-  await layerButton(page, name).click();
+  const row = layerButton(page, name);
+  await row.scrollIntoViewIfNeeded();
+  await row.focus();
+  await page.keyboard.press('Enter');
+  await expect(row, `“${name}” should be the selected row`).toHaveAttribute('aria-current', 'true');
   await expect(page.getByLabel('Layer name')).toHaveValue(name);
 }
 
@@ -563,7 +578,7 @@ async function runPhase(
 
       if (scenarioError !== null) {
         broken.add(scenario.name);
-        report.fail(`${phase} ${scenario.name}`, scenarioError);
+        report.fail(scenario.name, phase, scenarioError);
         continue;
       }
 

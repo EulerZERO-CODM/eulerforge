@@ -260,8 +260,11 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
       'e2e/export.spec.ts',
       'e2e/storage-restricted.spec.ts',
       'e2e/attribution.spec.ts',
+      'e2e/performance.spec.ts',
+      'e2e/undo-redo.spec.ts',
+      'src/components/workspace/undo-redo.test.tsx',
     ],
-    gap: 'The browser suite runs on Chromium only, so Firefox and WebKit rendering is unverified. Editing a 30-layer document is not measured anywhere, so the Phase 2 exit criterion about responsiveness on a mid-range laptop is still a manual check. Grouping, alignment tools, vector paths and PDF output are later phases and are labelled as such.',
+    gap: 'The browser suite runs on Chromium only, so Firefox and WebKit rendering is unverified. Thirty-layer responsiveness is measured in a real browser against a budget fixed in advance (docs/PERFORMANCE.md), but under a four-fold CPU slowdown on CI hardware rather than on a mid-range laptop, so it is a regression gate and not a claim about a particular machine. Grouping, alignment tools, vector paths and PDF output are later phases and are labelled as such.',
   },
   {
     id: 'studios.photo-video-motion-illustration',

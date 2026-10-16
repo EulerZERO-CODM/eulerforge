@@ -1308,6 +1308,27 @@ describe('refused, cancelled and unchanged actions leave no entry behind', () =>
     expect(undoButton()).toBeDisabled();
   });
 
+  it('leaves nothing behind when a typed value is cancelled with Escape', async () => {
+    const { services } = await mountWorkspace();
+    const user = userEvent.setup();
+    await user.click(selectRow('Panel'));
+    const before = contentOf(persisted(services));
+    const original = (screen.getByLabelText('Layer width') as HTMLInputElement).value;
+
+    const width = screen.getByLabelText('Layer width');
+    await user.clear(width);
+    await user.type(width, '320');
+    fireEvent.keyDown(width, { key: 'Escape' });
+    // Escape also takes focus away from the field, so the blur that follows it is part of the same
+    // cancellation: committing the abandoned draft here would record an edit the user just refused.
+    fireEvent.blur(width);
+
+    expect((screen.getByLabelText('Layer width') as HTMLInputElement).value).toBe(original);
+    expect(contentOf(persisted(services))).toBe(before);
+    expect(historyLabels()).toEqual([]);
+    expect(undoButton()).toBeDisabled();
+  });
+
   it('leaves nothing behind when the pointer never moves', async () => {
     const { services } = await mountWorkspace();
     const user = userEvent.setup();

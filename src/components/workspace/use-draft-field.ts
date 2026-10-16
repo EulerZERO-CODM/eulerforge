@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 /**
  * Controlled-input helper for inspector fields.
@@ -8,6 +8,11 @@ import { useState } from 'react';
  * Text fields keep a local draft while the user types, commit on blur or Enter (Escape reverts), and
  * surface the commit's error message inline. The draft resynchronises whenever the underlying
  * document value changes — for example after an undo — so the panel never shows a stale number.
+ *
+ * Escape cancels the whole edit, blur included: it reverts the draft and takes focus away from the
+ * field, and the blur that follows must not commit the value that was just refused. React has not
+ * applied `editing: false` by the time that synchronous blur arrives, so the cancellation is recorded
+ * in a ref rather than in state.
  */
 export type UseDraftFieldOptions = {
   /** Formatted value from the document. */
@@ -32,6 +37,8 @@ export function useDraftField({ value, onCommit }: UseDraftFieldOptions): DraftF
   const [draft, setDraftState] = useState(value);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  /** Set while an Escape is blurring the field, so the blur it causes does not commit. */
+  const cancelled = useRef(false);
   // React's documented "adjust state when a prop changes" pattern: when the document value moves
   // (after an undo, for example) and the field is not being edited, resynchronise during render
   // rather than in an effect, which would cost an extra render pass.
@@ -66,6 +73,10 @@ export function useDraftField({ value, onCommit }: UseDraftFieldOptions): DraftF
       setEditing(false);
     },
     onBlur: () => {
+      if (cancelled.current) {
+        cancelled.current = false;
+        return;
+      }
       if (!editing) return;
       const message = onCommit(draft);
       if (message) {
@@ -90,7 +101,13 @@ export function useDraftField({ value, onCommit }: UseDraftFieldOptions): DraftF
         setDraftState(value);
         setError(null);
         setEditing(false);
-        event.currentTarget.blur();
+        const element = event.currentTarget;
+        // Only a focused field fires the blur this flag is guarding, so it is only armed when that
+        // blur is really coming — otherwise it would swallow the next, unrelated one.
+        if (element === element.ownerDocument.activeElement) {
+          cancelled.current = true;
+          element.blur();
+        }
       }
     },
   };
