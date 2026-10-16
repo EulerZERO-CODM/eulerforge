@@ -1,6 +1,7 @@
 'use client';
 
 import { ArrowDown, ArrowUp, Copy, Trash2 } from 'lucide-react';
+import { useRef } from 'react';
 
 import { findAttribution } from '../../core/documents/layer-operations';
 import {
@@ -43,6 +44,7 @@ import { transformTargets } from '../../core/editor/selection';
 import { selectedLayers, type Selection } from '../../core/editor/selection';
 import type { Scene } from '../../core/documents/layer-types';
 import type { ForgeDocument } from '../../core/documents/types';
+import type { CommitOptions } from '../../state/document-session';
 import { Button } from '../ui/button';
 import { IconButton } from '../ui/icon-button';
 import { Field, Input, Select, SwitchField, Textarea } from '../ui/field';
@@ -365,6 +367,15 @@ function OpacityField({
   readonly layers: readonly Layer[];
 }) {
   const primary = layers[0];
+  /**
+   * Identity of the drag in progress.
+   *
+   * A range input fires a change for every pixel of a drag, and each one is the same edit: the
+   * slider therefore commits with a coalescing key while the pointer is down, so the whole drag is
+   * one history entry (and one undo step) with the value it ended on. Keyboard steps are *not*
+   * coalesced — each arrow press is a discrete edit, the same as nudging a layer with the arrow keys.
+   */
+  const drag = useRef({ active: false, id: 0 });
   if (!primary) return null;
   // With several layers selected the slider shows their shared value, or the first layer's when
   // they differ; either way one move sets every layer in the selection.
@@ -380,9 +391,23 @@ function OpacityField({
         value={percent}
         aria-label="Layer opacity"
         className="accent-accent w-full"
+        onPointerDown={() => {
+          drag.current = { active: true, id: drag.current.id + 1 };
+        }}
+        onPointerUp={() => {
+          drag.current.active = false;
+        }}
+        onPointerCancel={() => {
+          drag.current.active = false;
+        }}
         onChange={(event) => {
           // One patch for the whole selection: every layer moves to the same opacity together.
-          void api.run(setLayersOpacityCommand(api.doc, ids, Number(event.target.value) / 100));
+          void api.run(
+            setLayersOpacityCommand(api.doc, ids, Number(event.target.value) / 100),
+            drag.current.active
+              ? { coalesceKey: `opacity:${ids.join(',')}:${String(drag.current.id)}` }
+              : undefined,
+          );
         }}
       />
     </Field>
@@ -533,9 +558,21 @@ function ColourField({
   readonly label: string;
   readonly value: string | null;
   readonly hint?: string;
-  readonly onChange: (value: string | null) => void;
+  /**
+   * Called with the chosen colour, and — for a change that came from the picker rather than from
+   * typed text — the commit options that make the whole picking session one undoable step.
+   */
+  readonly onChange: (value: string | null, options?: CommitOptions) => void;
   readonly allowNone?: boolean;
 }) {
+  /**
+   * Identity of the current picking session.
+   *
+   * A native colour picker fires a change every time the pointer moves inside it, and all of those
+   * changes are one decision. The key changes when the field gains or loses focus, so two separate
+   * visits to the picker stay two undo steps.
+   */
+  const picking = useRef(0);
   const text = useDraftField({
     value: value ?? '',
     onCommit: (raw) => {
@@ -575,8 +612,17 @@ function ColourField({
           type="color"
           aria-label={`${label} colour picker`}
           value={value ?? '#000000'}
+          onFocus={() => {
+            picking.current += 1;
+          }}
+          onBlur={() => {
+            // Closing the picker ends the session, so the next one starts a new history entry.
+            picking.current += 1;
+          }}
           onChange={(event) => {
-            onChange(event.target.value.toLowerCase());
+            onChange(event.target.value.toLowerCase(), {
+              coalesceKey: `color:${label}:${String(picking.current)}`,
+            });
           }}
           className="border-line h-8 w-10 cursor-pointer rounded-sm border bg-transparent"
         />
@@ -761,9 +807,9 @@ function TextFields({ api, layer }: { readonly api: WorkspaceApi; readonly layer
       <ColourField
         label="Text colour"
         value={text.color}
-        onChange={(color) => {
+        onChange={(color, options) => {
           if (!color) return;
-          void api.run(setTextSettingsCommand(api.doc, layer.id, { color }));
+          void api.run(setTextSettingsCommand(api.doc, layer.id, { color }), options);
         }}
       />
     </div>
@@ -815,16 +861,16 @@ function ShapeFields({
         label="Fill"
         value={shape.fill}
         allowNone
-        onChange={(fill) => {
-          void api.run(setShapeSettingsCommand(api.doc, layer.id, { fill }));
+        onChange={(fill, options) => {
+          void api.run(setShapeSettingsCommand(api.doc, layer.id, { fill }), options);
         }}
       />
       <ColourField
         label="Stroke"
         value={shape.stroke}
         allowNone
-        onChange={(stroke) => {
-          void api.run(setShapeSettingsCommand(api.doc, layer.id, { stroke }));
+        onChange={(stroke, options) => {
+          void api.run(setShapeSettingsCommand(api.doc, layer.id, { stroke }), options);
         }}
       />
       <div className="grid grid-cols-2 gap-3">
@@ -916,8 +962,8 @@ function ImageFields({
         value={layer.image.tint}
         allowNone
         hint="Tint composites over the graphic's opaque pixels, so transparent areas stay transparent."
-        onChange={(tint) => {
-          void api.run(setImageSettingsCommand(api.doc, layer.id, { tint }));
+        onChange={(tint, options) => {
+          void api.run(setImageSettingsCommand(api.doc, layer.id, { tint }), options);
         }}
       />
 

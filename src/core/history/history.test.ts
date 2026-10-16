@@ -115,4 +115,60 @@ describe('HistoryStack', () => {
     expect(history.getState().value).toBe(1);
     expect(history.canUndo()).toBe(false);
   });
+
+  describe('replaceLatest', () => {
+    it('collapses a continuous interaction into the entry it started', () => {
+      const history = createStack();
+      history.commit('Set opacity', { value: 40, label: '40%' });
+      history.replaceLatest('Set opacity', { value: 55, label: '55%' });
+      history.replaceLatest('Set opacity', { value: 70, label: '70%' });
+
+      expect(history.snapshot().depth).toBe(1);
+      expect(history.snapshot().labels.map((item) => item.label)).toEqual(['Set opacity']);
+      expect(history.getState().value).toBe(70);
+      // The entry still remembers where the interaction started, not its previous step.
+      expect(history.undo()?.value).toBe(0);
+      expect(history.canUndo()).toBe(false);
+    });
+
+    it('redoes the value the interaction ended on', () => {
+      const history = createStack();
+      history.replaceLatest('No entry yet', { value: 3, label: 'three' });
+      history.commit('Set opacity', { value: 40, label: '40%' });
+      history.replaceLatest('Set opacity', { value: 70, label: '70%' });
+
+      history.undo();
+      expect(history.getState().value).toBe(0);
+      expect(history.redo()?.value).toBe(70);
+    });
+
+    it('renames the entry to describe where the interaction ended', () => {
+      const history = createStack();
+      history.commit('Set opacity', { value: 40, label: '40%' });
+      const replacement = history.replaceLatest('Set opacity to 70%', { value: 70, label: '70%' });
+
+      expect(replacement?.label).toBe('Set opacity to 70%');
+      expect(replacement?.id).toBe(history.snapshot().labels[0]?.id);
+      expect(history.snapshot().labels.map((item) => item.label)).toEqual(['Set opacity to 70%']);
+    });
+
+    it('returns null when there is nothing to replace', () => {
+      const history = createStack();
+      expect(history.replaceLatest('Set opacity', { value: 1, label: 'one' })).toBeNull();
+      expect(history.canUndo()).toBe(false);
+      expect(history.getState().value).toBe(0);
+    });
+
+    it('discards the redo branch, like any other new edit', () => {
+      const history = createStack();
+      history.commit('First', { value: 1, label: 'one' });
+      history.commit('Second', { value: 2, label: 'two' });
+      history.undo();
+      expect(history.canRedo()).toBe(true);
+
+      history.replaceLatest('Second, continued', { value: 7, label: 'seven' });
+      expect(history.canRedo()).toBe(false);
+      expect(history.getState().value).toBe(7);
+    });
+  });
 });

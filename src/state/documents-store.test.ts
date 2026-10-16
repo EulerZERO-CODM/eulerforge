@@ -253,6 +253,81 @@ describe('DocumentSession', () => {
     expect(session.getState().document.id).toBe(document.id);
   });
 
+  it('records the steps of one continuous interaction as a single undoable edit', async () => {
+    const { session } = await createSession();
+    await session.commit('Set opacity', { title: '40%' }, { coalesceKey: 'opacity:lyr-a' });
+    await session.commit('Set opacity to 55%', { title: '55%' }, { coalesceKey: 'opacity:lyr-a' });
+    await session.commit('Set opacity to 70%', { title: '70%' }, { coalesceKey: 'opacity:lyr-a' });
+
+    const state = session.getState();
+    expect(state.history.map((entry) => entry.label)).toEqual(['Set opacity to 70%']);
+    expect(state.document.title).toBe('70%');
+    // One drag is one undo step, and it goes back to before the drag started.
+    await session.undo();
+    expect(session.getState().document.title).toBe('Launch poster');
+    expect(session.getState().canUndo).toBe(false);
+    // Redo restores the value the drag ended on, not an intermediate one.
+    await session.redo();
+    expect(session.getState().document.title).toBe('70%');
+  });
+
+  it('starts a new entry when the coalescing key changes', async () => {
+    const { session } = await createSession();
+    await session.commit('Set opacity', { title: '40%' }, { coalesceKey: 'opacity:lyr-a' });
+    await session.commit('Set opacity to 70%', { title: '70%' }, { coalesceKey: 'opacity:lyr-b' });
+
+    expect(session.getState().history).toHaveLength(2);
+    await session.undo();
+    expect(session.getState().document.title).toBe('40%');
+  });
+
+  it('ends the interaction when an ordinary change arrives in between', async () => {
+    const { session } = await createSession();
+    await session.commit('Set opacity', { title: '40%' }, { coalesceKey: 'opacity:lyr-a' });
+    await session.commit('Rename project', { title: 'Renamed poster' });
+    await session.commit('Set opacity to 70%', { title: '70%' }, { coalesceKey: 'opacity:lyr-a' });
+
+    expect(session.getState().history.map((entry) => entry.label)).toEqual([
+      'Set opacity',
+      'Rename project',
+      'Set opacity to 70%',
+    ]);
+  });
+
+  it('does not merge an interaction with the one before an undo', async () => {
+    const { session } = await createSession();
+    await session.commit('Set opacity', { title: '40%' }, { coalesceKey: 'opacity:lyr-a' });
+    await session.undo();
+    await session.commit('Set opacity to 70%', { title: '70%' }, { coalesceKey: 'opacity:lyr-a' });
+
+    // The undone edit is gone, and the new one is its own step rather than a replacement of it.
+    expect(session.getState().history).toHaveLength(1);
+    expect(session.getState().canRedo).toBe(false);
+    await session.undo();
+    expect(session.getState().document.title).toBe('Launch poster');
+  });
+
+  it('persists every coalesced step so the saved document matches what is on screen', async () => {
+    const { harness, session } = await createSession();
+    await session.commit('Set opacity', { title: '40%' }, { coalesceKey: 'opacity:lyr-a' });
+    const writesAfterFirst = harness.save.mock.calls.length;
+    await session.commit('Set opacity to 70%', { title: '70%' }, { coalesceKey: 'opacity:lyr-a' });
+
+    const state = session.getState();
+    expect(state.dirty).toBe(false);
+    expect(harness.save.mock.calls.length).toBe(writesAfterFirst + 1);
+    expect(harness.store.getById(state.document.id)?.title).toBe('70%');
+    expect(harness.storage.get(DOCUMENTS_KEY)).not.toBeNull();
+  });
+
+  it('does not open an entry for a coalesced step that changes nothing', async () => {
+    const { session } = await createSession();
+    await session.commit('Set opacity', { title: '40%' }, { coalesceKey: 'opacity:lyr-a' });
+    await session.commit('Set opacity again', { title: '40%' }, { coalesceKey: 'opacity:lyr-a' });
+
+    expect(session.getState().history.map((entry) => entry.label)).toEqual(['Set opacity']);
+  });
+
   it('notifies subscribers on every state transition', async () => {
     const { session } = await createSession();
     const listener = vi.fn();

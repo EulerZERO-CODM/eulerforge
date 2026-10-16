@@ -689,9 +689,15 @@ export function setImageSettingsCommand(
   id: LayerId | string,
   patch: Partial<ImageSettings>,
 ): Result<SceneCommand> {
-  const label = named(document, id, (name) =>
-    patch.fit === undefined ? `Update “${name}”` : `Fit “${name}” graphic to ${patch.fit}`,
-  );
+  const label = named(document, id, (name) => {
+    // Each of the two graphic settings says what it did: a history entry reading "Update" would not
+    // tell a person whether the fit or the tint changed.
+    if (patch.fit !== undefined) return `Fit “${name}” graphic to ${patch.fit}`;
+    if (patch.tint !== undefined) {
+      return patch.tint === null ? `Remove “${name}” tint` : `Set “${name}” tint to ${patch.tint}`;
+    }
+    return `Update “${name}”`;
+  });
   if (!label.ok) return err(label.error);
 
   const changed = updateLayerSettings(document.scene, id, { image: patch });

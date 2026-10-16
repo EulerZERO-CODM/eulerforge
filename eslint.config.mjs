@@ -233,7 +233,7 @@ const config = [
 
   {
     // jsdom environment shims and test helpers legitimately check for APIs the DOM types claim exist.
-    files: ['vitest.setup.ts', '**/*.test.{ts,tsx}'],
+    files: ['vitest.setup.ts', '**/*.test.{ts,tsx}', 'src/testing/**/*.{ts,tsx}'],
     rules: {
       '@typescript-eslint/no-unnecessary-condition': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',

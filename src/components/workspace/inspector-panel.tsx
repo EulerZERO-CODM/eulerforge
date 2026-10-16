@@ -1,7 +1,7 @@
 'use client';
 
 import { Info, Plus, Trash2, Wand2 } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { SAMPLE_ASSETS } from '../../core/assets/data';
 import { DEFAULT_GUIDES } from '../../core/documents/factories';
@@ -79,6 +79,8 @@ function CanvasSection({
   readonly presetId: string;
 }) {
   const { canvas } = api.doc;
+  /** Identity of the current visit to the background colour picker, so one visit is one undo step. */
+  const backgroundPicker = useRef(0);
 
   const commitCanvas = (patch: Partial<Canvas>, label: string): string | null => {
     const next: Canvas = { ...canvas, ...patch };
@@ -215,10 +217,19 @@ function CanvasSection({
               aria-label="Background colour"
               value={canvas.transparent ? '#000000' : canvas.background}
               disabled={canvas.transparent}
+              onFocus={() => {
+                backgroundPicker.current += 1;
+              }}
+              onBlur={() => {
+                // Closing the picker ends the session: one visit, one history entry.
+                backgroundPicker.current += 1;
+              }}
               onChange={(event) => {
-                void api.commit('Change background colour', {
-                  canvas: { ...canvas, background: event.target.value },
-                });
+                void api.commit(
+                  'Change background colour',
+                  { canvas: { ...canvas, background: event.target.value } },
+                  { coalesceKey: `color:canvas-background:${String(backgroundPicker.current)}` },
+                );
               }}
               className="border-line-strong bg-ink-950 h-9 w-12 cursor-pointer rounded-sm border p-1 disabled:cursor-not-allowed disabled:opacity-50"
             />

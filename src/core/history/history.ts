@@ -91,6 +91,31 @@ export class HistoryStack<TState> {
     return entry;
   }
 
+  /**
+   * Replaces the newest entry instead of adding one.
+   *
+   * Used for a *continuous* interaction: dragging a slider or moving through a colour picker fires a
+   * change per step, and every one of those steps is the same edit. The entry keeps the state the
+   * interaction started from, so undo returns to before the drag rather than to the previous step,
+   * and its label is updated to describe where the interaction ended up.
+   *
+   * @returns the entry that was updated, or `null` when there is nothing to replace.
+   */
+  public replaceLatest(label: string, nextState: TState): HistoryEntry<TState> | null {
+    const entry = this.past[this.past.length - 1];
+    if (!entry) return null;
+    const replacement: HistoryEntry<TState> = {
+      ...entry,
+      label,
+      appliedAt: this.now().toISOString(),
+    };
+    this.past[this.past.length - 1] = replacement;
+    // A replacement is still a new edit: anything that was undone can no longer be redone.
+    this.future = [];
+    this.current = nextState;
+    return replacement;
+  }
+
   /** Reverts the most recent change. Returns the new state, or `null` if there was nothing to undo. */
   public undo(): TState | null {
     const entry = this.past.pop();

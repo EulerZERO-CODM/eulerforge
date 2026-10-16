@@ -18,7 +18,7 @@ import { useForgeServices } from '../../state/forge-provider';
 import { useDocumentSession, useStorageStatus } from '../../state/hooks';
 import { storageBadge } from '../../state/storage-status';
 import type { Result } from '../../core/result';
-import type { DocumentPatch } from '../../state/document-session';
+import type { CommitOptions, DocumentPatch } from '../../state/document-session';
 import type { SceneCommand } from '../../core/editor/commands';
 import { ContextHelp } from './context-help';
 import { DocumentAside } from './document-aside';
@@ -57,9 +57,9 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
   const images = useSceneImages(scene ?? EMPTY_SCENE);
 
   const commit = useCallback(
-    async (label: string, patch: DocumentPatch): Promise<boolean> => {
+    async (label: string, patch: DocumentPatch, options?: CommitOptions): Promise<boolean> => {
       if (!session) return false;
-      const result = await session.commit(label, patch);
+      const result = await session.commit(label, patch, options);
       if (!result.ok) {
         toasts.warning('Change not saved', result.error.message);
         return false;
@@ -74,12 +74,12 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
    * reports why instead of failing silently.
    */
   const run = useCallback(
-    async (command: Result<SceneCommand>): Promise<boolean> => {
+    async (command: Result<SceneCommand>, options?: CommitOptions): Promise<boolean> => {
       if (!command.ok) {
         toasts.warning('That edit was not applied', command.error.message);
         return false;
       }
-      return commit(command.value.label, command.value.patch);
+      return commit(command.value.label, command.value.patch, options);
     },
     [commit, toasts],
   );

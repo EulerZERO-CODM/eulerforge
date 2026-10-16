@@ -135,6 +135,32 @@ export async function addLayer(page: Page, kind: 'Text' | 'Rectangle' | 'Ellipse
 }
 
 /**
+ * Opens the graphic picker and places the named catalogue graphic with a click.
+ *
+ * Placing is a real document edit - it adds the layer *and* copies the catalogue record's licence into
+ * the document - so specs that care about attribution or about what one undo step contains use this
+ * rather than writing a layer into storage by hand.
+ */
+export async function placeGraphic(page: Page, name: string): Promise<void> {
+  const before = (await stored(page)).scene.layers.length;
+  await page.getByRole('button', { name: 'Graphic', exact: true }).click();
+  const picker = page.getByRole('dialog', { name: 'Place a graphic' });
+  await expect(picker).toBeVisible();
+  await picker.getByLabel('Search graphics').fill(name);
+  await picker
+    .locator('li')
+    .filter({ hasText: name })
+    .getByRole('button', { name: 'Place on canvas' })
+    .click();
+  await expect(picker).toBeHidden();
+  await storedWhen(
+    page,
+    (document) => document.scene.layers.length === before + 1,
+    `a graphic named ${name} should have been placed`,
+  );
+}
+
+/**
  * The history the artboard fixture leaves behind, newest first.
  *
  * Adding a layer is a real edit, so it stays in the history. Specs spread this into their

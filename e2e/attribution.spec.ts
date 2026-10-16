@@ -5,6 +5,7 @@ import { isPlaceable } from '../src/core/assets/types';
 import {
   STORAGE_KEY,
   createProject,
+  placeGraphic,
   selectLayerFromList,
   storedWhen,
   type StoredAttribution,
@@ -30,20 +31,6 @@ import {
  */
 
 const PLACED = 'Aurora mesh';
-
-/** Opens the graphic picker and places the named catalogue graphic with a click. */
-async function placeGraphic(page: Page, name: string): Promise<void> {
-  await page.getByRole('button', { name: 'Graphic', exact: true }).click();
-  const picker = page.getByRole('dialog', { name: 'Place a graphic' });
-  await expect(picker).toBeVisible();
-  await picker.getByLabel('Search graphics').fill(name);
-  await picker
-    .locator('li')
-    .filter({ hasText: name })
-    .getByRole('button', { name: 'Place on canvas' })
-    .click();
-  await expect(picker).toBeHidden();
-}
 
 /** Reads a stored record and rewrites its fields, the way a document from another catalogue would. */
 async function patchStoredAttribution(

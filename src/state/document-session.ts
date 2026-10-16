@@ -33,6 +33,18 @@ export type DocumentSessionState = {
   readonly lastSavedAt: string | null;
 };
 
+/**
+ * How a commit should be recorded.
+ *
+ * `coalesceKey` marks a commit as one step of a *continuous* interaction — a slider drag, a colour
+ * picker session. Consecutive commits carrying the same key replace the single entry the first one
+ * created, so one gesture is one undoable step with one label, and undo returns to the state before
+ * the gesture began. A different key, or no key at all, starts a new entry.
+ */
+export type CommitOptions = {
+  readonly coalesceKey?: string;
+};
+
 export type DocumentSessionOptions = {
   readonly document: ForgeDocument;
   readonly persist: (document: ForgeDocument) => Promise<Result<ForgeDocument>>;
@@ -45,6 +57,8 @@ export class DocumentSession {
   private readonly store: Store<DocumentSessionState>;
   private readonly persist: (document: ForgeDocument) => Promise<Result<ForgeDocument>>;
   private readonly now: () => Date;
+  /** Key of the continuous interaction in progress, if the last commit was part of one. */
+  private coalescing: string | null = null;
 
   public constructor(options: DocumentSessionOptions) {
     this.persist = options.persist;
@@ -91,7 +105,11 @@ export class DocumentSession {
    * Applies a labelled change: validate → record in history → persist.
    * @returns the persisted document, or an error explaining why nothing changed.
    */
-  public async commit(label: string, patch: DocumentPatch): Promise<Result<ForgeDocument>> {
+  public async commit(
+    label: string,
+    patch: DocumentPatch,
+    options: CommitOptions = {},
+  ): Promise<Result<ForgeDocument>> {
     const current = this.store.getState().document;
     const next = applyDocumentPatch(current, patch, this.now());
 
@@ -112,11 +130,18 @@ export class DocumentSession {
       );
     }
 
-    const entry = this.history.commit(label, next);
+    const key = options.coalesceKey ?? null;
+    // A step of the interaction that is already being recorded replaces its entry: one drag, one
+    // undoable step. Everything else appends, and ends whatever interaction was in progress.
+    const entry =
+      key !== null && key === this.coalescing
+        ? this.history.replaceLatest(label, next)
+        : this.history.commit(label, next);
     if (!entry) {
       // No-op change: report success with the current document so callers stay simple.
       return ok(current);
     }
+    this.coalescing = key;
 
     return this.persistToStore(true);
   }
@@ -125,6 +150,8 @@ export class DocumentSession {
     if (!this.history.canUndo()) {
       return err(forgeError('validation-failed', 'There is nothing to undo.'));
     }
+    // Stepping back ends any continuous interaction: the next change must be its own entry.
+    this.coalescing = null;
     this.history.undo();
     return this.persistToStore(false);
   }
@@ -133,6 +160,7 @@ export class DocumentSession {
     if (!this.history.canRedo()) {
       return err(forgeError('validation-failed', 'There is nothing to redo.'));
     }
+    this.coalescing = null;
     this.history.redo();
     return this.persistToStore(false);
   }
@@ -181,6 +209,7 @@ export class DocumentSession {
 
   /** Replaces the session's document (e.g. after an external reload). */
   public replace(document: ForgeDocument): void {
+    this.coalescing = null;
     this.history.reset(document);
     this.store.setState(this.buildState(false));
   }
