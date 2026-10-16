@@ -10,6 +10,17 @@
  * evaluation — the alternatives, the licence, and the edge cases it was tested against before it was
  * accepted as a dependency.
  *
+ * ## One import detail worth knowing about
+ *
+ * `polygon-clipping` publishes three builds with two different shapes: the CommonJS and UMD builds set
+ * `module.exports` to an object with the four operations, while the ESM build exports that same object
+ * as its *default* export. A bundler may pick any of them (Next resolves the UMD build for the
+ * browser and the ESM build elsewhere), so the module is imported through its default export, which
+ * resolves to the operations object in every build. The bundled type declarations only describe the
+ * named-export shape, so the concrete types are imported separately and used directly. A previous
+ * revision used `import * as clipping`, which reads `clipping.union === undefined` in the ESM build —
+ * this is the bug the Chromium test for boolean operations exists to catch.
+ *
  * The cost of that choice is stated rather than hidden: `polygon-clipping` clips *polygons*, so
  * curves are flattened to straight segments at a tolerance the caller sees, and every result carries
  * `tolerance`, `flattenedSegments` and `approximation` fields describing what was done. A boolean
@@ -34,7 +45,8 @@
  * overlapped") would be impossible to report honestly.
  */
 
-import * as clipping from 'polygon-clipping';
+import clip from 'polygon-clipping';
+import type { MultiPolygon, Pair } from 'polygon-clipping';
 
 import { areaOfContour } from './area';
 import { boundsOfPath } from './bounds';
@@ -163,14 +175,14 @@ function ringInsideRing(inner: readonly VectorPoint[], outer: readonly VectorPoi
  * two-element tuple. The map is written with the tuple spelled out rather than asserted, so a
  * change to the library's input type is a compile error here instead of a runtime surprise.
  */
-function toClippingInput(polygons: readonly Polygon[]): clipping.MultiPolygon {
+function toClippingInput(polygons: readonly Polygon[]): MultiPolygon {
   return polygons.map((polygon) =>
-    polygon.map((ring) => ring.map((point): clipping.Pair => [point.x, point.y])),
+    polygon.map((ring) => ring.map((point): Pair => [point.x, point.y])),
   );
 }
 
 /** Rings back to a path: outer rings positive, holes negative, all closed and line-only. */
-function fromClippingOutput(output: clipping.MultiPolygon): VectorPath {
+function fromClippingOutput(output: MultiPolygon): VectorPath {
   const contours = output
     .flatMap((polygon) => polygon)
     .map((ring) => {
@@ -288,20 +300,20 @@ export function booleanPaths(
     return err(forgeError('validation-failed', 'Combining shapes needs at least two shapes.'));
   }
 
-  let output: clipping.MultiPolygon;
+  let output: MultiPolygon;
   try {
     switch (operation) {
       case 'union':
-        output = clipping.union(first, ...inputs.slice(1));
+        output = clip.union(first, ...inputs.slice(1));
         break;
       case 'intersect':
-        output = clipping.intersection(first, ...inputs.slice(1));
+        output = clip.intersection(first, ...inputs.slice(1));
         break;
       case 'subtract':
-        output = clipping.difference(first, ...inputs.slice(1));
+        output = clip.difference(first, ...inputs.slice(1));
         break;
       case 'exclude':
-        output = clipping.xor(first, ...inputs.slice(1));
+        output = clip.xor(first, ...inputs.slice(1));
         break;
     }
   } catch (error) {
