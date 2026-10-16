@@ -410,6 +410,19 @@ const ROWS: readonly Row[] = [
     },
   },
   {
+    name: 'moving a layer with the Y position field',
+    label: 'Move “Panel” to y 160',
+    select: 'Panel',
+    act: async (user) => {
+      const field = screen.getByLabelText('Layer Y');
+      await user.clear(field);
+      await user.type(field, '160{Enter}');
+    },
+    expect: (_before, after) => {
+      expect(frameOf(after, 'lyr-a').y).toBe(160);
+    },
+  },
+  {
     name: 'editing text content',
     label: 'Edit text in “Headline”',
     select: 'Headline',
@@ -786,6 +799,22 @@ const ROWS: readonly Row[] = [
       expect(after.scene.layers.filter((layer) => layer.locked)).toHaveLength(2);
     },
   },
+  {
+    name: 'changing the opacity of a multi-layer selection',
+    label: 'Set opacity of 2 layers to 40%',
+    act: async (user) => {
+      await user.click(selectRow('Panel'));
+      fireEvent.click(selectRow('Footnote'), { shiftKey: true });
+      fireEvent.change(screen.getByLabelText('Layer opacity'), { target: { value: '40' } });
+    },
+    expect: (_before, after) => {
+      const changed = after.scene.layers.filter(
+        (layer) => layer.name === 'Panel' || layer.name === 'Footnote',
+      );
+      expect(changed).toHaveLength(2);
+      for (const layer of changed) expect(layer.opacity).toBeCloseTo(0.4, 5);
+    },
+  },
 
   /* ---------------------------------------------------------------- the rest of the ordering controls */
   {
@@ -1063,6 +1092,18 @@ const ROWS: readonly Row[] = [
     },
   },
   {
+    name: 'showing the centre lines again',
+    label: 'Show centre lines',
+    keys: ['guides'],
+    guides: { showCentreLines: false },
+    act: async (user) => {
+      await user.click(screen.getByRole('switch', { name: 'Centre lines' }));
+    },
+    expect: (_before, after) => {
+      expect(after.guides.showCentreLines).toBe(true);
+    },
+  },
+  {
     name: 'removing a palette colour',
     label: 'Remove palette colour',
     keys: ['palette'],
@@ -1135,7 +1176,7 @@ describe('every control that changes the document is one labelled undo step', ()
 
   it('covers the controls the workspace offers, not a sample of them', () => {
     // The matrix is the coverage claim: this fails if a row is dropped during a refactor.
-    expect(ROWS.length).toBeGreaterThanOrEqual(73);
+    expect(ROWS.length).toBeGreaterThanOrEqual(76);
     expect(new Set(ROWS.map((row) => row.name)).size).toBe(ROWS.length);
     // Every row names the history entry it must produce, and no row may claim an empty one.
     expect(ROWS.filter((row) => row.label.trim().length === 0)).toEqual([]);

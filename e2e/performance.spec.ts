@@ -170,25 +170,109 @@ async function setLocked(page: Page, name: string, locked: boolean): Promise<voi
   await expect(locked ? lockedToggle : unlockedToggle).toBeVisible();
 }
 
-/** Selects exactly one layer from the list, which is also the keyboard-reachable path to a selection. */
 /**
- * Prepares the measured interaction: leaves one named layer selected.
+ * The inspector that describes the current selection.
+ *
+ * Scoped on purpose. "Layer name" is a label the workspace uses for the name field of *each* layer
+ * being edited, and this benchmark's document holds ten text layers, so a document-wide lookup by
+ * that label is ambiguous by construction — it says nothing about which selection the page is in.
+ * The selection inspector is the one surface that states the selection in its own heading
+ * ("Selected layer" for one layer, "Selected layers (n)" for a group).
+ */
+function selectionInspector(page: Page) {
+  return page.locator('section[aria-labelledby="inspector-selection"]');
+}
+
+/**
+ * What the selection surfaces look like right now, appended to a preparation failure.
+ *
+ * A rejected preparation step has to explain itself. Playwright's strict-mode error names the locator
+ * and a count, and the count alone does not say *which* surface produced the extra elements, so this
+ * reports the parts a locator engine looks at — associated `<label>`, `aria-label` and
+ * `aria-labelledby` — for the name fields it finds, plus the selection inspector's own heading.
+ * A red run therefore carries its diagnosis in the check-run annotation instead of needing a rerun.
+ */
+async function describeSelection(page: Page): Promise<string> {
+  const summary = await page.evaluate(() => {
+    const labelOf = (element: Element): string => {
+      const referenced = element.getAttribute('aria-labelledby');
+      if (referenced) {
+        return referenced
+          .split(/\s+/)
+          .map((id) => element.ownerDocument.getElementById(id)?.textContent ?? '')
+          .join(' ');
+      }
+      const ariaLabel = element.getAttribute('aria-label');
+      if (ariaLabel) return ariaLabel;
+      const labelled = (element as HTMLInputElement).labels;
+      return labelled ? [...labelled].map((label) => label.textContent).join(' ') : '';
+    };
+    const named = [...document.querySelectorAll('input, textarea, select, button')].filter(
+      (element) => /layer name/i.test(labelOf(element)),
+    );
+    const inspectors = [
+      ...document.querySelectorAll('section[aria-labelledby="inspector-selection"]'),
+    ];
+    return {
+      inspectors: inspectors.length,
+      headings: inspectors.map((element) => element.querySelector('h3')?.textContent ?? '(no h3)'),
+      nameFields: named.length,
+      nameValues: named.slice(0, 12).map((element) => (element as HTMLInputElement).value),
+      nameMarkup: named.slice(0, 3).map((element) => element.outerHTML.slice(0, 100)),
+      rows: document.querySelectorAll('[data-testid^="layer-row-"]').length,
+      selectedRows: document.querySelectorAll('[data-testid^="layer-name-"][aria-current="true"]')
+        .length,
+    };
+  });
+  return JSON.stringify(summary);
+}
+
+/**
+ * Prepares the measured interaction: leaves one named layer selected, or fails loudly.
  *
  * Keyboard, not a pointer click, and deliberately so. This is not the interaction under measurement —
- * the measured click happens inside the scenario — and a pointer click on a list of thirty rows is
- * the one thing here that was flaky: Playwright scrolls a row into view, clicks it, and a list that
- * is still settling can put a neighbouring row under the cursor, which then fails as "the inspector
- * shows the wrong layer". Focusing the row and pressing Enter is the list's own keyboard path, with
- * no coordinates to land on, so the preparation is deterministic and the measurement keeps its real
- * pointer input.
+ * the measured click happens inside the scenario — and focusing the row and pressing Enter is the
+ * list's own keyboard path, with no coordinates to land on, so the preparation cannot click a
+ * neighbouring row while the list is still settling.
+ *
+ * Every step asserts a stated quantity rather than relying on a locator being unique by luck: the row
+ * has to exist once, it has to be the selected row, the workspace has to render exactly one selection
+ * inspector, and that inspector has to hold exactly one name field showing the named layer. A failure
+ * here is a *test* failure, never a budget failure, and it carries the page's own account of the
+ * selection (see `describeSelection`).
  */
 async function selectOnlyLayer(page: Page, name: string): Promise<void> {
-  const row = layerButton(page, name);
-  await row.scrollIntoViewIfNeeded();
-  await row.focus();
-  await page.keyboard.press('Enter');
-  await expect(row, `“${name}” should be the selected row`).toHaveAttribute('aria-current', 'true');
-  await expect(page.getByLabel('Layer name')).toHaveValue(name);
+  try {
+    const row = layerButton(page, name);
+    await expect(row, `the layer list should hold exactly one row for “${name}”`).toHaveCount(1, {
+      timeout: ACTION_TIMEOUT,
+    });
+    await row.scrollIntoViewIfNeeded();
+    await row.focus();
+    await page.keyboard.press('Enter');
+    await expect(row, `“${name}” should be the selected row`).toHaveAttribute(
+      'aria-current',
+      'true',
+      { timeout: ACTION_TIMEOUT },
+    );
+
+    const inspector = selectionInspector(page);
+    await expect(
+      inspector,
+      'the workspace should render exactly one selection inspector',
+    ).toHaveCount(1);
+    const nameField = inspector.getByLabel('Layer name', { exact: true });
+    await expect(
+      nameField,
+      'the selection inspector should hold exactly one name field',
+    ).toHaveCount(1);
+    await expect(nameField, `the selection inspector should be editing “${name}”`).toHaveValue(
+      name,
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`${reason} — selection state: ${await describeSelection(page)}`);
+  }
 }
 
 /** Adds a layer to the selection with the modifier click the list supports. */
@@ -670,7 +754,9 @@ function environment(): {
     runtime: `Node ${process.version} on ${process.platform} ${process.arch}`,
     browser: 'Chromium (Playwright)',
     cpu: `${String(cores.length)} vCPU — ${cores[0]?.model ?? 'unknown model'}`,
-    commit: process.env.GITHUB_SHA ?? 'local',
+    // CI sets the head SHA for this job: on a pull request the checkout is a merge commit, and a
+    // report naming the merge commit would not say which branch state was measured.
+    commit: process.env.GITHUB_HEAD_SHA ?? process.env.GITHUB_SHA ?? 'local',
   };
 }
 

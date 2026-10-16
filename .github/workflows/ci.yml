@@ -107,6 +107,11 @@ jobs:
 
       - name: Browser tests
         run: npm run test:e2e
+        env:
+          # The performance report names the commit its numbers describe. On a pull request the
+          # checkout is a merge commit, so the head SHA is what a reader needs in order to find the
+          # code the benchmark actually ran against.
+          GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Publish the performance report
         # Best effort on purpose: the report is evidence for a human to read, and a benchmark result

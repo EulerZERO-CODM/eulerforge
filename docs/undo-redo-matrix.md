@@ -11,7 +11,7 @@ Three levels of test, because they answer different questions:
 | Level         | File                                            | What it proves                                                                                                                    |
 | ------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | **Core**      | `src/core/editor/undo-redo.test.ts` (45 command rows, 49 tests) | The command's patch changes exactly the right keys, carries the right label, and the history stack reverts and replays byte-for-byte |
-| **Component** | `src/components/workspace/undo-redo.test.tsx` (73 control rows, 92 tests, plus the non-edit, refused and continuous-interaction blocks) | The control a person presses produces that one entry, the panel shows it, the session, the store and `localStorage` agree |
+| **Component** | `src/components/workspace/undo-redo.test.tsx` (76 control rows, 96 tests, plus the non-edit, refused and continuous-interaction blocks) | The control a person presses produces that one entry, the panel shows it, the session, the store and `localStorage` agree |
 | **Browser**   | `e2e/undo-redo.spec.ts` (6 tests) and the specs it names | Keyboard shortcuts, real pointer gestures and what is really persisted across a reload                                   |
 
 The component rows all run through one shared runner, so every row is checked against the same six
@@ -81,6 +81,7 @@ rather than a summary.
 | Group reorder (inspector)                               | `Bring forward: 2 layers`, `Send backward: 2 layers`, … | C U |
 | Group duplicate / delete                                | `Duplicate 2 layers` / `Delete 2 layers` | C U |
 | Group hide / lock (inspector)                           | `Hide 2 layers` / `Lock 2 layers`    | C U    |
+| Group opacity slider (inspector)                        | `Set opacity of 2 layers to <n>%`    | U      |
 
 Group rows are deliberately separate from single-layer rows: the label names a count rather than a
 layer, the transform is a rigid transform of the union of the frames, and the two have different
@@ -219,12 +220,17 @@ call site rather than from memory:
 
 - **No Chromium in this development sandbox.** `e2e/undo-redo.spec.ts` is written and listed by
   `npx playwright test --list`, and runs in the `Browser (Chromium)` CI job; nothing here was executed
-  on the machine that wrote it. Its first run was that CI job, and it found two real defects in the
-  spec rather than in the product: the walk back to the document a test starts from is *not* the floor
-  of the history — the fixture creates both layers through the workspace, so those are undoable steps
-  too — and an unqualified `getByRole('alert')` matched Next's route announcer as well as the field's
-  error. Both are fixed and asserted more precisely: the spec now walks past the fixture's own steps
-  to an empty canvas and back, and names the field's message.
+  on the machine that wrote it. Its first run was that CI job, and it found three genuine problems:
+  the walk back to the document a test starts from is *not* the floor of the history — the fixture
+  creates both layers through the workspace, so those are undoable steps too; an unqualified
+  `getByRole('alert')` matched Next's route announcer as well as the field's error; and, the one that
+  is a product defect rather than a test defect, **Escape committed the value it was cancelling**. The
+  draft was reverted and the field blurred, but the blur runs before React applies `editing: false`,
+  so the blur handler saw an edit still in progress and committed the refused number. The hook now
+  records the cancellation in a ref, which is already set when that synchronous blur arrives, and the
+  component suite has a regression row for the exact sequence (type, Escape, blur). The others are
+  asserted more precisely: the spec walks past the fixture's own steps to an empty canvas and back,
+  and names the field's message.
 - **Chromium only.** Firefox and WebKit are not in the job, so keyboard and pointer behaviour there is
   unverified.
 - **Group semantics that are not transforms.** Alignment, distribution and grouping (as opposed to
