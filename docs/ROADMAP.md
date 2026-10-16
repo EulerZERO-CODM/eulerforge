@@ -80,8 +80,9 @@ Four scenarios are asserted in the browser rather than by hand:
    do not occupy - is that guide.
 2. Text wrapping under real font metrics. `e2e/text-wrapping.spec.ts` reads the ink rows back out of
    the artboard's own canvas at every zoom and compares the line groups, so a zoom level that rewrapped
-   the text fails; narrowing the box adds lines, and a text layer taller than its box is clipped to it,
-   which is what the export report has always told the user.
+   the text fails; narrowing the box re-wraps the content into lines that stay inside it, never fewer
+   lines than the wider box and never more than the box can hold, and a text layer taller than its box
+   paints nothing below it, which is what the export report has always told the user.
 3. Storage refusal in a private window. `e2e/storage-restricted.spec.ts` makes browser storage refuse
    reads and writes before the application initialises: the app starts, says it is holding work in
    memory, never claims a durable save, keeps editing for the session, and loses the project on reload
