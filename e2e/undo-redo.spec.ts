@@ -80,6 +80,7 @@ test.describe('undo and redo in the browser', () => {
     await artboardFixture(page);
     await selectLayerFromList(page, 'Rectangle');
     const startX = await readNumberField(page, 'Layer X');
+    const startY = await readNumberField(page, 'Layer Y');
 
     const start = content(await stored(page));
 
@@ -143,8 +144,11 @@ test.describe('undo and redo in the browser', () => {
     await keyboardRedo(page);
     await expect.poll(async () => content(await stored(page))).toBe(afterSecondNudge);
     await expect(redoButton(page)).toBeDisabled();
-    // The second nudge worked in Y, so X is where the ArrowRight nudge left it.
+    /* The two nudges land exactly one document pixel each: X is the field edit plus the ArrowRight
+       nudge, and Y is the document's own Y plus the ArrowDown nudge. Reading both fields is what keeps
+       this a check on the restored *edit* rather than on "some number is showing". */
     expect(await readNumberField(page, 'Layer X')).toBe(startX + 41);
+    expect(await readNumberField(page, 'Layer Y')).toBe(startY + 1);
 
     // A new edit after undoing forgets the redo branch, as a single linear history must.
     await keyboardUndo(page);

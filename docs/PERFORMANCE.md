@@ -152,66 +152,133 @@ preparation step records a failure row, and the next scenario still runs. The fi
 `expect(report.failureLines(), report.markdown()).toEqual([])`, so a red run always shows the table it
 was based on.
 
+Preparation is itself verified, because a preparation that only *looks* done is how a benchmark ends up
+measuring the wrong thing. Rows are addressed by the layer id stored in the document (never by the name
+the row happens to show), every label lookup is scoped to the selection inspector, each inspector commit
+is confirmed against the document the application actually saved before the next one is made, a layer
+about to be dragged is put back at its fixture frame and made visible and unlocked, and the scenario
+fails — with the page's own account of the selection, first in the message — rather than measuring
+anything else.
+
 ## 6. Measured results
 
-### Environment
+### The two environments these numbers come from
 
-Every browser measurement in this repository so far comes from CI, because the sandbox used to develop
-it cannot download a Chromium binary (the browser CDN is blocked) — see the limitations section. The
-numbers below are therefore **CI numbers**, and the report header repeats the environment for each run:
+- **CI — the gate.** A GitHub-hosted Ubuntu runner: Node v22.23.3, Chromium 156.0.8078.4 (Playwright's own
+  build), 2 vCPU AMD EPYC 9V74, viewport 1440 × 960 at device pixel ratio 2. The `Browser (Chromium)` job
+  runs this benchmark against the production build and fails the pull request when a *gated* scenario
+  misses its budget. Only this environment's numbers count as acceptance.
+- **This development sandbox — reproduction and iteration.** Node v22.22.3, Chromium 153.0.8010.0, 2 vCPU
+  Intel Xeon @ 2.60 GHz. The sandbox cannot reach Playwright's browser CDN, so it runs a Chromium taken
+  from the `@sparticuz/chromium` npm package — a different build from CI's. It is the right place to
+  reproduce *behaviour* (locators, preparation, history state) and the wrong place to compare timings
+  with CI.
+- **No mid-range laptop has run this benchmark.** The four-fold throttle is a proxy for that hardware;
+  §4 says what it can and cannot stand for.
 
-- Runtime: Node v22.23.3 on linux x64
-- Browser: Chromium 156.0.8078.4 (Playwright)
-- CPU: 2 vCPU — AMD EPYC 9V45 96-Core Processor (GitHub-hosted Ubuntu runner)
-- Viewport: 1440 × 960 at device pixel ratio 2
-- Gated phase: `Emulation.setCPUThrottlingRate: 4`
+Every table below names its environment, and the report header repeats it for each run: the harness
+prints the runtime, the browser version, the CPU model and core count, and the commit it measured
+(`GITHUB_HEAD_SHA`, or `local` when nothing set it).
 
-### Gated (throttled) phase
+### A complete run: all twelve scenarios, both phases
 
-Measured by the CI run of `4d00ff2` (the run that also fixed the harness assertions this table was
-published with; the measured application code and the fixture are the same). All twelve scenarios
-passed:
+This is the first run in which every scenario completed in *both* phases: twelve interaction scenarios
+with twelve samples each, three drag scenarios with five drags each, after one unrecorded warm-up pass,
+under the four-fold throttle — and then the same scenarios again at full speed (6 / 3 samples).
+Environment: the sandbox above. Raw report: `test-results/perf-report.{md,json}`, written by
 
-| Scenario | What the user does | n | p50 | p95 | worst |
+```
+LD_LIBRARY_PATH=… npx playwright test e2e/performance.spec.ts --grep "stays inside the recorded budget"
+```
+
+**Result: every gated scenario stayed inside its budget.**
+
+| Scenario | Phase | n | p50 | p95 | worst |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `select-layer` | click a layer in the layer list | 12 | 25.5 ms | 28.1 ms | 28.1 ms |
-| `select-group` | shift-click a second layer into the selection | 12 | 24.8 ms | 26.1 ms | 26.1 ms |
-| `hide-layer` | click Hide on a layer row | 12 | 25.8 ms | 63.5 ms | 63.5 ms |
-| `lock-layer` | click Lock on a layer row | 12 | 26.1 ms | 42.6 ms | 42.6 ms |
-| `inspector-x` | commit a new X in the inspector with Enter | 12 | 32.0 ms | 48.2 ms | 48.2 ms |
-| `inspector-width` | commit a new width in the inspector with Enter | 12 | 26.1 ms | 73.5 ms | 73.5 ms |
-| `opacity-key` | press an arrow key on the opacity slider | 12 | 29.0 ms | 44.0 ms | 44.0 ms |
-| `undo` | undo an edit from the history panel | 12 | 25.5 ms | 27.8 ms | 27.8 ms |
-| `redo` | redo an edit from the history panel | 12 | 32.9 ms | 69.2 ms | 69.2 ms |
-| `drag-layer` | drag one text layer across the canvas | 5 | 16.7 ms | 16.7 ms | 16.8 ms |
-| `drag-group` | drag a three-layer selection | 5 | 16.7 ms | 16.7 ms | 16.8 ms |
-| `resize-handle` | drag the bottom-right handle to resize a layer | 5 | 16.7 ms | 16.7 ms | 16.8 ms |
+| `select-layer` | throttled | 12 | 25.3 ms | 25.8 ms | 25.8 ms |
+| `select-group` | throttled | 12 | 24.7 ms | 25.4 ms | 25.4 ms |
+| `hide-layer` | throttled | 12 | 25.7 ms | 42.3 ms | 42.3 ms |
+| `lock-layer` | throttled | 12 | 25.7 ms | 37.5 ms | 37.5 ms |
+| `inspector-x` | throttled | 12 | 22.6 ms | 39.1 ms | 39.1 ms |
+| `inspector-width` | throttled | 12 | 22.5 ms | 41.8 ms | 41.8 ms |
+| `opacity-key` | throttled | 12 | 22.4 ms | 45.7 ms | 45.7 ms |
+| `undo` | throttled | 12 | 35.6 ms | 49.9 ms | 49.9 ms |
+| `redo` | throttled | 12 | 20.3 ms | 51.3 ms | 51.3 ms |
+| `drag-layer` | throttled | 5 | 16.7 ms | 16.8 ms | 33.3 ms |
+| `drag-group` | throttled | 5 | 16.7 ms | 16.8 ms | 16.8 ms |
+| `resize-handle` | throttled | 5 | 16.7 ms | 16.7 ms | 16.8 ms |
 
-(Drag rows show the **gap between animation frames**, not the latency of one interaction: 16.7 ms is
-one frame at 60 Hz, which means the drag kept painting at display rate. Frame gaps over 50 ms: 0 % in
-all three drag scenarios through the run — 382 pooled gaps for `drag-layer`, 392 for `drag-group`.)
+The three drag rows are **gaps between animation frames**, not interaction latency: 16.7 ms is one frame
+at 60 Hz, so the drags kept painting at display rate. Pooled over the run: 352 gaps for `drag-layer`, 312
+for `drag-group`, 262 for `resize-handle`, with 0 % of them over 50 ms. Long tasks were 0–1 per scenario
+with a worst block of 68 ms (budget 600 ms), and input events over 16 ms ran 33–150 per scenario with a
+worst of 96 ms. Nothing came within a factor of four of a threshold.
 
-Observed alongside the latency: long tasks were 0–2 per phase with a worst block of 60–76 ms, far below
-the 600 ms freeze budget, and discrete input events over 16 ms ran between 25 and 144 per scenario with
-a worst of 112 ms. No scenario came near a threshold.
+The same run's unthrottled phase, for context rather than as a gate: interactions p50 20.2–29.7 ms and p95
+24.9–58.4 ms, drag gaps p50 16.7 ms with a worst of 33.4 ms.
 
-### Unthrottled phase (context, not gated)
+The commit measured here is `local` in the report because the harness only knows a commit when CI sets the
+environment variable; the application code measured is the same as the branch's last performance commit,
+and the harness itself is the file described in §5.
 
-Same scenarios at full speed, half the samples: `select-layer` p50 24.5 ms / p95 25.7 ms,
-`hide-layer` 25.0 / 41.3, `lock-layer` 24.8 / 26.3, `undo` 25.0 / 33.0, `redo` 24.3 / 28.3. The
-unthrottled phase is published because it shows how much of the cost is the slowdown itself, and it is
-deliberately not a gate: on a shared runner the fast phase is the one most exposed to a noisy neighbour,
-so gating on it would make the benchmark flaky rather than informative.
+### CI, the gate
+
+CI has not yet published a run in which all twelve scenarios completed, and the way it fails is worth
+recording — it is exactly the failure mode the harness was changed to make impossible. The `abc7982` run
+(Browser (Chromium) job of pull request #2, check run `116862619447`) measured eleven scenarios and could
+not prepare the twelfth:
+
+| Scenario | n | p50 | p95 | worst | Job |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `select-layer` | 12 | 25.4 ms | 44.4 ms | 44.4 ms | pass |
+| `select-group` | 12 | 25.2 ms | 41.6 ms | 41.6 ms | pass |
+| `hide-layer` | 12 | 25.8 ms | 42.7 ms | 42.7 ms | pass |
+| `lock-layer` | 12 | 25.6 ms | 42.0 ms | 42.0 ms | pass |
+| `inspector-x` | 12 | 32.2 ms | 51.6 ms | 51.6 ms | pass |
+| `inspector-width` | 12 | 47.8 ms | 59.5 ms | 59.5 ms | pass |
+| `opacity-key` | 12 | 43.1 ms | 70.8 ms | 70.8 ms | pass |
+| `undo` | 12 | 25.4 ms | 25.9 ms | 25.9 ms | pass |
+| `redo` | 12 | 36.7 ms | 54.0 ms | 54.0 ms | pass |
+| `drag-layer` | 5 | 16.7 ms | 16.7 ms | 16.8 ms | pass |
+| `drag-group` | 5 | 16.7 ms | 16.7 ms | 33.3 ms | pass |
+| `resize-handle` | 0 | — | — | — | **not measured** |
+
+The job failed, and that is the correct outcome: `resize-handle` was never driven into the state it
+measures, so the benchmark had no result to report for it — a preparation failure is a *test* failure and
+is never counted as a fast measurement. The report said so in its own words ("1 scenario phase(s) could
+not be measured"), the failing row read `scenario must run`, and the check-run annotation carried the
+selection state the page reported at that moment.
+
+That failure is what the current harness fixes. Four defects were behind it, all of them in the harness:
+
+1. Rows were found by the layer's *name*. The name-keyed lookup stopped resolving the moment the layer was
+   renamed by something else, turning a measurement into a twenty-second timeout that described nothing.
+2. Inspector fields were addressed document-wide (`getByLabel('Layer name')`), which is ambiguous by
+   construction in a document with ten text layers.
+3. A preparation step could *look* done — a field showing the value it was filled with — while the commit
+   behind it had not reached the document: two inspector commits issued back-to-back can race, because
+   the second handler still closes over the frame from before the first.
+4. The resize scenario did not reset the layer's frame between samples, and `page.mouse` does not
+   hit-test: once the handle had been dragged past the artboard's edge, the next sample's press landed on
+   the inspector rail and Chromium dragged the “Layer name” label's text into the name field — renaming a
+   layer of the document under measurement. That rename is what broke the name-keyed lookups in (1).
+
+The harness now addresses rows by the id in the document, scopes every label lookup to the selection
+inspector, resets the frames a scenario depends on before every sample and confirms each committed value
+against the document the application saved, verifies that the row it selected is the row the inspector is
+editing, checks with the page's own hit test that a raw pointer press really is aimed at the control it
+means to press, and fails a scenario if the document it is measuring is no longer the fixture document
+(§8).
 
 ### Runner variance, stated plainly
 
 An earlier CI run on the same document (`085f79a`) reported `select-layer` p50 **39.8 ms** / p95
-**43.1 ms**, where `4d00ff2` reported 25.5 / 28.1 — a difference of about 60 % on identical application
-code and the same fixture. Both runs passed. Shared CI runners have real, measurable variance, which is
-why the budget is set an order of magnitude above the observed cost rather than a margin around it, and
-why a single number from a single run is never the whole story. What the benchmark is for is catching a
-*gross* regression — a doubled critical path, a per-frame re-plan, a synchronous decode — not for
-adjudicating 15 ms.
+**43.1 ms**, where `abc7982` reported 25.4 ms / 44.4 ms — the same application code and the same fixture,
+with a difference of about 55 % in the median. Both runs passed. Shared CI runners have real, measurable
+variance, which is why the budget sits an order of magnitude above the observed cost rather than a margin
+around it, and why a single number from a single run is never the whole story. What the benchmark is for
+is catching a *gross* regression — a doubled critical path, a per-frame re-plan, a synchronous decode —
+not adjudicating 15 ms.
 
 ## 7. What was profiled, and why nothing was optimised
 
@@ -238,8 +305,11 @@ is one undo step), which is a correctness fix first and a cost fix second.
 
 ## 8. Limitations
 
-- **No mid-range laptop has run this benchmark.** All browser numbers are CI numbers. The 4× throttle is
-  a proxy and stands for CPU-bound main-thread work only (see above).
+- **No mid-range laptop has run this benchmark.** The numbers in this document come from a shared CI
+  runner and from a 2-vCPU sandbox container with a 153-build of Chromium; neither is a laptop. The 4×
+  throttle is a proxy and stands for CPU-bound main-thread work only (see §4), and a machine that
+  thermally throttles or swaps will behave worse than either environment without this benchmark saying by
+  how much.
 - **Chromium only.** Firefox and WebKit are unverified, including for timing.
 - **No GPU/thermal/memory modelling.** A device that thermally throttles or swaps will behave worse than
   these numbers, and this benchmark would not predict by how much.
@@ -250,6 +320,38 @@ is one undo step), which is a correctness fix first and a cost fix second.
   reported rather than a mean precisely so the spread is visible.
 - **Preparation failures are test failures, not budget failures.** If the workspace cannot be driven into
   the state a scenario needs, the scenario is recorded as failed *with the selection state the page
-  reported* — it does not silently measure something else, and it does not touch the budget.
+  reported* — it does not silently measure something else, and it does not touch the budget. The run's
+  gate is `expect(report.failureLines(), report.markdown()).toEqual([])`, so a scenario that never ran
+  cannot be mistaken for a scenario that passed: it prints `scenario must run` and fails the job.
+- **The measured document is checked to still be the fixture.** Before each measurement the harness
+  asserts that the layer it is about to select carries the name the fixture gave it, and after every
+  scenario it compares every layer name in the saved document with the fixture. A renamed layer is
+  reported as a failure of that scenario rather than published as a measurement of "the thirty-layer
+  fixture".
+- **The harness renamed a document layer once, and the cause is now known and guarded.** In the CI run
+  of `abc7982` the layer `Content card` was persisted as `ContLayer nameent card`, and the benchmark then
+  failed to prepare the next scenario that addressed a row by name. It was reproduced locally by running
+  the pre-fix harness with the page instrumented, which recorded the exact sequence:
+
+  ```
+  [drift] keydown key="Enter" on BUTTON[layer-name-lyr-30-2]
+  [drift] drop data="" on INPUT[_r_cd_] value="Content card"
+  [drift] beforeinput data="Layer name\n" on INPUT[_r_cd_] value="Content card"
+  [drift] input data="Layer name" on INPUT[_r_cd_] value="ContLayer nameent card"
+  ```
+
+  A native drag-and-drop, not a keystroke: the resize scenario did not reset the layer's frame between
+  samples, so after the first sample the handle's box sat *outside* the artboard (measured: surface
+  `right 802.5, bottom 628.4`; handle centre `833.1, 629.4`). `page.mouse` presses exactly where it is
+  told and does not hit-test, so the next sample's press landed on the inspector rail — on the
+  “Layer name” label — and Chromium turned the press-and-move into a drag of that label's text, dropping
+  it into the name field and renaming the layer.
+
+  The harness now (a) puts the layer back at its fixture frame before every sample, (b) verifies each
+  committed value against the document the application saved, (c) chooses a press point that the page's
+  own hit test says really is the control (`pressPoint`), (d) refuses a drag whose start point is not on
+  the artboard, (e) drops any text selection before a pointer scenario, and (f) checks after every
+  scenario that the document is still the fixture document, so a rename of any origin fails the
+  benchmark loudly instead of being published as a measurement.
 - **One document shape.** A 1600 × 1100 canvas with 30 layers is one point in the space; a document with
   a single huge image layer, or a hundred text layers, is not covered.

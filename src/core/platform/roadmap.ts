@@ -303,7 +303,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
         ],
         evidence: [
           'src/core/editor/undo-redo.test.ts (45 commands: the patch keys, the label, undo and redo compared as content, plus the refused, unchanged and continuous cases)',
-          'src/components/workspace/undo-redo.test.tsx (73 controls through one shared runner: the document, the label, the panel, the store and the saved bytes, plus the blocks for actions that must not create a step)',
+          'src/components/workspace/undo-redo.test.tsx (76 controls through one shared runner: the document, the label, the panel, the store and the saved bytes, plus the blocks for actions that must not create a step)',
           'e2e/undo-redo.spec.ts (the real shortcuts through the browser key pipeline, storage compared after every step, a placed graphic and its licence record, refused/unchanged/cancelled edits, and a reload that keeps the document and starts a fresh session)',
           'docs/undo-redo-matrix.md (the action-to-test matrix, the provenance of the enumeration, and the known gaps)',
         ],

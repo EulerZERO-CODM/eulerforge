@@ -38,7 +38,7 @@ import {
   THIRTY_LAYER_TOTAL,
   thirtyLayerDocument,
 } from '../src/testing/thirty-layers';
-import { STORAGE_KEY, layerButton, pointInDocument } from './fixtures';
+import { STORAGE_KEY, pointInDocument } from './fixtures';
 import {
   PerfReport,
   describeDistribution,
@@ -140,9 +140,70 @@ function historyButton(page: Page, label: 'Undo' | 'Redo') {
     .getByRole('button', { name: label, exact: true });
 }
 
-/** The row toggle for a layer, whatever state it is in: Hide when visible, Show when hidden. */
-function rowToggle(page: Page, name: string, kind: 'Hide' | 'Show' | 'Lock' | 'Unlock') {
-  return page.getByRole('button', { name: `${kind} \u201c${name}\u201d`, exact: true });
+/**
+ * The fixture's layer for a name.
+ *
+ * The harness addresses rows by the **id** the document stores, not by the visible name. The name is
+ * the fixture's contract and is asserted where it matters, but it must not be what a lookup depends
+ * on: a name that drifted would otherwise turn a measurement's preparation into a timeout that says
+ * nothing about what went wrong, which is what this file did in CI.
+ */
+type FixtureFrame = {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+};
+
+/** One or more stored facts about a layer that a preparation step has to be able to prove. */
+type LayerExpectation = {
+  readonly x?: number;
+  readonly y?: number;
+  readonly width?: number;
+  readonly height?: number;
+  readonly visible?: boolean;
+  readonly locked?: boolean;
+};
+
+function fixtureLayer(name: string): {
+  readonly id: string;
+  readonly name: string;
+  readonly frame: FixtureFrame;
+} {
+  const layer = DOCUMENT.scene.layers.find((candidate) => candidate.name === name);
+  if (!layer) throw new Error(`the fixture has no layer named “${name}”`);
+  return {
+    id: String(layer.id),
+    name: layer.name,
+    frame: { ...layer.frame },
+  };
+}
+
+/** A row's name button, addressed by the layer id the visible document stores. */
+function layerButtonById(page: Page, id: string): Locator {
+  return page.locator(`[data-testid="layer-name-${id}"]`);
+}
+
+/** The name a layer currently shows, read from the document the application really persisted. */
+async function currentLayerName(page: Page, id: string): Promise<string> {
+  const layer = (await storedScene(page)).layers.find((candidate) => String(candidate.id) === id);
+  if (!layer) throw new Error(`the stored document no longer holds layer ${id}`);
+  return layer.name;
+}
+
+/**
+ * The row toggle for a layer, whatever state it is in: Hide when visible, Show when hidden.
+ *
+ * Resolved against the name the document currently holds, so the accessible name asked for is the one
+ * the button really carries.
+ */
+async function rowToggle(
+  page: Page,
+  name: string,
+  kind: 'Hide' | 'Show' | 'Lock' | 'Unlock',
+): Promise<Locator> {
+  const current = await currentLayerName(page, fixtureLayer(name).id);
+  return page.getByRole('button', { name: `${kind} \u201c${current}\u201d`, exact: true });
 }
 
 /**
@@ -152,8 +213,8 @@ function rowToggle(page: Page, name: string, kind: 'Hide' | 'Show' | 'Lock' | 'U
  * prepared any number of times without accumulating edits.
  */
 async function setVisibility(page: Page, name: string, visible: boolean): Promise<void> {
-  const visibleToggle = rowToggle(page, name, 'Hide');
-  const hiddenToggle = rowToggle(page, name, 'Show');
+  const visibleToggle = await rowToggle(page, name, 'Hide');
+  const hiddenToggle = await rowToggle(page, name, 'Show');
   const alreadyVisible = (await visibleToggle.count()) > 0;
   if (alreadyVisible === visible) return;
   await (visible ? hiddenToggle : visibleToggle).click();
@@ -162,8 +223,8 @@ async function setVisibility(page: Page, name: string, visible: boolean): Promis
 
 /** Leaves a layer locked or unlocked, clicking only when it is not already in that state. */
 async function setLocked(page: Page, name: string, locked: boolean): Promise<void> {
-  const lockedToggle = rowToggle(page, name, 'Unlock');
-  const unlockedToggle = rowToggle(page, name, 'Lock');
+  const lockedToggle = await rowToggle(page, name, 'Unlock');
+  const unlockedToggle = await rowToggle(page, name, 'Lock');
   const alreadyLocked = (await lockedToggle.count()) > 0;
   if (alreadyLocked === locked) return;
   await (locked ? unlockedToggle : lockedToggle).click();
@@ -208,23 +269,29 @@ async function describeSelection(page: Page): Promise<string> {
       const labelled = (element as HTMLInputElement).labels;
       return labelled ? [...labelled].map((label) => label.textContent).join(' ') : '';
     };
-    const named = [...document.querySelectorAll('input, textarea, select, button')].filter(
-      (element) => /layer name/i.test(labelOf(element)),
-    );
+    const inspector = document.querySelector('section[aria-labelledby="inspector-selection"]');
+    const nameFields = inspector
+      ? [...inspector.querySelectorAll('input, textarea, select')].filter((element) =>
+          /layer\s*name/i.test(labelOf(element)),
+        )
+      : [];
     const current = [
       ...document.querySelectorAll<HTMLElement>(
         '[data-testid^="layer-name-"][aria-current="true"]',
       ),
     ];
-    const text = (element: HTMLElement): string => element.textContent.trim().slice(0, 40);
+    // A row's name is its first span: the button's whole text also carries the type and the size, and
+    // reading all of it is what made an earlier report unreadable.
+    const nameOf = (element: HTMLElement): string =>
+      (element.querySelector('span')?.textContent ?? element.textContent).trim().slice(0, 40);
     return [
       `rows=${String(document.querySelectorAll('[data-testid^="layer-row-"]').length)}`,
       `selectedRows=${String(current.length)}`,
-      `selected=${JSON.stringify(current.slice(0, 3).map(text))}`,
+      `selected=${JSON.stringify(current.slice(0, 3).map(nameOf))}`,
       `inspectors=${String(document.querySelectorAll('section[aria-labelledby="inspector-selection"]').length)}`,
       `heading=${JSON.stringify((document.getElementById('inspector-selection')?.textContent ?? '(none)').slice(0, 40))}`,
-      `nameFields=${String(named.length)}`,
-      `values=${JSON.stringify(named.slice(0, 3).map((element) => (element as HTMLInputElement).value))}`,
+      `nameFields=${String(nameFields.length)}`,
+      `values=${JSON.stringify(nameFields.slice(0, 3).map((element) => (element as HTMLInputElement).value))}`,
     ].join(' ');
   });
 }
@@ -284,9 +351,20 @@ function activates(row: Locator, timeout = 1_000): Promise<boolean> {
  * selection (see `describeSelection`) comes first in the message so truncation cannot hide it.
  */
 async function selectOnlyLayer(page: Page, name: string): Promise<void> {
+  const { id } = fixtureLayer(name);
   try {
-    const row = layerButton(page, name);
-    await expect(row, `the layer list should hold exactly one row for “${name}”`).toHaveCount(1, {
+    // The fixture's name is a contract, so it is checked against what the application persisted
+    // before anything is measured: a document whose layer was renamed would otherwise be measured as
+    // "the layer called Content card" while describing a different picture.
+    const stored = await currentLayerName(page, id);
+    if (stored !== name) {
+      throw new Error(
+        `layer ${id} is named “${stored}” in the document, the fixture calls it “${name}”`,
+      );
+    }
+
+    const row = layerButtonById(page, id);
+    await expect(row, `the layer list should hold exactly one row for ${id}`).toHaveCount(1, {
       timeout: ACTION_TIMEOUT,
     });
     await row.scrollIntoViewIfNeeded();
@@ -324,8 +402,120 @@ async function selectOnlyLayer(page: Page, name: string): Promise<void> {
 
 /** Adds a layer to the selection with the modifier click the list supports. */
 async function extendSelection(page: Page, name: string): Promise<void> {
-  await layerButton(page, name).click({ modifiers: ['Shift'] });
-  await expect(layerButton(page, name)).toHaveAttribute('aria-current', 'true');
+  const row = layerButtonById(page, fixtureLayer(name).id);
+  await row.click({ modifiers: ['Shift'] });
+  await expect(row, `\u201c${name}\u201d should join the selection`).toHaveAttribute(
+    'aria-current',
+    'true',
+  );
+}
+
+/**
+ * Puts a layer's frame back where the fixture defines it, through the inspector's own fields.
+ *
+ * The measured gestures really move and resize layers. By the fifth or twelfth sample a dragged layer
+ * can sit under a later one and a resized layer can grow away from the handle the previous sample
+ * grabbed, so the "same" measurement would start from a different place each time — or from a layer
+ * the hit test no longer reaches. Resetting through the inspector is the app's own command path (the
+ * same fields a person types into) and happens before the measurement starts, never inside it.
+ */
+async function resetFrame(page: Page, name: string): Promise<void> {
+  const frame = fixtureLayer(name).frame;
+  await selectOnlyLayer(page, name);
+  // One field per commit, each confirmed against the document the application saved. Two inspector
+  // commits in the same render would otherwise race: the second handler still closes over the frame
+  // from before the first commit, so a fast pair can put the first field back where it started.
+  const steps = [
+    ['Layer X', frame.x, { x: frame.x }],
+    ['Layer Y', frame.y, { y: frame.y }],
+    ['Layer width', frame.width, { width: frame.width }],
+    ['Layer height', frame.height, { height: frame.height }],
+  ] as const satisfies readonly (readonly [string, number, LayerExpectation])[];
+  for (const [label, value, expectation] of steps) {
+    await setInspectorField(page, label, value);
+    await expectStoredLayer(page, name, expectation);
+  }
+}
+
+/**
+ * Waits until the document the application *saved* shows the frame the preparation committed.
+ *
+ * The store is ahead of the saved bytes, and the saved bytes are where a drag's coordinates come
+ * from: measuring before the save lands would aim the pointer at where the layer used to be — which
+ * is how a preparation that looked correct ended up reporting that a layer was covered everywhere.
+ */
+async function expectStoredLayer(
+  page: Page,
+  name: string,
+  expected: LayerExpectation,
+): Promise<void> {
+  const { id } = fixtureLayer(name);
+  const wanted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(expected)) {
+    wanted[key] = typeof value === 'number' ? Math.round(value) : value;
+  }
+  await expect
+    .poll(
+      async () => {
+        const layer = (await storedScene(page)).layers.find(
+          (candidate) => String(candidate.id) === id,
+        );
+        if (!layer) return null;
+        const seen: Record<string, unknown> = {};
+        for (const key of Object.keys(wanted)) {
+          if (key === 'visible' || key === 'locked') seen[key] = layer[key];
+          else if (key === 'x' || key === 'y' || key === 'width' || key === 'height') {
+            seen[key] = Math.round(layer.frame[key]);
+          }
+        }
+        return seen;
+      },
+      {
+        message: `“${name}” is not in the state the preparation committed: ${Object.keys(wanted)
+          .map((key) => `${key}=${String(wanted[key])}`)
+          .join(', ')}`,
+      },
+    )
+    .toEqual(wanted);
+}
+
+/**
+ * Makes a layer reachable by the pointer: visible and unlocked.
+ *
+ * The row scenarios leave the document in whatever state they measured — the redo scenario ends with
+ * the layer it re-hid still hidden — and a hidden layer is invisible to the application's own hit
+ * test, so a later drag would fail to grab it anywhere. Restoring it is preparation, not measurement.
+ */
+async function makeReachable(page: Page, name: string): Promise<void> {
+  await setVisibility(page, name, true);
+  await setLocked(page, name, false);
+  await expectStoredLayer(page, name, { visible: true, locked: false });
+}
+
+/** A number the inspector commits, scoped to the selection inspector's own fields. */
+async function setInspectorField(page: Page, label: string, value: number): Promise<void> {
+  const field = selectionInspector(page).getByLabel(label, { exact: true });
+  await expect(
+    field,
+    `the selection inspector should hold exactly one “${label}” field`,
+  ).toHaveCount(1);
+  await field.fill(String(value));
+  await field.press('Enter');
+  await expect(field).toHaveValue(String(value));
+}
+
+/**
+ * Puts focus on the artboard before an undo/redo measurement.
+ *
+ * A field that is still being edited commits when it loses focus, and that commit is a real edit: it
+ * clears the redo branch. Focusing the stage first — what a person does on the way to the history
+ * panel — lets any such commit land *before* the step that is about to be measured, instead of in
+ * the middle of it.
+ */
+async function settleEditing(page: Page): Promise<void> {
+  const surface = page.locator('[data-testid="artboard-surface"]');
+  await surface.focus();
+  await expect(surface, 'the artboard should hold focus before the history step').toBeFocused();
 }
 
 /* ------------------------------------------------------------------ coordinates from the document */
@@ -337,19 +527,24 @@ async function extendSelection(page: Page, name: string): Promise<void> {
  * is really on top. Scanning and asking `hitTestScene` — the same function the pointer handler runs —
  * keeps that honest: a miss is reported rather than silently measuring a drag of the wrong layer.
  */
-function grabPoint(scene: Scene, name: string): { readonly x: number; readonly y: number } {
-  const layer = scene.layers.find((candidate) => candidate.name === name);
-  if (!layer) throw new Error(`the fixture has no layer named “${name}”`);
-  for (let row = 2; row <= 8; row += 1) {
-    for (let column = 2; column <= 8; column += 1) {
+function grabPoint(scene: Scene, id: string): { readonly x: number; readonly y: number } {
+  const layer = scene.layers.find((candidate) => String(candidate.id) === id);
+  if (!layer) throw new Error(`the stored document has no layer ${id} to grab`);
+  let coveredBy: string | null = null;
+  for (let row = 1; row <= 9; row += 1) {
+    for (let column = 1; column <= 9; column += 1) {
       const point = {
         x: layer.frame.x + (layer.frame.width * column) / 10,
         y: layer.frame.y + (layer.frame.height * row) / 10,
       };
-      if (hitTestScene(scene, point, { includeLocked: true })?.name === name) return point;
+      const hit = hitTestScene(scene, point, { includeLocked: true });
+      if (String(hit?.id) === id) return point;
+      coveredBy ??= hit ? `${String(hit.id)} (${hit.name})` : 'nothing';
     }
   }
-  throw new Error(`no point inside “${name}” hits it: another layer covers it everywhere`);
+  throw new Error(
+    `no point inside layer ${id} (${layer.name}, ${String(layer.visible ? 'visible' : 'hidden')}) hits it: ${coveredBy ?? 'nothing'} covers it everywhere`,
+  );
 }
 
 /**
@@ -369,6 +564,103 @@ async function storedScene(page: Page): Promise<Scene> {
   return migrated.value.scene;
 }
 
+/**
+ * Layers whose name no longer matches the fixture.
+ *
+ * The benchmark publishes numbers for *this* document, so a run that quietly renamed a layer would be
+ * measuring something else while still calling itself the thirty-layer fixture. A drifted name is
+ * reported as a failure of the scenario that was being measured — never as a passing measurement.
+ */
+function renamedLayers(scene: Scene): string[] {
+  const expected = new Map(DOCUMENT.scene.layers.map((layer) => [String(layer.id), layer.name]));
+  return scene.layers
+    .filter(
+      (layer) => expected.has(String(layer.id)) && expected.get(String(layer.id)) !== layer.name,
+    )
+    .map(
+      (layer) => `${String(layer.id)} “${expected.get(String(layer.id)) ?? ''}”→“${layer.name}”`,
+    );
+}
+
+/**
+ * The grounded kind of pointer interaction: `page.mouse` presses exactly where it is told.
+ *
+ * That is the point of using it — no auto-waiting, no retrying, no "scroll into view" that would
+ * change what is being measured — but it also means a press aimed at the wrong pixel lands on
+ * whatever the interface happens to have underneath. This spec learned that the expensive way: with
+ * a resize handle that had been pushed outside the artboard, the next sample's press landed on the
+ * inspector's “Layer name” label, Chromium turned the press-and-move into a native drag of that
+ * label's text, dropped it into the name field, and **renamed a layer of the document being
+ * measured**. The benchmark then failed to prepare a later scenario, and reported it as a
+ * preparation failure — which is how it must behave, but the harness is what should not have done it.
+ *
+ * So every raw press is checked first against the page's own hit test, and a miss is a *preparation
+ * failure that names what is really there* rather than a silent interaction with the wrong element.
+ */
+function pointedAt(page: Page, point: { readonly x: number; readonly y: number }) {
+  return page.evaluate(
+    ({ x, y }) => {
+      const element = document.elementFromPoint(x, y);
+      if (!element) return { inside: false, describes: 'nothing' };
+      const surface = document.querySelector('[data-testid="artboard-surface"]');
+      const inside = surface ? surface.contains(element) : false;
+      const describes =
+        element.getAttribute('data-testid') ??
+        element.getAttribute('aria-label') ??
+        element.tagName.toLowerCase();
+      return { inside, describes };
+    },
+    { x: point.x, y: point.y },
+  );
+}
+
+/**
+ * The point inside an element's box that a press should use: its centre, or a corner when something
+ * overlaps the centre — and a failure naming the covering element when nothing in the box is the
+ * element itself.
+ *
+ * Choosing a different point within the *same control* is not a weakened measurement: the interaction
+ * is still a real press on the real handle, and the alternative is a press that misses it.
+ */
+async function pressPoint(
+  element: Locator,
+  what: string,
+): Promise<{ readonly x: number; readonly y: number }> {
+  const box = await element.boundingBox();
+  if (!box) throw new Error(`${what} has no box on screen, so it cannot be pressed`);
+  const candidates: readonly (readonly [number, number])[] = [
+    [0.5, 0.5],
+    [0.45, 0.45],
+    [0.55, 0.55],
+    [0.45, 0.55],
+    [0.55, 0.45],
+  ];
+  const seen: string[] = [];
+  for (const [fx, fy] of candidates) {
+    const point = { x: box.x + box.width * fx, y: box.y + box.height * fy };
+    const target = await element.evaluate((node, coordinates) => {
+      const element2 = node.ownerDocument.elementFromPoint(coordinates.x, coordinates.y);
+      if (!element2) return 'nothing';
+      if (element2 === node || node.contains(element2)) return 'itself';
+      return (
+        element2.getAttribute('data-testid') ??
+        element2.getAttribute('aria-label') ??
+        element2.tagName.toLowerCase()
+      );
+    }, point);
+    if (target === 'itself') return point;
+    seen.push(`${fx}×${fy}=${target}`);
+  }
+  throw new Error(`${what} is not hittable anywhere in its box: ${seen.join(', ')}`);
+}
+
+/** Drops any text selection, so a stray press cannot turn one into a native drag of its text. */
+async function clearSelection(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    window.getSelection()?.removeAllRanges();
+  });
+}
+
 /** A stepped pointer drag with the frame loop watching, in document pixels. */
 async function dragWithFrames(
   page: Page,
@@ -378,6 +670,14 @@ async function dragWithFrames(
 ): Promise<FrameStats> {
   const start = await pointInDocument(page, from);
   const end = await pointInDocument(page, to);
+  // The press has to land on the canvas: a drag that starts on the surrounding interface would
+  // measure (and drag) something that is not the document at all.
+  const atStart = await pointedAt(page, start);
+  if (!atStart.inside) {
+    throw new Error(
+      `a drag from document ${JSON.stringify(from)} would press on ${atStart.describes}, which is not the artboard`,
+    );
+  }
   return measureFrames(page, async () => {
     await page.mouse.move(start.x, start.y);
     await page.mouse.down();
@@ -400,13 +700,13 @@ async function dragLayer(
   name: string,
   delta: { readonly x: number; readonly y: number },
 ): Promise<FrameStats> {
-  const from = grabPoint(await storedScene(page), name);
+  const from = grabPoint(await storedScene(page), fixtureLayer(name).id);
   return dragWithFrames(page, from, { x: from.x + delta.x, y: from.y + delta.y });
 }
 
 /** The number a field currently shows, so a scenario can alternate around the real value. */
 async function fieldValue(page: Page, label: string): Promise<number> {
-  return Number(await page.getByLabel(label, { exact: true }).inputValue());
+  return Number(await selectionInspector(page).getByLabel(label, { exact: true }).inputValue());
 }
 
 /* ------------------------------------------------------------------ the scenarios */
@@ -418,10 +718,12 @@ const SCENARIOS: readonly Scenario[] = [
     metric: 'interaction',
     prepare: async () => {},
     run: async (page, sample) => {
-      const names = (await storedScene(page)).layers.map((layer) => layer.name);
-      const name = names[(sample * 3 + 1) % names.length] ?? 'Headline';
+      // Addressed by id, not by the name the document happens to hold: the scenario clicks a row, and
+      // a row that was renamed earlier in the run is still the same row.
+      const layer = DOCUMENT.scene.layers[(sample * 3 + 1) % DOCUMENT.scene.layers.length];
+      if (!layer) throw new Error('the fixture has no layers');
       return measureInteraction(page, 'select-layer', ['click'], async () => {
-        await layerButton(page, name).click();
+        await layerButtonById(page, String(layer.id)).click();
       });
     },
   },
@@ -447,7 +749,7 @@ const SCENARIOS: readonly Scenario[] = [
     },
     run: async (page) => {
       const measured = await measureInteraction(page, 'hide-layer', ['click'], async () => {
-        await rowToggle(page, 'Dateline', 'Hide').click();
+        await (await rowToggle(page, 'Dateline', 'Hide')).click();
       });
       await setVisibility(page, 'Dateline', true);
       return measured;
@@ -462,7 +764,7 @@ const SCENARIOS: readonly Scenario[] = [
     },
     run: async (page) => {
       const measured = await measureInteraction(page, 'lock-layer', ['click'], async () => {
-        await rowToggle(page, 'Footer stamp', 'Lock').click();
+        await (await rowToggle(page, 'Footer stamp', 'Lock')).click();
       });
       await setLocked(page, 'Footer stamp', false);
       return measured;
@@ -477,7 +779,7 @@ const SCENARIOS: readonly Scenario[] = [
     },
     run: async (page, sample) => {
       const current = await fieldValue(page, 'Layer X');
-      const field = page.getByLabel('Layer X', { exact: true });
+      const field = selectionInspector(page).getByLabel('Layer X', { exact: true });
       await field.fill(String(Math.round(sample % 2 === 0 ? current + 12 : current - 12)));
       return measureInteraction(page, 'inspector-x', ['keydown'], async () => {
         await field.press('Enter');
@@ -493,7 +795,7 @@ const SCENARIOS: readonly Scenario[] = [
     },
     run: async (page, sample) => {
       const current = await fieldValue(page, 'Layer width');
-      const field = page.getByLabel('Layer width', { exact: true });
+      const field = selectionInspector(page).getByLabel('Layer width', { exact: true });
       await field.fill(String(Math.round(sample % 2 === 0 ? current + 20 : current - 20)));
       return measureInteraction(page, 'inspector-width', ['keydown'], async () => {
         await field.press('Enter');
@@ -506,7 +808,7 @@ const SCENARIOS: readonly Scenario[] = [
     metric: 'interaction',
     prepare: async (page) => {
       await selectOnlyLayer(page, 'Accent dot');
-      await page.getByLabel('Layer opacity').focus();
+      await selectionInspector(page).getByLabel('Layer opacity').focus();
     },
     run: async (page, sample) => {
       const key = sample % 2 === 0 ? 'ArrowLeft' : 'ArrowRight';
@@ -523,14 +825,21 @@ const SCENARIOS: readonly Scenario[] = [
       await setVisibility(page, 'Footer note', true);
     },
     run: async (page) => {
-      // A real edit first, so there is something to step back to; then the measured step back.
-      await rowToggle(page, 'Footer note', 'Hide').click();
-      await expect(historyButton(page, 'Undo')).toBeEnabled();
+      // Settle first: this scenario measures the step back, not a field commit that happens to land
+      // at the same time.
+      await settleEditing(page);
+      await (await rowToggle(page, 'Footer note', 'Hide')).click();
+      await expect(
+        historyButton(page, 'Undo'),
+        'hiding a layer should be an undoable step',
+      ).toBeEnabled();
       const measured = await measureInteraction(page, 'undo', ['click'], async () => {
         await historyButton(page, 'Undo').click();
       });
-      // Put the document back into the state the undo produced, whichever way it ended up.
-      await setVisibility(page, 'Footer note', false);
+      // The measured step has to have done its job: the row is offering Hide again, and the redo it
+      // left behind is what the next scenario needs.
+      await expect(await rowToggle(page, 'Footer note', 'Hide')).toBeVisible();
+      await expect(historyButton(page, 'Redo'), 'undone work should be redoable').toBeEnabled();
       return measured;
     },
   },
@@ -542,13 +851,19 @@ const SCENARIOS: readonly Scenario[] = [
       await setVisibility(page, 'Quote', true);
     },
     run: async (page) => {
-      await rowToggle(page, 'Quote', 'Hide').click();
+      await settleEditing(page);
+      await (await rowToggle(page, 'Quote', 'Hide')).click();
+      await expect(
+        historyButton(page, 'Undo'),
+        'hiding a layer should be an undoable step',
+      ).toBeEnabled();
       await historyButton(page, 'Undo').click();
-      await expect(historyButton(page, 'Redo')).toBeEnabled();
+      await expect(historyButton(page, 'Redo'), 'redoing needs the undone step').toBeEnabled();
       const measured = await measureInteraction(page, 'redo', ['click'], async () => {
         await historyButton(page, 'Redo').click();
       });
-      await setVisibility(page, 'Quote', true);
+      // The measured redo has to have re-applied the hidden state.
+      await expect(await rowToggle(page, 'Quote', 'Show')).toBeVisible();
       return measured;
     },
   },
@@ -557,7 +872,9 @@ const SCENARIOS: readonly Scenario[] = [
     how: 'drag one text layer across the canvas',
     metric: 'frames',
     prepare: async (page) => {
-      await selectOnlyLayer(page, 'Quote');
+      await makeReachable(page, 'Quote');
+      await resetFrame(page, 'Quote');
+      await clearSelection(page);
     },
     run: async (page, sample) => {
       const direction = sample % 2 === 0 ? 1 : -1;
@@ -569,13 +886,22 @@ const SCENARIOS: readonly Scenario[] = [
     how: 'drag a three-layer selection',
     metric: 'frames',
     prepare: async (page) => {
+      // Every layer the group drags goes back to its fixture place, then the group is built again:
+      // three layers that drifted apart would otherwise answer a different question each sample.
+      for (const name of ['Intro copy', 'Offer line', 'Notes']) {
+        await makeReachable(page, name);
+      }
+      await resetFrame(page, 'Intro copy');
+      await resetFrame(page, 'Offer line');
+      await resetFrame(page, 'Notes');
+      await clearSelection(page);
       await selectOnlyLayer(page, 'Intro copy');
       await extendSelection(page, 'Offer line');
       await extendSelection(page, 'Notes');
     },
     run: async (page, sample) => {
       const direction = sample % 2 === 0 ? 1 : -1;
-      const from = grabPoint(await storedScene(page), 'Intro copy');
+      const from = grabPoint(await storedScene(page), fixtureLayer('Intro copy').id);
       return dragWithFrames(page, from, {
         x: from.x + 30 * direction,
         y: from.y + 20 * direction,
@@ -587,21 +913,29 @@ const SCENARIOS: readonly Scenario[] = [
     how: 'drag the bottom-right handle to resize a layer',
     metric: 'frames',
     prepare: async (page) => {
-      await selectOnlyLayer(page, 'Content card');
+      // The handle has to be where the previous sample left it, not where a chain of resizes put it.
+      const frame = fixtureLayer('Content card').frame;
+      await makeReachable(page, 'Content card');
+      await resetFrame(page, 'Content card');
+      await expectStoredLayer(page, 'Content card', {
+        x: frame.x,
+        y: frame.y,
+        width: frame.width,
+        height: frame.height,
+      });
+      await clearSelection(page);
     },
     run: async (page, sample) => {
       const handle = page.getByRole('button', { name: 'Resize bottom right' });
-      const box = await handle.boundingBox();
-      if (!box) throw new Error('the bottom-right handle has no box');
+      // Checked before the measurement starts: the press has to be on the handle, not merely on the
+      // coordinates the handle's box reports — an off-artboard handle would otherwise press the rail.
+      const from = await pressPoint(handle, 'the bottom-right resize handle');
       const direction = sample % 2 === 0 ? 1 : -1;
       return measureFrames(page, async () => {
-        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.move(from.x, from.y);
         await page.mouse.down();
         for (let step = 1; step <= 18; step += 1) {
-          await page.mouse.move(
-            box.x + box.width / 2 + step * 3 * direction,
-            box.y + box.height / 2 + step * 2 * direction,
-          );
+          await page.mouse.move(from.x + step * 3 * direction, from.y + step * 2 * direction);
           await page.waitForTimeout(6);
         }
         await page.mouse.up();
@@ -696,6 +1030,19 @@ async function runPhase(
           scenarioError = error instanceof Error ? error.message : String(error);
           await resetPerfRecorder(page);
           break;
+        }
+      }
+
+      // The fixture's names are part of what these numbers are about: a rename is a failure, not a
+      // measurement of the fixture document.
+      try {
+        const drifted = renamedLayers(await storedScene(page));
+        if (scenarioError === null && drifted.length > 0) {
+          scenarioError = `the measured document is no longer the fixture document: ${drifted.join('; ')}`;
+        }
+      } catch {
+        if (scenarioError === null) {
+          scenarioError = 'the stored document could not be read back to check the fixture';
         }
       }
 

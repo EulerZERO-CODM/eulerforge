@@ -218,9 +218,11 @@ call site rather than from memory:
 
 ## Known gaps
 
-- **No Chromium in this development sandbox.** `e2e/undo-redo.spec.ts` is written and listed by
-  `npx playwright test --list`, and runs in the `Browser (Chromium)` CI job; nothing here was executed
-  on the machine that wrote it. Its first run was that CI job, and it found three genuine problems:
+- **Chromium only, and the sandbox runs a different build from CI.** `e2e/undo-redo.spec.ts` runs in the
+  `Browser (Chromium)` CI job on Playwright's own Chromium 156, and it also runs here — this sandbox
+  cannot reach Playwright's browser CDN, so it uses a Chromium 153 binary from the `@sparticuz/chromium`
+  npm package instead. Both found genuine problems, starting with the spec's first CI run, which found
+  three:
   the walk back to the document a test starts from is *not* the floor of the history — the fixture
   creates both layers through the workspace, so those are undoable steps too; an unqualified
   `getByRole('alert')` matched Next's route announcer as well as the field's error; and, the one that
