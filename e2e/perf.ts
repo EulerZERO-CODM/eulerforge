@@ -351,11 +351,21 @@ function markdownTable(rows: readonly ScenarioRow[]): string {
  * Every row is written into the file as soon as it is measured, so a run that fails halfway still
  * publishes what it managed to measure. The same markdown is handed to the assertion message, which
  * is what makes a red check-run carry its own evidence.
+ *
+ * Failures are kept in two lists, because they mean different things. A **budget miss** is a measured
+ * scenario that was slower than the budget it was measured against — that is a finding about the
+ * product. A **preparation failure** is a scenario the harness could not drive into the state it
+ * needs: no measurement was taken, no budget was compared, and the report says so rather than
+ * presenting the absence of a number as a result. Both fail the benchmark; only the first is about
+ * speed, and a run that produced no measurements must never read as a run that stayed inside budget.
  */
 export class PerfReport {
   private readonly rows: ScenarioRow[] = [];
   private readonly notes: string[] = [];
-  private readonly failures: string[] = [];
+  /** Measured scenarios that were slower than their budget. */
+  private readonly overBudget: string[] = [];
+  /** Scenarios that could not be measured at all: a test failure, not a budget verdict. */
+  private readonly blocked: string[] = [];
 
   public constructor(
     private readonly title: string,
@@ -366,7 +376,7 @@ export class PerfReport {
   public add(row: ScenarioRow): void {
     this.rows.push(row);
     if (row.verdict === 'fail') {
-      this.failures.push(
+      this.overBudget.push(
         `${row.scenario} (${row.phase}): p95 ${row.p95.toFixed(1)}ms / worst ${row.worst.toFixed(1)}ms against ${row.budget}`,
       );
     }
@@ -388,7 +398,7 @@ export class PerfReport {
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
     const summary = truncate(lines.slice(0, 4).join(' | '), 320);
-    this.failures.push(`${phase} ${scenario}: ${summary}`);
+    this.blocked.push(`${scenario} (${phase}): not measured — ${summary}`);
     this.rows.push({
       scenario,
       how: 'the scenario could not be completed',
@@ -404,8 +414,9 @@ export class PerfReport {
     this.write();
   }
 
+  /** Every failure, budget misses first. A non-empty list is what fails the benchmark. */
   public failureLines(): readonly string[] {
-    return this.failures;
+    return [...this.overBudget, ...this.blocked];
   }
 
   public markdown(): string {
@@ -420,11 +431,23 @@ export class PerfReport {
       /* The outcome comes before the table on purpose. This markdown is the failure message of the
          spec, and a check-run annotation is truncated at a few thousand characters: putting the
          verdict first is what makes a red run explain itself in the place a reader actually sees. */
-      this.failures.length === 0
+      this.overBudget.length === 0 && this.blocked.length === 0
         ? '**Result: every gated scenario stayed inside its budget.**'
-        : ['**Result: budget missed**', '', ...this.failures.map((failure) => `- ${failure}`)].join(
-            '\n',
-          ),
+        : [
+            this.overBudget.length > 0
+              ? `**Result: budget missed by ${String(this.overBudget.length)} scenario(s).**`
+              : '**Result: no scenario that was measured missed its budget.**',
+            '',
+            ...this.overBudget.map((failure) => `- ${failure}`),
+            ...(this.blocked.length > 0
+              ? [
+                  '',
+                  `**${String(this.blocked.length)} scenario phase(s) could not be measured.** No budget was compared for these, so this run is not a performance result for them — they are harness failures and are reported as such rather than as slowness:`,
+                  '',
+                  ...this.blocked.map((failure) => `- ${failure}`),
+                ]
+              : []),
+          ].join('\n'),
       '',
       markdownTable(this.rows),
       '',
@@ -440,7 +463,9 @@ export class PerfReport {
         environment: this.environment,
         rows: this.rows,
         notes: this.notes,
-        failures: this.failures,
+        failures: this.failureLines(),
+        overBudget: this.overBudget,
+        blocked: this.blocked,
       },
       null,
       2,

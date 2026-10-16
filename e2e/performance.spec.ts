@@ -27,7 +27,7 @@
 
 import { cpus } from 'node:os';
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { CURRENT_SCHEMA_VERSION, migrateDocument } from '../src/core/documents/migrations';
 import { hitTestScene } from '../src/core/documents/scene-geometry';
@@ -184,16 +184,17 @@ function selectionInspector(page: Page) {
 }
 
 /**
- * What the selection surfaces look like right now, appended to a preparation failure.
+ * What the selection surfaces look like right now, carried by a preparation failure.
  *
- * A rejected preparation step has to explain itself. Playwright's strict-mode error names the locator
- * and a count, and the count alone does not say *which* surface produced the extra elements, so this
- * reports the parts a locator engine looks at — associated `<label>`, `aria-label` and
- * `aria-labelledby` — for the name fields it finds, plus the selection inspector's own heading.
- * A red run therefore carries its diagnosis in the check-run annotation instead of needing a rerun.
+ * A rejected preparation step has to explain itself, and the check-run annotation that publishes a
+ * failure is truncated: this is one short, decisive line rather than a dump. It answers the questions
+ * that separate the possible causes — did the list still hold every row (`rows`), did *any* row become
+ * the current one (`selectedRows`) and which (`selected`), what does the selection inspector say it is
+ * editing (`heading`), and how many name fields with which values exist in the whole document
+ * (`nameFields`, `values`). It goes *first* in the error message so truncation cannot remove it.
  */
 async function describeSelection(page: Page): Promise<string> {
-  const summary = await page.evaluate(() => {
+  return page.evaluate(() => {
     const labelOf = (element: Element): string => {
       const referenced = element.getAttribute('aria-labelledby');
       if (referenced) {
@@ -210,36 +211,77 @@ async function describeSelection(page: Page): Promise<string> {
     const named = [...document.querySelectorAll('input, textarea, select, button')].filter(
       (element) => /layer name/i.test(labelOf(element)),
     );
-    const inspectors = [
-      ...document.querySelectorAll('section[aria-labelledby="inspector-selection"]'),
+    const current = [
+      ...document.querySelectorAll<HTMLElement>(
+        '[data-testid^="layer-name-"][aria-current="true"]',
+      ),
     ];
-    return {
-      inspectors: inspectors.length,
-      headings: inspectors.map((element) => element.querySelector('h3')?.textContent ?? '(no h3)'),
-      nameFields: named.length,
-      nameValues: named.slice(0, 12).map((element) => (element as HTMLInputElement).value),
-      nameMarkup: named.slice(0, 3).map((element) => element.outerHTML.slice(0, 100)),
-      rows: document.querySelectorAll('[data-testid^="layer-row-"]').length,
-      selectedRows: document.querySelectorAll('[data-testid^="layer-name-"][aria-current="true"]')
-        .length,
-    };
+    const text = (element: HTMLElement): string => element.textContent.trim().slice(0, 40);
+    return [
+      `rows=${String(document.querySelectorAll('[data-testid^="layer-row-"]').length)}`,
+      `selectedRows=${String(current.length)}`,
+      `selected=${JSON.stringify(current.slice(0, 3).map(text))}`,
+      `inspectors=${String(document.querySelectorAll('section[aria-labelledby="inspector-selection"]').length)}`,
+      `heading=${JSON.stringify((document.getElementById('inspector-selection')?.textContent ?? '(none)').slice(0, 40))}`,
+      `nameFields=${String(named.length)}`,
+      `values=${JSON.stringify(named.slice(0, 3).map((element) => (element as HTMLInputElement).value))}`,
+    ].join(' ');
   });
-  return JSON.stringify(summary);
+}
+
+/**
+ * Names whose selection needed the pointer fallback, so the report can say so instead of hiding it.
+ * A preparation detail is worth publishing: if the keyboard path stops working, that is a finding.
+ */
+const pointerFallback = new Set<string>();
+
+/**
+ * Whether this row became the current row within a second, resolved in the page.
+ *
+ * The attribute appears when React has committed the selection, which is a microtask after the click
+ * the Enter key produced — not necessarily before the next round trip from the test. Observing the
+ * attribute instead of reading it once keeps a fast activation from triggering the fallback by timing
+ * alone, while a button that was never activated still falls through in a second rather than in the
+ * twenty-second action timeout.
+ */
+function activates(row: Locator, timeout = 1_000): Promise<boolean> {
+  return row.evaluate(
+    (element, limit) =>
+      element.getAttribute('aria-current') === 'true'
+        ? true
+        : new Promise<boolean>((resolve) => {
+            const observer = new MutationObserver(() => {
+              if (element.getAttribute('aria-current') !== 'true') return;
+              observer.disconnect();
+              resolve(true);
+            });
+            observer.observe(element, { attributes: true, attributeFilter: ['aria-current'] });
+            window.setTimeout(() => {
+              observer.disconnect();
+              resolve(element.getAttribute('aria-current') === 'true');
+            }, limit);
+          }),
+    timeout,
+  );
 }
 
 /**
  * Prepares the measured interaction: leaves one named layer selected, or fails loudly.
  *
- * Keyboard, not a pointer click, and deliberately so. This is not the interaction under measurement —
- * the measured click happens inside the scenario — and focusing the row and pressing Enter is the
- * list's own keyboard path, with no coordinates to land on, so the preparation cannot click a
- * neighbouring row while the list is still settling.
+ * Two activation paths, both real: the list's own keyboard path (focus the row, press Enter — its
+ * native button activation) and, when that does not take, the pointer click every other spec in this
+ * suite uses. The keyboard path is tried first because it has no coordinates to land on, so it cannot
+ * click a neighbouring row while the list is still settling; the pointer path is the fallback because
+ * a window that lost focus mid-run leaves Enter with nothing to activate, and a preparation step that
+ * silently kept the *previous* selection would make every later assertion describe the wrong layer.
+ * Whichever path actually ran is recorded and published by the report — and neither of them is the
+ * measurement, which happens inside the scenario with real pointer input.
  *
- * Every step asserts a stated quantity rather than relying on a locator being unique by luck: the row
- * has to exist once, it has to be the selected row, the workspace has to render exactly one selection
- * inspector, and that inspector has to hold exactly one name field showing the named layer. A failure
- * here is a *test* failure, never a budget failure, and it carries the page's own account of the
- * selection (see `describeSelection`).
+ * Every step then asserts a stated quantity rather than relying on a locator being unique by luck: the
+ * row has to exist once, it has to be the selected row, the workspace has to render exactly one
+ * selection inspector, and that inspector has to hold exactly one name field showing the named layer.
+ * A failure here is a *test* failure, never a budget failure, and the page's own account of the
+ * selection (see `describeSelection`) comes first in the message so truncation cannot hide it.
  */
 async function selectOnlyLayer(page: Page, name: string): Promise<void> {
   try {
@@ -250,6 +292,10 @@ async function selectOnlyLayer(page: Page, name: string): Promise<void> {
     await row.scrollIntoViewIfNeeded();
     await row.focus();
     await page.keyboard.press('Enter');
+    if (!(await activates(row))) {
+      pointerFallback.add(name);
+      await row.click();
+    }
     await expect(row, `“${name}” should be the selected row`).toHaveAttribute(
       'aria-current',
       'true',
@@ -271,7 +317,8 @@ async function selectOnlyLayer(page: Page, name: string): Promise<void> {
     );
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`${reason} — selection state: ${await describeSelection(page)}`);
+    // Diagnostics first: the annotation that publishes this failure is truncated from the end.
+    throw new Error(`selection state: ${await describeSelection(page)} — ${reason}`);
   }
 }
 
@@ -823,6 +870,13 @@ test.describe('a thirty-layer document in a real browser', () => {
       await runPhase(page, 'throttled', report, broken);
       await runPhase(page, 'unthrottled', report, broken);
     } finally {
+      // A preparation that needed the pointer fallback is published rather than hidden: it says which
+      // activation path the harness actually used, and a change there is a finding about the list.
+      if (pointerFallback.size > 0) {
+        report.note(
+          `The keyboard selection path did not take for ${[...pointerFallback].join(', ')}; those preparations used the pointer path instead.`,
+        );
+      }
       // Left in the log for anyone reading the run, and written to test-results/perf-report.md for the
       // CI job that publishes it onto the pull request. Written even when a phase threw, because the
       // numbers already collected are the evidence.
