@@ -165,70 +165,95 @@ anything else.
 ### The two environments these numbers come from
 
 - **CI — the gate.** A GitHub-hosted Ubuntu runner: Node v22.23.3, Chromium 156.0.8078.4 (Playwright's own
-  build), 2 vCPU AMD EPYC 9V74, viewport 1440 × 960 at device pixel ratio 2. The `Browser (Chromium)` job
-  runs this benchmark against the production build and fails the pull request when a *gated* scenario
-  misses its budget. Only this environment's numbers count as acceptance.
-- **This development sandbox — reproduction and iteration.** Node v22.22.3, Chromium 153.0.8010.0, 2 vCPU
+  build), 2 vCPU AMD EPYC (the run below reports a 7763; earlier runs on the same workflow reported a 9V74
+  and a 9V45 — see “Runner variance”), viewport 1440 × 960 at device pixel ratio 2. The
+  `Browser (Chromium)` job runs this benchmark against the production build and fails the pull request when
+  a *gated* scenario misses its budget. This environment's numbers are the acceptance evidence.
+- **A development sandbox — reproduction and iteration.** Node v22.22.3, Chromium 153.0.8010.0, 2 vCPU
   Intel Xeon @ 2.60 GHz. The sandbox cannot reach Playwright's browser CDN, so it runs a Chromium taken
   from the `@sparticuz/chromium` npm package — a different build from CI's. It is the right place to
-  reproduce *behaviour* (locators, preparation, history state) and the wrong place to compare timings
-  with CI.
-- **No mid-range laptop has run this benchmark.** The four-fold throttle is a proxy for that hardware;
-  §4 says what it can and cannot stand for.
+  reproduce *behaviour* (locators, preparation, history state) and the wrong place to compare timings with
+  CI.
+- **No mid-range laptop has run this benchmark.** The four-fold throttle stands in for that hardware; §4
+  says what the proxy can and cannot mean.
 
-Every table below names its environment, and the report header repeats it for each run: the harness
-prints the runtime, the browser version, the CPU model and core count, and the commit it measured
-(`GITHUB_HEAD_SHA`, or `local` when nothing set it).
+Every run's report header names its own environment — runtime, browser build, CPU model and core count —
+and the commit it measured (`GITHUB_HEAD_SHA` in CI, `local` in the sandbox).
 
-### A complete run: all twelve scenarios, both phases
+### The acceptance run: CI, both phases, all twelve scenarios
 
-This is the first run in which every scenario completed in *both* phases: twelve interaction scenarios
-with twelve samples each, three drag scenarios with five drags each, after one unrecorded warm-up pass,
-under the four-fold throttle — and then the same scenarios again at full speed (6 / 3 samples).
-Environment: the sandbox above. Raw report: `test-results/perf-report.{md,json}`, written by
+`43c4008` — the commit that fixed the benchmark's preparation — is the first run in which **every scenario
+completed in both phases** in CI. The `Browser (Chromium)` job of the pull-request workflow passed with
+**44 passed (5.0 m)** (check run `116910114267`, run
+[38881820021](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38881820021); the identical
+push-workflow job is check run `116910141359`, run
+[38881828160](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38881828160)). The job publishes its
+report as a comment on the pull request (`<!-- eulerforge-perf-report -->`), and the numbers below are
+copied from it unchanged:
 
-```
-LD_LIBRARY_PATH=… npx playwright test e2e/performance.spec.ts --grep "stays inside the recorded budget"
-```
-
-**Result: every gated scenario stayed inside its budget.**
+- Commit: `43c40085d6e12509688f3aac55f9ac740c8955ff`
+- Browser: Chromium 156.0.8078.4 · Runtime: Node v22.23.3 on linux x64
+- CPU: 2 vCPU — AMD EPYC 7763 64-Core Processor (GitHub-hosted Ubuntu runner)
+- Gated phase: CDP `Emulation.setCPUThrottlingRate: 4`, 12 interaction samples and 5 drag samples per
+  scenario, after one unrecorded warm-up pass
 
 | Scenario | Phase | n | p50 | p95 | worst |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `select-layer` | throttled | 12 | 25.3 ms | 25.8 ms | 25.8 ms |
-| `select-group` | throttled | 12 | 24.7 ms | 25.4 ms | 25.4 ms |
-| `hide-layer` | throttled | 12 | 25.7 ms | 42.3 ms | 42.3 ms |
-| `lock-layer` | throttled | 12 | 25.7 ms | 37.5 ms | 37.5 ms |
-| `inspector-x` | throttled | 12 | 22.6 ms | 39.1 ms | 39.1 ms |
-| `inspector-width` | throttled | 12 | 22.5 ms | 41.8 ms | 41.8 ms |
-| `opacity-key` | throttled | 12 | 22.4 ms | 45.7 ms | 45.7 ms |
-| `undo` | throttled | 12 | 35.6 ms | 49.9 ms | 49.9 ms |
-| `redo` | throttled | 12 | 20.3 ms | 51.3 ms | 51.3 ms |
-| `drag-layer` | throttled | 5 | 16.7 ms | 16.8 ms | 33.3 ms |
-| `drag-group` | throttled | 5 | 16.7 ms | 16.8 ms | 16.8 ms |
-| `resize-handle` | throttled | 5 | 16.7 ms | 16.7 ms | 16.8 ms |
+| `select-layer` | throttled | 12 | 18.8 ms | 37.7 ms | 37.7 ms |
+| `select-group` | throttled | 12 | 24.2 ms | 40.2 ms | 40.2 ms |
+| `hide-layer` | throttled | 12 | 24.7 ms | 41.8 ms | 41.8 ms |
+| `lock-layer` | throttled | 12 | 24.7 ms | 41.4 ms | 41.4 ms |
+| `inspector-x` | throttled | 12 | 47.1 ms | 52.0 ms | 52.0 ms |
+| `inspector-width` | throttled | 12 | 48.4 ms | 61.3 ms | 61.3 ms |
+| `opacity-key` | throttled | 12 | 26.0 ms | 34.2 ms | 34.2 ms |
+| `undo` | throttled | 12 | 40.2 ms | 49.6 ms | 49.6 ms |
+| `redo` | throttled | 12 | 38.0 ms | 62.6 ms | 62.6 ms |
+| `drag-layer` | throttled | 5 | 16.7 ms | 16.8 ms | 33.5 ms |
+| `drag-group` | throttled | 5 | 16.7 ms | 16.8 ms | 33.4 ms |
+| `resize-handle` | throttled | 5 | 16.7 ms | 16.8 ms | 33.4 ms |
 
 The three drag rows are **gaps between animation frames**, not interaction latency: 16.7 ms is one frame
-at 60 Hz, so the drags kept painting at display rate. Pooled over the run: 352 gaps for `drag-layer`, 312
-for `drag-group`, 262 for `resize-handle`, with 0 % of them over 50 ms. Long tasks were 0–1 per scenario
-with a worst block of 68 ms (budget 600 ms), and input events over 16 ms ran 33–150 per scenario with a
-worst of 96 ms. Nothing came within a factor of four of a threshold.
+at 60 Hz, so the drags kept painting at display rate. Pooled over the run: 431 gaps for `drag-layer`, 398
+for `drag-group`, 338 for `resize-handle`, with **0 % of them over 50 ms** in all three. Long tasks were
+0–4 per scenario with a worst block of 114 ms (`drag-layer`), the one number that approaches anything —
+and still a fifth of the 600 ms freeze budget. Input events over 16 ms ran 28–150 per scenario with a
+worst of 144 ms. Nothing came within a factor of two of a threshold.
 
-The same run's unthrottled phase, for context rather than as a gate: interactions p50 20.2–29.7 ms and p95
-24.9–58.4 ms, drag gaps p50 16.7 ms with a worst of 33.4 ms.
+The same run's unthrottled phase, published for context and deliberately not gated: interactions p50
+23.6–48.6 ms, p95 40.5–68.2 ms; drag gaps p50 16.7 ms with a worst of 66.6 ms. The fast phase is the one
+most exposed to a noisy neighbour on a shared runner, so gating on it would make the benchmark flaky
+rather than informative.
 
-The commit measured here is `local` in the report because the harness only knows a commit when CI sets the
-environment variable; the application code measured is the same as the branch's last performance commit,
-and the harness itself is the file described in §5.
+### The same harness in the sandbox, for reproduction
 
-### CI, the gate
+The identical scenarios were run in the sandbox against the production build, under the same throttle and
+the same sample counts, three times in a row while the fix was being verified — the last of which reported:
 
-CI has not yet published a run in which all twelve scenarios completed, and the way it fails is worth
-recording — it is exactly the failure mode the harness was changed to make impossible. The `abc7982` run
-(Browser (Chromium) job of pull request #2, check run `116862619447`) measured eleven scenarios and could
-not prepare the twelfth:
+| Scenario | Phase | n | p50 | p95 | worst |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `select-layer` | throttled | 12 | 23.6 ms | 40.8 ms | 40.8 ms |
+| `select-group` | throttled | 12 | 24.5 ms | 42.2 ms | 42.2 ms |
+| `hide-layer` | throttled | 12 | 23.9 ms | 38.2 ms | 38.2 ms |
+| `lock-layer` | throttled | 12 | 25.2 ms | 42.2 ms | 42.2 ms |
+| `inspector-x` | throttled | 12 | 28.0 ms | 48.6 ms | 48.6 ms |
+| `inspector-width` | throttled | 12 | 27.2 ms | 86.3 ms | 86.3 ms |
+| `opacity-key` | throttled | 12 | 25.2 ms | 48.3 ms | 48.3 ms |
+| `undo` | throttled | 12 | 35.6 ms | 46.1 ms | 46.1 ms |
+| `redo` | throttled | 12 | 34.6 ms | 59.8 ms | 59.8 ms |
+| `drag-layer` | throttled | 5 | 16.7 ms | 16.8 ms | 33.4 ms |
+| `drag-group` | throttled | 5 | 16.7 ms | 16.8 ms | 33.4 ms |
+| `resize-handle` | throttled | 5 | 16.7 ms | 16.7 ms | 16.8 ms |
 
-| Scenario | n | p50 | p95 | worst | Job |
+Same picture: every gated scenario inside its budget, drag gaps at display rate, 0 % over 50 ms. It is
+published because it shows the harness is reproducible outside CI — not as a substitute for the CI run
+above, whose browser build, CPU and runner class are different.
+
+### The CI failure these measurements replaced, and why it failed
+
+Before the fix, CI kept failing the same job on a *preparation*, not on latency. At `abc7982` the job
+(Browser (Chromium) check run `116862619447`) measured eleven scenarios and could not prepare the twelfth:
+
+| Scenario | n | p50 | p95 | worst | Job outcome |
 | --- | ---: | ---: | ---: | ---: | --- |
 | `select-layer` | 12 | 25.4 ms | 44.4 ms | 44.4 ms | pass |
 | `select-group` | 12 | 25.2 ms | 41.6 ms | 41.6 ms | pass |
@@ -245,23 +270,24 @@ not prepare the twelfth:
 
 The job failed, and that is the correct outcome: `resize-handle` was never driven into the state it
 measures, so the benchmark had no result to report for it — a preparation failure is a *test* failure and
-is never counted as a fast measurement. The report said so in its own words ("1 scenario phase(s) could
-not be measured"), the failing row read `scenario must run`, and the check-run annotation carried the
-selection state the page reported at that moment.
+is never counted as a fast measurement. The report said so in its own words (“1 scenario phase(s) could not
+be measured”), the failing row read `scenario must run`, and the check-run annotation carried the selection
+state the page reported at that moment.
 
-That failure is what the current harness fixes. Four defects were behind it, all of them in the harness:
+Four harness defects were behind it:
 
 1. Rows were found by the layer's *name*. The name-keyed lookup stopped resolving the moment the layer was
    renamed by something else, turning a measurement into a twenty-second timeout that described nothing.
 2. Inspector fields were addressed document-wide (`getByLabel('Layer name')`), which is ambiguous by
    construction in a document with ten text layers.
 3. A preparation step could *look* done — a field showing the value it was filled with — while the commit
-   behind it had not reached the document: two inspector commits issued back-to-back can race, because
-   the second handler still closes over the frame from before the first.
-4. The resize scenario did not reset the layer's frame between samples, and `page.mouse` does not
-   hit-test: once the handle had been dragged past the artboard's edge, the next sample's press landed on
-   the inspector rail and Chromium dragged the “Layer name” label's text into the name field — renaming a
-   layer of the document under measurement. That rename is what broke the name-keyed lookups in (1).
+   behind it had not reached the document: two inspector commits issued back-to-back can race, because the
+   second handler still closes over the frame from before the first.
+4. The resize scenario did not reset the layer's frame between samples, and `page.mouse` does not hit-test:
+   once the handle had been dragged past the artboard's edge, the next sample's press landed on the
+   inspector rail, and Chromium dragged the “Layer name” label's text into the name field — renaming a
+   layer of the document under measurement. That rename is what broke the name-keyed lookups in (1); §8
+   records the reproduction in full.
 
 The harness now addresses rows by the id in the document, scopes every label lookup to the selection
 inspector, resets the frames a scenario depends on before every sample and confirms each committed value
@@ -272,13 +298,13 @@ means to press, and fails a scenario if the document it is measuring is no longe
 
 ### Runner variance, stated plainly
 
-An earlier CI run on the same document (`085f79a`) reported `select-layer` p50 **39.8 ms** / p95
-**43.1 ms**, where `abc7982` reported 25.4 ms / 44.4 ms — the same application code and the same fixture,
-with a difference of about 55 % in the median. Both runs passed. Shared CI runners have real, measurable
-variance, which is why the budget sits an order of magnitude above the observed cost rather than a margin
-around it, and why a single number from a single run is never the whole story. What the benchmark is for
-is catching a *gross* regression — a doubled critical path, a per-frame re-plan, a synchronous decode —
-not adjudicating 15 ms.
+The three CI runs of this benchmark on the same document and the same harness family reported
+`select-layer` p50 **18.8 ms** (`43c4008`), **25.4 ms** (`abc7982`) and **39.8 ms** (`085f79a`) — a spread
+of more than a factor of two on identical application code, all of them passing. Shared CI runners have
+real, measurable variance, which is why the budget sits an order of magnitude above the observed cost
+rather than a margin around it, and why a single number from a single run is never the whole story. What
+the benchmark is for is catching a *gross* regression — a doubled critical path, a per-frame re-plan, a
+synchronous decode — not adjudicating 15 ms.
 
 ## 7. What was profiled, and why nothing was optimised
 
