@@ -182,16 +182,21 @@ and the commit it measured (`GITHUB_HEAD_SHA` in CI, `local` in the sandbox).
 
 ### The acceptance run: CI, both phases, all twelve scenarios
 
-`43c4008` — the commit that fixed the benchmark's preparation — is the first run in which **every scenario
-completed in both phases** in CI. The `Browser (Chromium)` job of the pull-request workflow passed with
-**44 passed (5.0 m)** (check run `116910114267`, run
-[38881820021](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38881820021); the identical
-push-workflow job is check run `116910141359`, run
-[38881828160](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38881828160)). The job publishes its
-report as a comment on the pull request (`<!-- eulerforge-perf-report -->`), and the numbers below are
-copied from it unchanged:
+The commit that fixed the benchmark's preparation, `43c4008`, was the first run in which **every scenario
+completed in both phases** in CI; the same benchmark then ran again on the branch's last commit, `9eb530e`,
+which changes this file and nothing else, and reported the same outcome. Both are recorded here, because
+between them they are what “the benchmark passes on this branch” means:
 
-- Commit: `43c40085d6e12509688f3aac55f9ac740c8955ff`
+| Run | Workflow | Browser (Chromium) job | Browser specs |
+| --- | --- | --- | --- |
+| `43c4008` | pull request [38881828160](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38881828160) · push [38881820021](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38881820021) | 116910114267 · 116910141359, both **success** | 44 passed (5.0 m) |
+| `9eb530e` | pull request [38882742579](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38882742579) · push [38882736633](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38882736633) | 116913092201 · 116913111091, both **success** | see the run |
+
+The job publishes its report as a comment on the pull request (`<!-- eulerforge-perf-report -->`),
+rewriting the same comment on every run. The numbers below are copied unchanged from the final commit's
+comment:
+
+- Commit: `9eb530ee1f98e88dd9011ab821b262f5dee4a138`
 - Browser: Chromium 156.0.8078.4 · Runtime: Node v22.23.3 on linux x64
 - CPU: 2 vCPU — AMD EPYC 7763 64-Core Processor (GitHub-hosted Ubuntu runner)
 - Gated phase: CDP `Emulation.setCPUThrottlingRate: 4`, 12 interaction samples and 5 drag samples per
@@ -199,28 +204,33 @@ copied from it unchanged:
 
 | Scenario | Phase | n | p50 | p95 | worst |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `select-layer` | throttled | 12 | 18.8 ms | 37.7 ms | 37.7 ms |
-| `select-group` | throttled | 12 | 24.2 ms | 40.2 ms | 40.2 ms |
-| `hide-layer` | throttled | 12 | 24.7 ms | 41.8 ms | 41.8 ms |
-| `lock-layer` | throttled | 12 | 24.7 ms | 41.4 ms | 41.4 ms |
-| `inspector-x` | throttled | 12 | 47.1 ms | 52.0 ms | 52.0 ms |
-| `inspector-width` | throttled | 12 | 48.4 ms | 61.3 ms | 61.3 ms |
-| `opacity-key` | throttled | 12 | 26.0 ms | 34.2 ms | 34.2 ms |
-| `undo` | throttled | 12 | 40.2 ms | 49.6 ms | 49.6 ms |
-| `redo` | throttled | 12 | 38.0 ms | 62.6 ms | 62.6 ms |
-| `drag-layer` | throttled | 5 | 16.7 ms | 16.8 ms | 33.5 ms |
-| `drag-group` | throttled | 5 | 16.7 ms | 16.8 ms | 33.4 ms |
+| `select-layer` | throttled | 12 | 24.5 ms | 40.7 ms | 40.7 ms |
+| `select-group` | throttled | 12 | 24.8 ms | 41.7 ms | 41.7 ms |
+| `hide-layer` | throttled | 12 | 25.1 ms | 41.7 ms | 41.7 ms |
+| `lock-layer` | throttled | 12 | 25.0 ms | 41.3 ms | 41.3 ms |
+| `inspector-x` | throttled | 12 | 37.7 ms | 55.0 ms | 55.0 ms |
+| `inspector-width` | throttled | 12 | 39.8 ms | 66.1 ms | 66.1 ms |
+| `opacity-key` | throttled | 12 | 24.7 ms | 34.1 ms | 34.1 ms |
+| `undo` | throttled | 12 | 41.7 ms | 68.2 ms | 68.2 ms |
+| `redo` | throttled | 12 | 39.3 ms | 68.0 ms | 68.0 ms |
+| `drag-layer` | throttled | 5 | 16.7 ms | 16.7 ms | 33.4 ms |
+| `drag-group` | throttled | 5 | 16.7 ms | 16.7 ms | 16.8 ms |
 | `resize-handle` | throttled | 5 | 16.7 ms | 16.8 ms | 33.4 ms |
 
 The three drag rows are **gaps between animation frames**, not interaction latency: 16.7 ms is one frame
-at 60 Hz, so the drags kept painting at display rate. Pooled over the run: 431 gaps for `drag-layer`, 398
-for `drag-group`, 338 for `resize-handle`, with **0 % of them over 50 ms** in all three. Long tasks were
-0–4 per scenario with a worst block of 114 ms (`drag-layer`), the one number that approaches anything —
-and still a fifth of the 600 ms freeze budget. Input events over 16 ms ran 28–150 per scenario with a
-worst of 144 ms. Nothing came within a factor of two of a threshold.
+at 60 Hz, so the drags kept painting at display rate. Pooled over the run: 422 gaps for `drag-layer`, 390
+for `drag-group`, 325 for `resize-handle`, with **0 % of them over 50 ms** in all three. Long tasks were
+0–4 per scenario with a worst block of 62 ms against the 600 ms freeze budget, and input events over
+16 ms ran 28–150 per scenario with a worst of 144 ms. Nothing came near a threshold; the slowest single
+interaction of the run was 68.2 ms against a 500 ms worst-case budget.
 
-The same run's unthrottled phase, published for context and deliberately not gated: interactions p50
-23.6–48.6 ms, p95 40.5–68.2 ms; drag gaps p50 16.7 ms with a worst of 66.6 ms. The fast phase is the one
+For comparison, the earlier complete CI run (`43c4008`) reported `select-layer` 18.8 / 37.7 ms,
+`undo` 40.2 / 49.6 ms and `redo` 38.0 / 62.6 ms p50 / p95, with drag gaps 431, 398 and 338 at a 16.7 ms
+median and 0 % over 50 ms — the same shape, which is the point: this is a regression gate, not a
+stopwatch.
+
+The final commit's unthrottled phase, published for context and deliberately not gated: interactions p50
+24.6–41.9 ms, p95 25.2–63.6 ms; drag gaps p50 16.7 ms with a worst of 50.0 ms. The fast phase is the one
 most exposed to a noisy neighbour on a shared runner, so gating on it would make the benchmark flaky
 rather than informative.
 
@@ -298,9 +308,9 @@ means to press, and fails a scenario if the document it is measuring is no longe
 
 ### Runner variance, stated plainly
 
-The three CI runs of this benchmark on the same document and the same harness family reported
-`select-layer` p50 **18.8 ms** (`43c4008`), **25.4 ms** (`abc7982`) and **39.8 ms** (`085f79a`) — a spread
-of more than a factor of two on identical application code, all of them passing. Shared CI runners have
+Four CI runs of this benchmark on the same document reported `select-layer` p50 **18.8 ms** (`43c4008`),
+**24.5 ms** (`9eb530e`), **25.4 ms** (`abc7982`) and **39.8 ms** (`085f79a`) — a spread of more than a
+factor of two on identical application code, all of them passing. Shared CI runners have
 real, measurable variance, which is why the budget sits an order of magnitude above the observed cost
 rather than a margin around it, and why a single number from a single run is never the whole story. What
 the benchmark is for is catching a *gross* regression — a doubled critical path, a per-frame re-plan, a
