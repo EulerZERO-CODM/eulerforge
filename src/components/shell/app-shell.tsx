@@ -6,7 +6,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { env } from '../../config/env';
 import { useForgeServices } from '../../state/forge-provider';
 import { storageClaim, storagePhase, type ForgeStorageStatus } from '../../state/storage-status';
-import { useDocumentLibrary } from '../../state/hooks';
+import { useDocumentLibrary, useStorageStatus } from '../../state/hooks';
 import { TooltipProvider } from '../ui/tooltip';
 import { ToastViewport } from '../ui/toast-viewport';
 import { CommandPalette, useCommandPaletteShortcut } from './command-palette';
@@ -112,7 +112,7 @@ function storageClaimElement(status: ForgeStorageStatus): ReactNode {
 }
 
 function ShellFooter() {
-  const { storageStatus } = useForgeServices();
+  const storageStatus = useStorageStatus();
 
   return (
     <div className="border-line-subtle text-2xs text-fg-subtle mt-4 space-y-1 border-t pt-3">

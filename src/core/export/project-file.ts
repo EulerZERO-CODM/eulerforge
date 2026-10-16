@@ -95,19 +95,27 @@ export function projectFileName(document: ForgeDocument): string {
 }
 
 /**
- * Triggers a browser download. Kept in the export module (rather than a component) so the only
- * DOM-touching code for exports is in one auditable place.
+ * The exact bytes and suggested name of a project file, ready to be saved.
+ *
+ * The core builds the payload; handing it to the browser is the caller's job, because that step
+ * needs `document`, `window` and `URL.createObjectURL`, none of which belong in `src/core/**`
+ * (ADR-0019). The interface composes this with the download adapter; a test can assert the payload
+ * without a browser at all.
  */
-export function downloadProjectFile(document: ForgeDocument, now: Date = new Date()): void {
-  if (typeof window === 'undefined') return;
-  const blob = new Blob([serialiseProjectFile(document, now)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const anchor = window.document.createElement('a');
-  anchor.href = url;
-  anchor.download = projectFileName(document);
-  anchor.rel = 'noopener';
-  window.document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
+export type ProjectFilePayload = {
+  /** The file's contents: pretty-printed JSON with a trailing newline. */
+  readonly contents: string;
+  readonly fileName: string;
+  readonly mimeType: 'application/json';
+};
+
+export function projectFilePayload(
+  document: ForgeDocument,
+  now: Date = new Date(),
+): ProjectFilePayload {
+  return {
+    contents: serialiseProjectFile(document, now),
+    fileName: projectFileName(document),
+    mimeType: 'application/json',
+  };
 }

@@ -9,6 +9,9 @@
 import { err, forgeError, ok, type Result } from '../result';
 import { brand } from '../types/brand';
 import type { PartialProps } from '../types/optional';
+import { freezeDocument } from './freeze';
+import { emptyScene } from './layer-operations';
+import type { AttributionRecord, Scene } from './layer-types';
 import { createDocumentInputSchema, formatIssues } from './schema';
 import { CURRENT_SCHEMA_VERSION } from './migrations';
 import type { Canvas, CreateDocumentInput, ForgeDocument, GuideSettings } from './types';
@@ -40,6 +43,12 @@ export function resolveGuides(overrides?: PartialProps<GuideSettings>): GuideSet
     gridMm: overrides.gridMm ?? DEFAULT_GUIDES.gridMm,
     showCentreLines: overrides.showCentreLines ?? DEFAULT_GUIDES.showCentreLines,
   };
+}
+
+/** Scene for a document created without startup artwork: a real, empty artboard. */
+export function resolveScene(overrides?: Scene): Scene {
+  if (!overrides) return emptyScene();
+  return Object.freeze({ layers: Object.freeze([...overrides.layers]) });
 }
 
 export type DocumentIdGenerator = () => string;
@@ -88,6 +97,8 @@ export function createDocument(
     canvas: value.canvas,
     guides: resolveGuides(value.guides),
     palette: value.palette ?? [],
+    scene: resolveScene(value.scene),
+    attribution: [] as readonly AttributionRecord[],
     metadata: {
       authorLabel: '',
       tags: value.tags ?? [],
@@ -99,7 +110,7 @@ export function createDocument(
     updatedAt: timestamp,
   };
 
-  return ok(Object.freeze(document));
+  return ok(freezeDocument(document));
 }
 
 /** Applies a partial patch and bumps `revision` + `updatedAt`. Used by the history layer. */
@@ -108,7 +119,7 @@ export function applyDocumentPatch(
   patch: Partial<Omit<ForgeDocument, 'id' | 'schemaVersion' | 'createdAt'>>,
   now: Date = new Date(),
 ): ForgeDocument {
-  return Object.freeze({
+  return freezeDocument({
     ...document,
     ...patch,
     revision: document.revision + 1,

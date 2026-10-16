@@ -6,21 +6,26 @@ Euler's Forge is a browser-first creative platform: one place to make design, ph
 and illustration work, with the learning material built into the same environment instead of
 scattered across tutorials.
 
-This repository contains **Phase 1: the engineering foundation and the platform shell**. What that
-means in plain terms:
+This repository contains **Phase 1: the engineering foundation and the platform shell**, plus a
+working **Phase 2: Design Studio editing** surface. In plain terms:
 
 - A working, tested, type-checked application shell: navigation, home, project library, creation
   flow, studio discovery, learning hub, asset catalogue, settings, roadmap and a capability ledger.
-- **Design Studio** opens into a real workspace for *document setup*: canvas, units, guides, working
-  palette, project metadata, undo/redo, export readiness and a downloadable `.forge.json` project
-  file. There are **no drawing tools yet** — the workspace says so on screen.
+- **Design Studio** is an editor, not a mockup: canvas setup (units, presets, guides, palette,
+  metadata), an ordered layer scene of **text, rectangle, ellipse and placed graphic** layers,
+  selection from the artboard or the layer tree, move and resize with visible handles, snapping to
+  guides, grid lines and sibling edges, inspectable typography and shape settings, undo/redo with
+  labels, local-first saving, and a real **PNG or JPEG export** rendered from the same scene as the
+  artboard. `.forge.json` project files round-trip the whole document, layers included.
 - Studio **definitions** exist for Photo, Video, Motion, Illustration and 3D, each with honest
   availability flags, planned capabilities and the engine boundary it will plug into. None of them
   pretends to be usable.
 
-Nothing in this repository claims cloud sync, accounts, collaboration, rendering or AI features. The
-places those will live are marked as interfaces, planned items, or unavailable — never as working
-buttons.
+Nothing in this repository claims cloud sync, accounts, collaboration, vector export, video or AI
+features. The places those will live are marked as interfaces, planned items, or unavailable — never
+as working buttons. Capabilities that only exist in a browser (a download, a real canvas raster) are
+verified by a Chromium suite that runs in CI, and whatever even that cannot reach is listed as a
+manual check in `docs/ROADMAP.md` rather than assumed.
 
 ## Quick start
 
@@ -55,9 +60,15 @@ npm start
 | `npm run test:watch`    | Vitest in watch mode                                                |
 | `npm run test:coverage` | Vitest with V8 coverage                                             |
 | `npm run verify`        | Format check → lint → typecheck → tests → production build          |
+| `npm run test:e2e`      | Playwright against the production build (`npm run build` first)     |
+| `npm run test:e2e:install` | Installs the Chromium build Playwright drives                    |
 | `npm run clean`         | Removes `.next`, `out` and `coverage`                               |
 
-`.github/workflows/ci.yml` runs the same gates as separate steps (so a failure names the gate) plus a coverage report, on Node 22.x and 24.x.
+`.github/workflows/ci.yml` runs the same gates as separate steps (so a failure names the gate) plus a
+coverage report, on Node 22.x and 24.x. A second job, `Browser (Chromium)`, installs Chromium and runs
+`npm run test:e2e` against the production build: pointer capture, the browser's own rasteriser and real
+file downloads cannot be verified in jsdom, so they are verified there instead of being described as
+tested.
 
 ## What is actually implemented
 
@@ -125,6 +136,7 @@ src/
     export/               Format registry, readiness checklist, project file format
     history/ commands/ events/ preferences/ platform/
   lib/                    Tiny shared utilities (class names, store, formatting, hooks)
+  lib/browser/            The browser-only adapters (canvas element, file download)
   state/                  Application stores and React bindings
   testing/                Test-only helpers (in-memory services, App Router route resolver)
 docs/                     Product vision, architecture, roadmap, decision records
@@ -132,7 +144,10 @@ docs/                     Product vision, architecture, roadmap, decision record
 
 Rules that keep this maintainable:
 
-- `src/core/**` is framework-free. It has no React, no DOM and no `localStorage` access.
+- `src/core/**` is framework-free. It has no React, no DOM and no `localStorage` access; browser
+  calls live behind `src/lib/browser/**`, and ESLint fails the build if core reaches for one
+  (ADR-0019). The single exception is the storage boundary, which probes `window.localStorage` behind
+  a server-render guard to report volatility honestly.
 - Components never import persistence directly; ESLint enforces it. They talk to stores in
   `src/state/**`, which talk to the repository boundary.
 - Anything a user can click either does something real, or is visibly disabled/unavailable with the
@@ -144,15 +159,20 @@ Rules that keep this maintainable:
   refuses to become.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — layers, data flow, extension conventions.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — implemented / planned / exploratory, with exit criteria.
-- [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision records (ADR-0001 … ADR-0014).
+- [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision records (ADR-0001 … ADR-0018).
 - [`AGENTS.md`](AGENTS.md) — conventions for humans and coding agents working in this repository.
 
 ## Status and limitations
 
-Phase 1 is a foundation, not a product: one discipline has a usable setup workspace, no studio can
-yet create artwork, and everything is stored in one browser profile on one device. The roadmap is
-explicit about the order in which that changes, and each entry in it has measurable completion
-criteria.
+One discipline — Design Studio — can create real artwork end to end: shapes, text and placed
+graphics, edited on the artboard, saved locally, reopened, and exported as PNG or JPEG. Everything
+is stored in one browser profile on one device, so exporting a project file is the only backup.
+
+What is not implemented, and is labelled as such in the interface: multiple artboards per document,
+per-run text styling, custom fonts, reusable styles, templates and brand kits, vector (SVG/PDF)
+output, WebP and video, and every other studio. Pointer capture, the browser's own canvas output and
+file downloads are covered by `e2e/**`, a Playwright suite that drives the production build in a real
+Chromium in CI; `docs/ROADMAP.md` lists what it still does not reach.
 
 ## Licence
 

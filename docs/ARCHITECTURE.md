@@ -7,10 +7,12 @@ and how to extend the platform without touching the shell. Decisions are recorde
 ## The one-paragraph version
 
 The application is a Next.js App Router project. Everything under `src/core/**` is framework-free
-domain code with no React, no DOM and no storage access. `src/state/**` composes those modules into
-stores and exposes them to React through `useSyncExternalStore`. `src/components/**` renders, and is
-forbidden from reaching into persistence — ESLint enforces that. `src/app/**` is thin routing: each
-route resolves data and renders a feature component.
+domain code with no React, no DOM and no storage access; the few calls only a browser can make live
+behind `src/lib/browser/**`, and the interface composes them with core values — ESLint enforces both
+directions. `src/state/**` composes those modules into stores and exposes them to React through
+`useSyncExternalStore`. `src/components/**` renders, and is forbidden from reaching into persistence —
+ESLint enforces that too. `src/app/**` is thin routing: each route resolves data and renders a feature
+component.
 
 ```
 src/app/**                routes (server by default, client only where interaction requires it)
@@ -22,7 +24,10 @@ src/state/**               stores, provider, hooks             ─ the only plac
 src/core/**                documents, studios, assets, learning, persistence, export, history,
                            commands, events, preferences, platform  ─ framework-free and testable
       │
-src/lib/**                 class names, store primitives, formatting
+src/lib/**                 class names, store primitives, formatting, and the browser adapters
+                           (src/lib/browser/**) that core deliberately does not contain
+      │
+e2e/**                     Playwright specs against the production build ─ nothing in src/ imports it
 ```
 
 ## Layers
@@ -39,7 +44,9 @@ The parts every studio must share. Each module is small, pure where possible, an
   `getRegistryIssues()` is asserted empty in tests, so authoring mistakes fail CI.
 - **`assets/`** — the catalogue boundary (`AssetCatalog`), licence records, provenance model, and a
   pure query engine (filter → score → sort → paginate) with facet counting that ignores its own
-  dimension.
+  dimension. `data.ts` is the bundled sample catalogue: ten records point at repository-authored SVG
+  files under `public/forge-assets/`, the rest are explicitly reference-only, and `isPlaceable()`
+  is the single predicate the UI and the placement command both use (ADR-0008).
 - **`learning/`** — concepts, tool explanations and lessons as typed content, plus query and
   integrity validation. Lessons reference studios by id and exercise steps link to real routes,
   which the test suite verifies.
@@ -47,8 +54,27 @@ The parts every studio must share. Each module is small, pure where possible, an
   adapter can replace the local one without touching callers (ADR-0006). `createBrowserStorage()`
   also reports the backend's *durability*, because an in-memory fallback must never be presented as a
   save (ADR-0006 → durability reporting).
+- **`documents/layer-*.ts`, `documents/scene-geometry.ts`** — the scene model behind the editor:
+  layer types and their settings (`layer-types`), the operations that add, update, duplicate, delete
+  and reorder layers (`layer-operations`), the defaults a new layer starts from (`layer-defaults`),
+  and the pure geometry the pointer interactions need — hit-testing, resize anchors and snapping
+  targets (`scene-geometry`). Layer records are validated by the same Zod schema as the rest of the
+  document, and `documents/validation.ts` adds the field-level messages a form can render.
+- **`render/`** — the renderer, in two halves: `plan.ts` turns a document into an ordered, immutable
+  list of paint operations plus any issues it found, and `paint.ts` draws that plan into anything
+  that satisfies `PainterContext`. `text-layout.ts` and `measure.ts` do wrapping and alignment
+  through an injected measure function. Nothing here imports React or touches a DOM: the browser
+  canvas adapter lives in `src/lib/browser/canvas.ts` and is passed in as a factory (ADR-0016,
+  ADR-0019).
+- **`editor/`** — the interaction model: `selection.ts` (what is selected, never persisted),
+  `commands.ts` (each edit as a label plus the patch that performs it) and `gesture.ts` (move and
+  resize previews in document coordinates, resolved once on release, with snapping).
 - **`export/`** — the format registry (which formats exist versus which are planned), the readiness
-  checklist that evaluates a document against a format, and the `.forge.json` project file format.
+  checklist that evaluates a document against a format, the `.forge.json` project file format (whose
+  payload is built here and saved by the caller), and the raster pipeline that rasterises a render
+  plan offscreen (`raster.ts`) into an injected canvas. `URL.createObjectURL` and the `<a>` element
+  live in `src/lib/browser/download.ts`, outside the core, so every file here stays testable with no
+  browser at all.
 - **`documents/zoom.ts`** — the canvas zoom arithmetic (setting + measured viewport → exact pixel
   box), kept out of the components so portrait, landscape, oversized zooms and `fit` are testable
   without a browser (ADR-0015).
@@ -108,6 +134,34 @@ same content is prerendered; `/workspace/[documentId]` is dynamic because it dep
 document library. Route integrity is covered by tests that resolve every declared navigation target
 against the files under `src/app` (see `src/testing/routes.ts`).
 
+## Editing pipeline
+
+An edit on the artboard travels the same path as an inspector change, with one extra stage that
+keeps history readable:
+
+```
+pointer down/up on the artboard
+        ↓
+editor/gesture.ts — preview only, in document coordinates, no React state in the document
+        ↓ resolveGesture(...) → { scene, frame, unchanged }
+        ↓
+editor/commands.ts — one command: label + patch (move, resize, reorder, delete, settings, ...)
+        ↓
+WorkspaceApi.run(command) → DocumentSession.commit(label, patch)
+```
+
+Three rules hold this together:
+
+1. **Transient state is not document state.** Selection, snappable guides, an in-flight drag and the
+   current zoom live in component state or `src/core/editor`, never in `ForgeDocument`, so they are
+   not persisted, not exported and not history entries. Only the resolved patch is committed.
+2. **One gesture, one history step.** A drag previews on every pointer move and commits once on
+   release; `unchanged` is true when the resolved frame equals the starting frame, and that produces
+   no commit at all. Cancelling leaves the document exactly as it was.
+3. **The renderer is shared.** The artboard and the export pipeline both consume
+   `buildRenderPlan(document)` and both paint through `paintPlan`, so "what you see is what you
+   export" is a property of the code rather than a promise (ADR-0016).
+
 ## Data flow of a real edit
 
 ```
@@ -136,7 +190,9 @@ it, which is why the history panel and the document can never diverge.
 | A new command                 | Add it in `src/components/shell/commands.ts`; commands that share a destination are merged automatically.         |
 | A new screen                  | Add a route under `src/app/`, add it to `NAV_GROUPS` if it belongs in navigation, and link it from where it is needed. |
 | A new storage backend         | Implement `KeyValueStorage` + `DocumentRepository`; no caller changes are required.                               |
-| A new export format           | Add it to `src/core/export/formats.ts` and give it checks in `src/core/export/checklist.ts`.                       |
+| A new export format           | Add it to `src/core/export/formats.ts`, give it checks in `src/core/export/checklist.ts`, and only then tell the export panel to write it. |
+| A new layer type              | Add the settings type in `documents/layer-types.ts`, the Zod schema, defaults, operations, a render operation in `render/plan.ts` + `render/paint.ts` and field validation — the schema and the renderer both reject what they do not understand. |
+| A new sample asset file       | Add the SVG under `public/forge-assets/`, then a record in `src/core/assets/data.ts` pointing at it with licence and provenance. Nothing else: placement, attribution and export already read the record. |
 | A new capability claim        | Add an entry to `src/core/platform/status.ts` with `verification` evidence; `/platform-status` renders it.        |
 | A new zoom level or mode      | Add it to `src/core/documents/zoom.ts` with tests, and to the select in `document-stage.tsx` — never as CSS that caps the canvas. |
 | A new storage backend         | Report its durability through `describeStorageBackend` so the interface can state whether a save survives a reload.   |
@@ -159,7 +215,22 @@ it, which is why the history panel and the document can never diverge.
   project file round trip, the repository, and the stores.
 - `src/**/*.test.tsx` covers behaviour: the shell, the command palette, the workspace rail (against a
   real in-memory session) and lesson rendering.
-- `src/testing/**` holds test-only infrastructure: an in-memory service graph and the App Router
-  route resolver used to prove that no navigation target is dead.
+- `src/testing/**` holds test-only infrastructure: an in-memory service graph, the App Router route
+  resolver used to prove that no navigation target is dead, and layer/render/raster fixtures
+  (`layers.ts`, `render.ts`, `raster.ts`). Raster tests rasterise for real through
+  `@napi-rs/canvas` (a dev dependency) and assert on actual pixel values, so the export pipeline is
+  tested against a canvas implementation rather than a mock.
 
-End-to-end browser tests are a planned roadmap item, deliberately not faked here.
+What the unit suite cannot reach is covered by a browser suite instead of by assertion: `e2e/**`
+drives the production build in a real Chromium (`@playwright/test`, a dev dependency, its own CI
+job), because pointer capture, the browser's own canvas output and a real file download cannot be
+verified in jsdom. It reads state from the same local storage the application writes, so it asserts
+what the product actually persisted rather than what a test double was told. The application does not
+import anything from `e2e/**`: the only hooks it exposes are inert `data-*` attributes the component
+tests use too. The same suite decodes the artboard's own canvas pixels, so the positions the rendered
+snapping guides occupy and the words each line of a text layer lands on are asserted as well, at 25%,
+100% and 200% zoom (`e2e/snapping.spec.ts`, `e2e/text-wrapping.spec.ts`), and a session started with
+browser storage refused is driven through the whole creation-and-edit flow
+(`e2e/storage-restricted.spec.ts`). What even that cannot reach — other browser engines, the
+responsiveness of a 30-layer document, font metrics that would only hold on one machine — is listed as
+a manual check in `docs/ROADMAP.md` rather than quietly assumed.

@@ -1,10 +1,22 @@
 'use client';
 
-import { Grid2X2, Maximize2, Ruler, ZoomIn, ZoomOut } from 'lucide-react';
+import {
+  Circle,
+  Grid2X2,
+  ImagePlus,
+  Magnet,
+  Maximize2,
+  Ruler,
+  Square,
+  Type,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
-import type { ForgeDocument } from '../../core/documents/types';
+import type { Rect } from '../../core/documents/geometry';
 import { aspectRatioLabel, megapixelLabel, orientationOf } from '../../core/documents/geometry';
+import type { LayerId, LayerType } from '../../core/documents/layer-types';
 import { formatLength } from '../../core/documents/units';
 import {
   ZOOM_PERCENT_LEVELS,
@@ -14,34 +26,61 @@ import {
   type ViewportBox,
   type ZoomSetting,
 } from '../../core/documents/zoom';
-import { cn } from '../../lib/cn';
+import {
+  addLayerCommand,
+  placeAssetCommand,
+  setLayerFramesCommand,
+} from '../../core/editor/commands';
+import type { Selection } from '../../core/editor/selection';
+import type { AssetRecord } from '../../core/assets/types';
 import { Button } from '../ui/button';
 import { IconButton } from '../ui/icon-button';
-import { DocumentPreview } from '../documents/document-preview';
+import { InlineNote } from '../ui/states';
+import { Artboard, describeImageState } from './artboard';
+import { GraphicPicker } from './graphic-picker';
+import type { SceneImages } from './use-scene-images';
+import type { WorkspaceApi } from './workspace-api';
 
 /** Padding around the canvas inside the scroll area, in pixels (`p-4`); measured space excludes it. */
 const STAGE_PADDING_PX = 16 * 2;
 /** Smallest sensible scroll area; below this the stage still renders rather than collapsing. */
 const MIN_STAGE_HEIGHT_PX = 22 * 16;
 
+export type DocumentStageProps = {
+  readonly api: WorkspaceApi;
+  readonly selection: Selection;
+  readonly onSelectionChange: (selection: Selection) => void;
+  readonly images: SceneImages;
+  readonly snapping: boolean;
+  readonly onSnappingChange: (snapping: boolean) => void;
+  readonly showGuides: boolean;
+  readonly onGuidesChange: (show: boolean) => void;
+};
+
 /**
  * Document stage.
  *
- * The workspace's main surface. Because no layer tools exist yet, this renders the document's real
- * geometry — background, safe area, bleed, centre lines, grid — at a controllable zoom, and it says
- * plainly that direct manipulation is not part of this build.
- *
- * Zoom is geometry, not styling: `fit` measures the scroll area and scales the document down to it,
- * and an explicit percentage renders the document at exactly that multiple of its declared pixel
- * size. Nothing caps the canvas — at 200% the box is genuinely 200% wide and the stage scrolls, which
- * is the only honest way to offer a zoom level the viewport cannot hold (ADR-0015).
+ * The workspace's main surface: a toolbar that creates layers, the interactive artboard, and the
+ * zoom and snapping controls that govern it. Zoom is geometry, not styling — `fit` measures the
+ * scroll area and an explicit percentage renders the document at exactly that multiple of its
+ * declared pixel size, so a canvas larger than the pane genuinely scrolls (ADR-0015).
  */
-export function DocumentStage({ doc }: { readonly doc: ForgeDocument }) {
-  const [showGuides, setShowGuides] = useState(true);
+export function DocumentStage({
+  api,
+  selection,
+  onSelectionChange,
+  images,
+  snapping,
+  onSnappingChange,
+  showGuides,
+  onGuidesChange,
+}: DocumentStageProps) {
   const [zoom, setZoom] = useState<ZoomSetting>('fit');
   const [viewport, setViewport] = useState<ViewportBox>({ width: 0, height: 0 });
+  const [pickerOpen, setPickerOpen] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement | null>(null);
 
+  const doc = api.doc;
   const { canvas, guides } = doc;
 
   // Measure the scroll area so `fit` has something real to fit against, and keep it current when the
@@ -75,6 +114,7 @@ export function DocumentStage({ doc }: { readonly doc: ForgeDocument }) {
 
   const scale = computeZoom(canvas, zoom, viewport);
   const unmeasured = scale.setting === 'fit' && scale.unmeasured;
+  const graphics = describeImageState(doc.scene.layers, images.status);
 
   return (
     <section
@@ -82,24 +122,59 @@ export function DocumentStage({ doc }: { readonly doc: ForgeDocument }) {
       className="border-line bg-surface-raised/50 flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border"
     >
       <div className="border-line-subtle flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-2xs text-fg-subtle mr-1 font-semibold tracking-wider uppercase">
+            Add
+          </span>
+          {(['text', 'rect', 'ellipse'] as const satisfies readonly LayerType[]).map((type) => (
+            <Button
+              key={type}
+              variant="outline"
+              size="sm"
+              iconLeft={iconFor(type)}
+              onClick={() => {
+                void api.run(addLayerCommand(doc, type));
+              }}
+            >
+              {type === 'text' ? 'Text' : type === 'rect' ? 'Rectangle' : 'Ellipse'}
+            </Button>
+          ))}
+          <Button
+            variant="outline"
+            size="sm"
+            iconLeft={<ImagePlus aria-hidden />}
+            onClick={() => {
+              setPickerOpen(true);
+            }}
+          >
+            Graphic
+          </Button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button
+            variant={snapping ? 'primary' : 'outline'}
+            size="sm"
+            aria-pressed={snapping}
+            iconLeft={<Magnet aria-hidden />}
+            title="Snap to guides, grid lines and other layers while moving or resizing"
+            onClick={() => {
+              onSnappingChange(!snapping);
+            }}
+          >
+            Snapping {snapping ? 'on' : 'off'}
+          </Button>
           <IconButton
             label={showGuides ? 'Hide guides' : 'Show guides'}
             size="sm"
             onClick={() => {
-              setShowGuides((previous) => !previous);
+              onGuidesChange(!showGuides);
             }}
             aria-pressed={showGuides}
             variant="quiet"
           >
             {guides.showGrid ? <Grid2X2 aria-hidden /> : <Ruler aria-hidden />}
           </IconButton>
-          <span className="text-2xs text-fg-subtle">
-            {showGuides ? 'Guides visible' : 'Guides hidden'}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-1.5">
           <IconButton
             label="Zoom out"
             size="sm"
@@ -145,25 +220,68 @@ export function DocumentStage({ doc }: { readonly doc: ForgeDocument }) {
         </div>
       </div>
 
-      {/*
-        `m-auto` centres the canvas when it fits and still leaves both edges reachable by scrolling
-        when it does not — `justify-center` on a scroll container would clip the leading edge.
-      */}
       <div
         ref={scrollAreaRef}
         data-testid="stage-scroll-area"
         className="forge-scroll flex flex-1 overflow-auto p-4"
         style={{ minHeight: `${String(MIN_STAGE_HEIGHT_PX)}px` }}
       >
-        <DocumentPreview
-          canvas={canvas}
-          guides={guides}
-          showGuides={showGuides}
-          sizing={{ kind: 'absolute', width: scale.width, height: scale.height }}
-          className="m-auto"
-          showCaption={false}
-        />
+        <div className="m-auto">
+          <Artboard
+            doc={doc}
+            zoom={scale.scale}
+            selection={selection}
+            onSelectionChange={onSelectionChange}
+            onCommitFrames={(
+              label: string,
+              frames: readonly { readonly id: LayerId; readonly frame: Rect }[],
+            ) => {
+              void api.run(setLayerFramesCommand(doc, frames, label));
+            }}
+            images={images}
+            showGuides={showGuides}
+            snapping={snapping}
+          />
+        </div>
       </div>
+
+      {graphics.length > 0 ? (
+        <div className="px-3 pt-3">
+          <InlineNote
+            tone={images.errors.length > 0 ? 'danger' : 'info'}
+            title={
+              images.errors.length > 0
+                ? 'A graphic could not be loaded'
+                : 'Graphics are still loading'
+            }
+          >
+            <ul className="space-y-1">
+              {graphics.map((note) => (
+                <li key={note} className="text-xs">
+                  {note}
+                </li>
+              ))}
+            </ul>
+            {images.errors.length > 0 ? (
+              <>
+                <p className="text-xs">
+                  Export is refused while a graphic is missing, so a file can never silently omit
+                  it.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    images.retry();
+                  }}
+                >
+                  Reload graphics
+                </Button>
+              </>
+            ) : null}
+          </InlineNote>
+        </div>
+      ) : null}
 
       <dl className="border-line-subtle text-2xs grid grid-cols-2 gap-x-4 gap-y-1.5 border-t px-3 py-2.5 sm:grid-cols-4">
         <Spec label="Canvas" value={`${String(canvas.width)} × ${String(canvas.height)} px`} />
@@ -187,12 +305,13 @@ export function DocumentStage({ doc }: { readonly doc: ForgeDocument }) {
             </span>
           ) : null}
           <span>
+            Drag to move, drag a handle to resize, Shift keeps the aspect ratio, Alt resizes from
+            the centre, and arrow keys nudge the selection.{' '}
+          </span>
+          <span>
             Zoom maps document pixels to CSS pixels; on a high-density display one CSS pixel is
             drawn with more than one device pixel.
-          </span>{' '}
-          Direct manipulation — selection, text, shapes, images — is{' '}
-          <strong className="text-fg-muted font-medium">not</strong> implemented in this build. What
-          you can change today is the document itself.
+          </span>
         </p>
         <Button
           variant="link"
@@ -208,15 +327,37 @@ export function DocumentStage({ doc }: { readonly doc: ForgeDocument }) {
           Explain these settings
         </Button>
       </div>
+
+      <GraphicPicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        onPlace={(record: AssetRecord) => {
+          setPickerOpen(false);
+          void api.run(placeAssetCommand(doc, record));
+        }}
+      />
     </section>
   );
+}
+
+function iconFor(type: LayerType): React.ReactNode {
+  switch (type) {
+    case 'text':
+      return <Type aria-hidden />;
+    case 'rect':
+      return <Square aria-hidden />;
+    case 'ellipse':
+      return <Circle aria-hidden />;
+    case 'image':
+      return <ImagePlus aria-hidden />;
+  }
 }
 
 function Spec({ label, value }: { readonly label: string; readonly value: string }) {
   return (
     <div className="min-w-0">
       <dt className="text-fg-subtle uppercase">{label}</dt>
-      <dd className={cn('forge-numeric text-fg-muted truncate')}>{value}</dd>
+      <dd className="forge-numeric text-fg-muted truncate">{value}</dd>
     </div>
   );
 }

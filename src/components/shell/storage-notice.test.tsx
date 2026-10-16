@@ -1,5 +1,8 @@
-import { render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import { act } from 'react';
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AppShell } from './app-shell';
 import { StorageNotice } from './storage-notice';
@@ -113,6 +116,100 @@ describe('StorageNotice', () => {
 
     expect(screen.getByText(/Projects are stored in this browser only/i)).toBeInTheDocument();
     expect(screen.queryByText(/only in memory/i)).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Hydration: the server cannot inspect the browser, so the first client render must not contradict it.
+ *
+ * The defect this pins down: every surface read the storage status straight out of the services, which
+ * the server builds as "not determined yet" and the browser builds as the real answer. The server
+ * therefore rendered "Checking storage…" and the first client render replaced it with a claim or a
+ * warning, so React reported a hydration error on every page load and re-rendered the page inside the
+ * browser. A browser that refuses storage is where it mattered most: the warning the interface is
+ * *supposed* to show was the thing tearing the page down.
+ */
+describe('storage status during hydration', () => {
+  // Hydrated containers live in `document.body`, where the queries of every other test look, so they
+  // are removed after each test whether it passed or failed.
+  const containers: HTMLElement[] = [];
+  afterEach(() => {
+    for (const container of containers.splice(0)) container.remove();
+  });
+
+  function appShell(services: ReturnType<typeof createTestServices>) {
+    return (
+      <ForgeProvider services={services}>
+        <AppShell>
+          <p>Screen content</p>
+        </AppShell>
+      </ForgeProvider>
+    );
+  }
+
+  /** Renders the server's markup, then hydrates it in the browser, reporting recovery attempts. */
+  async function hydrate(
+    serverHtml: string,
+    browserServices: ReturnType<typeof createTestServices>,
+  ): Promise<{ readonly container: HTMLElement; readonly recovered: readonly unknown[] }> {
+    const container = document.createElement('div');
+    container.innerHTML = serverHtml;
+    document.body.append(container);
+    containers.push(container);
+
+    const recovered: unknown[] = [];
+    await act(async () => {
+      hydrateRoot(container, appShell(browserServices), {
+        onRecoverableError: (error) => {
+          recovered.push(error);
+        },
+      });
+    });
+
+    return { container, recovered };
+  }
+
+  it('keeps the server markup when storage is refused, then warns once the browser has been asked', async () => {
+    const serverHtml = renderToString(
+      appShell(createTestServices({ storageStatus: undeterminedStorageStatus() })),
+    );
+    expect(serverHtml).toContain('Checking storage');
+    expect(serverHtml).not.toContain('not being saved');
+
+    const { container, recovered } = await hydrate(
+      serverHtml,
+      createTestServices({ storageStatus: volatileStorageStatus('Access denied.') }),
+    );
+
+    // React had nothing to recover from: the server's markup was kept, not thrown away and re-rendered.
+    expect(recovered).toEqual([]);
+
+    // The refusal is reported as soon as the browser has answered the question...
+    await waitFor(() => {
+      expect(container.querySelector('[role="note"]')).not.toBeNull();
+    });
+    expect(container.textContent).toContain('Projects are not being saved to this device');
+    expect(container.textContent).toContain('only in memory and will be lost');
+    // ...and the intermediate wording is gone rather than left on screen.
+    expect(container.textContent).not.toContain('Checking storage');
+  });
+
+  it('hydrates cleanly for a browser that does store, and then says where projects are kept', async () => {
+    const serverHtml = renderToString(
+      appShell(createTestServices({ storageStatus: undeterminedStorageStatus() })),
+    );
+
+    const { container, recovered } = await hydrate(
+      serverHtml,
+      createTestServices({ storageStatus: persistentStorageStatus() }),
+    );
+
+    expect(recovered).toEqual([]);
+    await waitFor(() => {
+      expect(container.textContent).toContain('Projects are stored in this browser only.');
+    });
+    expect(container.textContent).not.toContain('Checking storage');
+    expect(container.querySelector('[role="note"]')).toBeNull();
   });
 });
 

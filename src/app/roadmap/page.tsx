@@ -21,6 +21,7 @@ export const metadata: Metadata = {
 
 const STATUS_TONES: Record<RoadmapItemStatus, BadgeTone> = {
   done: 'available',
+  partial: 'progress',
   'in-progress': 'progress',
   planned: 'planned',
   exploratory: 'exploratory',
@@ -84,6 +85,13 @@ export default function RoadmapPage() {
                     </div>
                     <p className="text-fg-muted mt-1 text-sm">{item.description}</p>
 
+                    {item.gap ? (
+                      <p className="text-fg-subtle mt-1.5 text-xs">
+                        <span className="font-medium">Still missing: </span>
+                        {item.gap}
+                      </p>
+                    ) : null}
+
                     <div className="mt-2.5 grid gap-2 sm:grid-cols-2">
                       <div>
                         <p className="text-2xs text-fg-subtle font-medium tracking-wide uppercase">
@@ -120,6 +128,18 @@ export default function RoadmapPage() {
                                 .map((id) => getCapability(id)?.label ?? id)
                                 .join(', ')}
                             </p>
+                          ) : null}
+                          {item.evidence && item.evidence.length > 0 ? (
+                            <div className="text-fg-subtle text-xs">
+                              <span className="font-medium">Evidence</span>
+                              <ul className="mt-0.5 space-y-0.5">
+                                {item.evidence.map((entry) => (
+                                  <li key={entry} className="forge-numeric break-all">
+                                    {entry}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
                           ) : null}
                         </div>
                       ) : null}

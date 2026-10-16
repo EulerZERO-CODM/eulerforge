@@ -10,7 +10,14 @@ Conventions for humans and coding agents editing Euler's Forge. Read
 npm ci                 # reproducible install from package-lock.json
 npm run verify         # format:check → lint → typecheck → test → build  (same as CI)
 npm run dev            # development server
+npm run test:e2e       # Playwright against the production build (npm run build first)
 ```
+
+`npm run test:e2e` is the only way to check anything that depends on real browser behaviour — native
+pointer capture, the browser's own canvas rasteriser, a file download. jsdom supplies none of the
+three, so a unit test over those paths proves nothing about them (ADR-0018). Run `npm run test:e2e`
+before claiming such a capability works, and if Chromium is unavailable, say that the check was not
+run rather than implying it passed.
 
 `npm run typecheck` is expected to pass with or without a dev server running (`.next/dev/types` is
 excluded from the type-check project for that reason — see ADR-0003).
@@ -34,7 +41,12 @@ never weaken a check to make something pass.
 4. **Do not silence lint.** Fix the cause or add a narrow, commented disable. Blanket rule
    exclusions in `eslint.config.mjs` need a reason in the commit message.
 5. **Respect the layers.** `src/core/**` stays framework-free (no React, no DOM, no storage).
-   Components never import `src/core/persistence/**` — ESLint enforces it.
+   Browser-only calls — creating a canvas, handing a file to the browser — belong in
+   `src/lib/browser/**` and are composed with core values by the interface. Components never import
+   `src/core/persistence/**`, and components and core never import `src/lib/browser/**`. ESLint
+   enforces all three in `eslint.config.mjs` (ADR-0019). The single exception is the storage
+   boundary: `src/core/persistence/storage.ts` probes `window.localStorage` behind a server-render
+   guard and reports the volatile fallback (ADR-0006).
 6. **Documents are immutable.** Mutate through `applyDocumentPatch` / `DocumentSession.commit`, never
    in place.
 7. **Route integrity.** Every href a user can click must resolve to a page under `src/app`. Tests for
@@ -67,6 +79,7 @@ never weaken a check to make something pass.
 | A capability claim   | Entry in `src/core/platform/status.ts` with `verification` evidence.                                    |
 | A roadmap item       | `src/core/platform/roadmap.ts` with dependencies and measurable completion criteria.                    |
 | A dependency         | Justify it in the PR description; prefer platform features. Record anything architectural.              |
+| A browser-only claim | A spec in `e2e/**` that reads persisted state or downloaded bytes; `docs/ROADMAP.md` lists what it still does not reach. |
 | A new ADR            | Append to `docs/DECISIONS.md` with context, decision, reasoning and consequences.                      |
 
 ## Tests

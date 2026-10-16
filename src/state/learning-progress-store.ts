@@ -72,6 +72,14 @@ export class LearningProgressStore {
     return this.store.getState();
   }
 
+  /**
+   * The state a server render saw: the store is created with this value and may load afterwards, and
+   * React needs the first of the two to hydrate against the markup the server sent (see `useStore`).
+   */
+  public get initialState(): LearningProgressState {
+    return this.store.initialState;
+  }
+
   private load(): void {
     const raw = this.storage.get(LEARNING_PROGRESS_KEY);
     if (!raw.ok || raw.value === null) {

@@ -7,10 +7,15 @@
  */
 
 export type RoadmapPhaseStatus = 'complete' | 'in-progress' | 'planned' | 'exploratory';
-export type RoadmapItemStatus = 'done' | 'in-progress' | 'planned' | 'exploratory';
+/**
+ * `partial` exists so a genuinely half-finished item does not have to choose between overclaiming
+ * (`done`) and underclaiming (`planned`). Its `gap` says what is missing.
+ */
+export type RoadmapItemStatus = 'done' | 'partial' | 'in-progress' | 'planned' | 'exploratory';
 
 export const ROADMAP_STATUS_LABELS: Readonly<Record<RoadmapItemStatus, string>> = {
   done: 'Done',
+  partial: 'Partially done',
   'in-progress': 'In progress',
   planned: 'Planned',
   exploratory: 'Exploratory',
@@ -25,6 +30,13 @@ export type RoadmapItem = {
   readonly dependsOn: readonly string[];
   /** How we will know it is finished — measurable, not aspirational. */
   readonly completionCriteria: readonly string[];
+  /**
+   * What actually demonstrates the claim: test files, or an explicit manual step.
+   * Required for `done`; the test suite checks that every named file exists.
+   */
+  readonly evidence?: readonly string[];
+  /** What is still missing, for `partial` and `in-progress` items. */
+  readonly gap?: string;
   /** Links into the capability ledger in ./status.ts. */
   readonly capabilityIds: readonly string[];
 };
@@ -57,6 +69,13 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Invalid documents cannot be constructed through the factory',
           'A v0 document migrates to the current schema and validates',
         ],
+        evidence: [
+          'src/core/documents/schema.test.ts',
+          'src/core/documents/factories.test.ts',
+          'src/core/documents/migrations.test.ts',
+          'src/core/documents/units.test.ts',
+          'src/core/documents/geometry.test.ts',
+        ],
         capabilityIds: ['core.document-model', 'core.migrations', 'core.unit-conversion'],
       },
       {
@@ -70,6 +89,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Undo and redo restore exact prior states',
           'Depth is bounded and label metadata survives',
         ],
+        evidence: ['src/core/history/history.test.ts'],
         capabilityIds: ['core.history'],
       },
       {
@@ -83,6 +103,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Registering an invalid studio produces a reported issue',
           'CI fails if a studio claims availability without an entry route',
         ],
+        evidence: ['src/core/studios/registry.test.ts', 'src/core/studios/definitions.test.ts'],
         capabilityIds: ['studios.registry'],
       },
       {
@@ -96,6 +117,12 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Every primary navigation target renders a real screen',
           'Creating a project from a preset produces a persisted, validated document',
           'A save is never claimed when storage is a session-only fallback',
+        ],
+        evidence: [
+          'src/components/shell/app-shell.test.tsx',
+          'src/components/shell/command-palette.test.tsx',
+          'src/components/shell/storage-notice.test.tsx',
+          'e2e/storage-restricted.spec.ts (a browser that refuses storage before the app starts: memory-only notice, no durable claim, editing still works, and a reload loses the project and says so)',
         ],
         capabilityIds: [
           'shell.navigation',
@@ -116,6 +143,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Content integrity checks pass',
           'Lesson exercise steps map to real, reachable routes',
         ],
+        evidence: ['src/core/learning/query.test.ts'],
         capabilityIds: ['learn.hub', 'learn.progress'],
       },
       {
@@ -129,6 +157,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Query results paginate and facet correctly',
           'Sample content is labelled as sample everywhere it appears',
         ],
+        evidence: ['src/core/assets/catalog.test.ts', 'src/core/assets/query.test.ts'],
         capabilityIds: ['assets.catalogue'],
       },
       {
@@ -141,6 +170,9 @@ export const ROADMAP: readonly RoadmapPhase[] = [
         completionCriteria: [
           'npm run verify passes locally and in CI',
           'No test is skipped to make the pipeline green',
+        ],
+        evidence: [
+          'Command evidence rather than a test file: npm run verify (tsc, eslint, prettier, vitest, build) locally, and the Verify job on Node 22 and Node 24 for every push',
         ],
         capabilityIds: ['platform.tooling', 'platform.env-validation'],
       },
@@ -156,18 +188,24 @@ export const ROADMAP: readonly RoadmapPhase[] = [
     name: 'Phase 2 — Design Studio editing',
     summary:
       'Direct manipulation on the artboard: a layer model, text and shape tools, selection and transform, and raster export.',
-    status: 'planned',
+    status: 'in-progress',
     items: [
       {
         id: 'p2.layers',
         title: 'Layer model and scene tree',
         description:
-          'Documents gain an ordered scene tree of layers (text, shape, image placeholder) with selection state that is not persisted as history noise.',
-        status: 'planned',
+          'Documents carry an ordered scene of text, rectangle, ellipse and image layers, each with a stable id, geometry, appearance and settings. Selection and other transient interaction state never reach the document or the history labels.',
+        status: 'done',
         dependsOn: ['p1.core', 'p1.history'],
         completionCriteria: [
           'Layer operations are commands with labels and undo',
           'A document with layers still validates against the schema and migrates forward',
+        ],
+        evidence: [
+          'src/core/documents/layer-operations.test.ts (add, update, duplicate, delete, reorder, stable z-order)',
+          'src/core/documents/migrations.test.ts (v0 to v1 to v2, v1 to v2 gains an empty scene)',
+          'src/core/documents/layer-persistence.test.ts (layers survive JSON, .forge.json and reload)',
+          'src/components/workspace/workspace-editor.test.tsx (selection is not persisted, list keyboard model)',
         ],
         capabilityIds: ['studios.design'],
       },
@@ -175,36 +213,60 @@ export const ROADMAP: readonly RoadmapPhase[] = [
         id: 'p2.text',
         title: 'Text tool with typography controls',
         description:
-          'Font family stack, size, weight, line height, tracking, alignment and colour.',
-        status: 'planned',
+          'Font family stack, size, weight, line height, tracking, alignment and colour, edited from the selection inspector and laid out by the shared renderer.',
+        status: 'done',
         dependsOn: ['p2.layers'],
         completionCriteria: [
           'Text renders at correct position and wraps inside its box',
           'Typography settings round-trip through the project file',
+        ],
+        evidence: [
+          'src/core/render/text-layout.test.ts (wrapping, alignment, truncation reporting)',
+          'src/core/render/paint.test.ts (an overflowing text layer is clipped to its box, which is what the export report tells the user)',
+          'src/core/export/raster.test.ts (text painted at its frame position in real pixels)',
+          'src/core/documents/layer-persistence.test.ts (newlines and alignment survive the project file)',
+          'src/core/documents/validation.test.ts (typography ranges rejected with field messages)',
+          'e2e/text-wrapping.spec.ts (real browser font metrics, no stubbed measure: the same wrapped lines with the same ink bands at 25%, 100% and 200% zoom, read back from the artboard canvas, and nothing painted below the box)',
         ],
         capabilityIds: [],
       },
       {
         id: 'p2.transform',
         title: 'Selection, move, resize and snapping',
-        description: 'Direct manipulation with snapping to guides, grid and sibling edges.',
-        status: 'planned',
+        description:
+          'Direct manipulation with snapping to guides, grid lines and sibling edges. A gesture previews live and commits once, in document coordinates, independent of zoom.',
+        status: 'done',
         dependsOn: ['p2.layers'],
         completionCriteria: [
           'Snapping is deterministic and can be disabled',
           'Every transform is one undoable step',
+        ],
+        evidence: [
+          'src/core/editor/gesture.test.ts (move, group resize, locked layers, snapping on and off, cancellation)',
+          'src/core/documents/scene-geometry.test.ts (hit-testing, resize anchors, snap targets, group transforms)',
+          'src/components/workspace/workspace-editor.test.tsx (one history entry per gesture, group resize and undo, locked layers, keyboard paths)',
+          'src/components/workspace/document-stage.test.tsx (keyboard equivalents for every pointer action)',
+          'e2e/workspace.spec.ts (real pointer capture: select and modifier-select, group move, single and group resize with undo, Escape cancellation, locked layers, bulk duplicate and reorder, keyboard-only editing)',
+          'e2e/snapping.spec.ts (a drag whose pointer stops three screen pixels short of the canvas centre, at 25%, 100% and 200% zoom: the persisted frame lands on the target, the drawn guide sits on the screen pixel the document implies - measured from the artboard box, not the viewport - and the guide is found in a screenshot of the artboard in rows the layer does not occupy)',
         ],
         capabilityIds: ['studios.design'],
       },
       {
         id: 'p2.raster-export',
         title: 'Raster export pipeline',
-        description: 'PNG/JPEG export via an offscreen renderer, with scale and quality options.',
-        status: 'planned',
+        description:
+          'PNG and JPEG export through the same render plan and painter as the live artboard, at the document size times a chosen scale, with JPEG quality and an explicit background for alpha.',
+        status: 'done',
         dependsOn: ['p2.layers'],
         completionCriteria: [
           'Exported pixels match the on-screen composition within tolerance',
           'Export is blocked with an explanation when unsupported elements exist',
+        ],
+        evidence: [
+          'src/core/export/raster.test.ts (dimensions per scale, stacking order, transparency, JPEG background, failures)',
+          'src/core/render/plan.test.ts (blocking versus advisory render issues)',
+          'src/components/workspace/document-aside.test.tsx (the panel refuses formats it cannot write)',
+          'e2e/export.spec.ts (a real browser exports a real PNG and JPEG and the downloaded bytes are checked: PNG signature and IHDR size, JPEG signature and frame size, at 1x and 2x; editing guides reach neither the bytes nor the pixels where a guide was drawn)',
         ],
         capabilityIds: ['core.rendering'],
       },
@@ -212,14 +274,59 @@ export const ROADMAP: readonly RoadmapPhase[] = [
         id: 'p2.asset-placement',
         title: 'Asset placement',
         description:
-          'Drag sample graphics and palettes into a document with attribution preserved.',
-        status: 'planned',
+          'Repository-authored graphics and sample palettes are applied to a document with attribution preserved. Placement works from the catalogue and from the editor, by click as well as drag; metadata-only records stay clearly labelled as reference-only.',
+        status: 'done',
         dependsOn: ['p2.layers', 'p1.assets'],
         completionCriteria: [
           'Placed assets record their licence in the document',
           'Unverified-provenance assets warn before use',
         ],
+        evidence: [
+          'src/core/editor/commands.test.ts (place, palette with attribution, unverified warning)',
+          'src/components/workspace/graphic-picker.test.tsx (click-to-place, reference-only records, warnings)',
+          'src/components/workspace/workspace-editor.test.tsx (placed graphic renders, saves and reloads)',
+          'src/core/export/raster.test.ts (a placed graphic reaches exported pixels)',
+          'e2e/attribution.spec.ts (placed through the picker, then compared field by field with the catalogue and with the record in the saved document, again after leaving and reopening the project, and again with a rewritten saved record so the panel has to follow the document rather than the catalogue)',
+        ],
         capabilityIds: ['assets.usable-files'],
+      },
+      {
+        id: 'p2.undo-coverage',
+        title: 'Undo/redo coverage for every editing action',
+        description:
+          'Every control and command that changes the document is exactly one labelled, reversible step, with selection and the other transient view state kept out of history entirely.',
+        status: 'done',
+        dependsOn: ['p2.layers'],
+        completionCriteria: [
+          'Each document-changing action produces one non-empty history label',
+          'Undo restores the previous document and redo the post-edit one, including attribution records and layer ordering',
+        ],
+        evidence: [
+          'src/core/editor/undo-redo.test.ts (45 commands: the patch keys, the label, undo and redo compared as content, plus the refused, unchanged and continuous cases)',
+          'src/components/workspace/undo-redo.test.tsx (76 controls through one shared runner: the document, the label, the panel, the store and the saved bytes, plus the blocks for actions that must not create a step)',
+          'e2e/undo-redo.spec.ts (the real shortcuts through the browser key pipeline, storage compared after every step, a placed graphic and its licence record, refused/unchanged/cancelled edits, and a reload that keeps the document and starts a fresh session)',
+          'docs/undo-redo-matrix.md (the action-to-test matrix, the provenance of the enumeration, and the known gaps)',
+        ],
+        capabilityIds: ['core.history', 'studios.design'],
+      },
+      {
+        id: 'p2.responsiveness',
+        title: 'Thirty-layer responsiveness',
+        description:
+          'Interaction cost is measured in a real browser on a thirty-layer document, against a budget fixed before the first measurement.',
+        status: 'partial',
+        dependsOn: ['p2.layers'],
+        completionCriteria: [
+          'A thirty-layer document with real catalogue graphics can be built deterministically for tests',
+          'Selecting, dragging, resizing, inspector edits, visibility, locking and undo/redo are measured in a real browser and gated on a published budget',
+        ],
+        evidence: [
+          "src/testing/thirty-layers.test.ts (the fixture: thirty layers of four types built through the editor's own commands, deterministic ids and timestamps, rendered with real font metrics and the repository's own asset files, zero issues)",
+          'e2e/performance.spec.ts (twelve scenarios, twelve interaction samples and five drags each after a warm-up, in a controlled CPU-slowdown phase and again at full speed, with the report published to the pull request)',
+          'docs/PERFORMANCE.md (method, thresholds, measured results, environment, and what the controlled slowdown can and cannot stand for)',
+        ],
+        gap: 'Responsiveness is measured on CI hardware under a four-fold CPU throttle rather than on a mid-range laptop, so the numbers are a regression gate for this repository and not evidence about a particular machine; the benchmark is Chromium only.',
+        capabilityIds: ['studios.design'],
       },
     ],
     exitCriteria: [
@@ -549,8 +656,10 @@ export const ROADMAP: readonly RoadmapPhase[] = [
 ] as const;
 
 export function roadmapCounts(): Readonly<Record<RoadmapItemStatus, number>> {
+  // Every key is initialised: an unlisted status would otherwise silently produce NaN.
   const counts: Record<RoadmapItemStatus, number> = {
     done: 0,
+    partial: 0,
     'in-progress': 0,
     planned: 0,
     exploratory: 0,

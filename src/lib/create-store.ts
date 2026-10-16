@@ -13,6 +13,16 @@ export type Store<TState> = {
   getState: () => TState;
   setState: (next: TState | ((previous: TState) => TState)) => void;
   subscribe: (listener: Listener) => () => void;
+  /**
+   * The state the store was created with.
+   *
+   * Kept because it is the state a *server* render saw: the server builds the store, renders it, and
+   * then discards it, so whatever the store says later is a client fact. React needs that first
+   * value to hydrate a store-backed component: a streamed or otherwise deferred boundary is hydrated
+   * after the shell's effects have already loaded the store, and rendering the *current* state there
+   * would contradict the markup the server sent (see `useStore`).
+   */
+  readonly initialState: TState;
 };
 
 /**
@@ -23,6 +33,8 @@ export type Store<TState> = {
 export type ReadableStore<TState> = {
   getState: () => TState;
   subscribe: (listener: Listener) => () => void;
+  /** See `Store['initialState']`: the state a server render saw. */
+  readonly initialState: TState;
 };
 
 export function createStore<TState>(initialState: TState): Store<TState> {
@@ -30,6 +42,7 @@ export function createStore<TState>(initialState: TState): Store<TState> {
   const listeners = new Set<Listener>();
 
   return {
+    initialState,
     getState: () => state,
     setState: (next) => {
       const resolved =

@@ -12,7 +12,12 @@ import { studioRegistry } from '../../core/studios';
 import { env } from '../../config/env';
 import { formatBytes, pluralise } from '../../lib/format';
 import { useForgeServices } from '../../state/forge-provider';
-import { useDocuments, useLearningProgress, usePreferences } from '../../state/hooks';
+import {
+  useDocuments,
+  useLearningProgress,
+  usePreferences,
+  useStorageStatus,
+} from '../../state/hooks';
 import { isVolatile } from '../../state/storage-status';
 import { Button } from '../ui/button';
 import { ConfirmDialog } from '../ui/dialog';
@@ -29,7 +34,8 @@ import { StatusDot } from '../ui/controls';
  * validated environment and the actual storage footprint so nothing has to be taken on trust.
  */
 export function SettingsView() {
-  const { documents, preferences, learning, toasts, storageStatus } = useForgeServices();
+  const { documents, preferences, learning, toasts } = useForgeServices();
+  const storageStatus = useStorageStatus();
   const volatile = isVolatile(storageStatus);
   const preferenceState = usePreferences();
   const library = useDocuments();

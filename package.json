@@ -2,7 +2,7 @@
   "name": "eulerforge",
   "version": "0.1.0",
   "private": true,
-  "description": "Euler's Forge — a browser-first, all-in-one creative platform. Create anything. Learn everything.",
+  "description": "Euler's Forge \u2014 a browser-first, all-in-one creative platform. Create anything. Learn everything.",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=22.12.0"
@@ -20,6 +20,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install --with-deps chromium",
     "verify": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build",
     "clean": "rm -rf .next out coverage"
   },
@@ -37,6 +39,8 @@
     "zod": "4.6.6"
   },
   "devDependencies": {
+    "@napi-rs/canvas": "^1.0.11",
+    "@playwright/test": "^1.64.0",
     "@tailwindcss/postcss": "4.3.3",
     "@testing-library/jest-dom": "7.0.1",
     "@testing-library/react": "16.3.3",

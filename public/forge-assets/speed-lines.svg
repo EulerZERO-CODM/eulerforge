@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="800" height="400" role="img" aria-label="Horizontal speed lines fading to the right">
+  <g fill="#f4f5f7">
+    <rect x="0" y="40" width="620" height="16" fill-opacity="0.95"/>
+    <rect x="0" y="90" width="520" height="12" fill-opacity="0.8"/>
+    <rect x="0" y="132" width="700" height="20" fill-opacity="1"/>
+    <rect x="0" y="188" width="430" height="10" fill-opacity="0.7"/>
+    <rect x="0" y="224" width="600" height="14" fill-opacity="0.85"/>
+    <rect x="0" y="272" width="330" height="8" fill-opacity="0.6"/>
+    <rect x="0" y="308" width="760" height="18" fill-opacity="0.9"/>
+    <rect x="0" y="352" width="280" height="10" fill-opacity="0.5"/>
+  </g>
+</svg>

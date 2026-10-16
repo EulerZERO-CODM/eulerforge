@@ -36,10 +36,11 @@ export default function HomePage() {
       <section className="space-y-6">
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone="accent" withDot>
-            Phase 1 platform shell
+            Phase 2 · Design Studio editing
           </Badge>
           <span className="text-fg-subtle text-xs">
-            Design Studio usable today · five studios designed and honest about their status
+            Design Studio edits and exports real artwork · five studios designed and honest about
+            their status
           </span>
         </div>
 

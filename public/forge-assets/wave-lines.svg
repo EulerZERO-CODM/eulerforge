@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="800" height="500" role="img" aria-label="Stacked wave lines">
+  <rect width="800" height="500" fill="#0f1115"/>
+  <g fill="none" stroke-linecap="round" stroke-width="8">
+    <path d="M20 90C140 20 260 160 380 90C500 20 620 160 780 90" stroke="#ff8a3d"/>
+    <path d="M20 190C140 120 260 260 380 190C500 120 620 260 780 190" stroke="#38e0c8"/>
+    <path d="M20 290C140 220 260 360 380 290C500 220 620 360 780 290" stroke="#4f8cff"/>
+    <path d="M20 390C140 320 260 460 380 390C500 320 620 460 780 390" stroke="#f4f5f7"/>
+  </g>
+</svg>

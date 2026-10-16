@@ -3,8 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DocumentAside } from './document-aside';
+import type { SceneImages } from './use-scene-images';
 import { ForgeProvider } from '../../state/forge-provider';
 import { createTestServices, type TestForgeServices } from '../../testing/forge-services';
+import { EMPTY_SELECTION } from '../../core/editor/selection';
 import { brand } from '../../core/types/brand';
 import type { DocumentSession } from '../../state/document-session';
 import type { CreateDocumentInput } from '../../core/documents/types';
@@ -39,6 +41,17 @@ const input: CreateDocumentInput = {
  * `DocumentSession.commit`, are persisted into the in-memory repository and come back through the
  * store.
  */
+/** The rail shares one image cache with the artboard; this fixture has no graphic layers. */
+const images: SceneImages = {
+  resolver: () => ({ error: 'this fixture has no graphics' }),
+  status: new Map(),
+  loading: false,
+  errors: [],
+  retry: () => {
+    /* nothing to retry in this fixture */
+  },
+};
+
 function renderAside(services: TestForgeServices, session: DocumentSession) {
   const view = () => {
     const state = session.getState();
@@ -48,12 +61,22 @@ function renderAside(services: TestForgeServices, session: DocumentSession) {
           api={{
             doc: state.document,
             commit: async (label, patch) => (await session.commit(label, patch)).ok,
+            run: async (command) =>
+              command.ok
+                ? (await session.commit(command.value.label, command.value.patch)).ok
+                : false,
             undo: () => {
               void session.undo();
             },
             redo: () => {
               void session.redo();
             },
+          }}
+          scene={state.document.scene}
+          images={images}
+          selection={EMPTY_SELECTION}
+          onSelectionChange={() => {
+            /* this test drives the rail, not the artboard */
           }}
           history={state.history}
           canUndo={state.canUndo}
@@ -153,11 +176,21 @@ describe('DocumentAside', () => {
     expect(screen.getByRole('button', { name: /download project file/i })).toBeEnabled();
   });
 
-  it('blocks a planned format and says plainly that no file will be produced', async () => {
+  it('reports PNG readiness honestly in an environment that cannot rasterise', async () => {
     const user = userEvent.setup();
     await user.selectOptions(screen.getByLabelText('Format'), 'png');
 
-    expect(await screen.findByRole('button', { name: /download unavailable/i })).toBeDisabled();
+    // jsdom ships no canvas 2D context, so the panel must say so instead of offering a dead button.
+    expect(await screen.findByText(/did not provide a canvas 2D context/i)).toBeInTheDocument();
+    expect(screen.getByText(/output size within limits/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /export blocked/i })).toBeDisabled();
+  });
+
+  it('still refuses a format that is not implemented at all', async () => {
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText('Format'), 'svg');
+
+    expect(await screen.findByRole('button', { name: /export blocked/i })).toBeDisabled();
     expect(screen.getByText(/not implemented in this build/i)).toBeInTheDocument();
   });
 

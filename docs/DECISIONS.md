@@ -414,3 +414,161 @@ browser.
 `sizing={{ kind: 'fluid' }}`, so the two meanings of "preview" never blur. Any future zoom mode (a
 zoom-to-selection, a percentage between the fixed levels) is added to the core function with tests
 rather than to the component's CSS.
+
+## ADR-0016 — One render plan and one painter serve both the artboard and export
+
+**Status:** Accepted
+
+**Context.** Phase 2 needed real drawing. The tempting shortcut is to let the editor be a DOM/SVG
+surface and hand export to a canvas library, or to let each of them interpret the document its own
+way. Both approaches drift: text wraps one way on screen and another in the file, stacking order
+differs, and "what you see is what you export" becomes a claim nobody can test. Pulling in a large
+graphics dependency would also have added a second geometry model to keep in sync.
+
+**Decision.**
+
+- The renderer is **Canvas 2D**, and the scene is described once as a **render plan**
+  (`src/core/render/plan.ts`): an ordered list of paint operations (background, rect, ellipse, text,
+  image) plus the issues found while planning. `src/core/render/paint.ts` draws that plan into any
+  object matching `PainterContext` (`globalAlpha`, `fillStyle`, `font`, the shape and image calls).
+- The **live artboard** and the **offscreen export** both build a plan from the same document and
+  paint it through the same code; they differ only in the transform they apply first (viewport zoom
+  versus output scale) and in which canvas implements `PainterContext`. The browser adapter is
+  `render/browser-canvas.ts` (moved to `src/lib/browser/canvas.ts` by ADR-0019); tests use recording
+  and real-canvas implementations.
+- **Text layout, wrapping, alignment and measurement live in the core** (`render/text-layout.ts`,
+  `render/measure.ts`) behind an injected `MeasureFactory`. Fonts are system stacks resolved per
+  platform, so nothing is downloaded and no webfont can fail at paint time.
+- **Guides, safe areas and selection handles stay DOM overlays.** They are interface, not artwork:
+  keeping them in the DOM preserves accessibility, keyboard focus and crisp hairlines at any zoom,
+  while keeping them out of the canvas guarantees they cannot leak into an export.
+- Raster output is produced offscreen at document size × scale, and `export/raster.ts` returns a
+  `Blob` plus width, height and byte size. Nothing in `src/core/**` touches `URL.createObjectURL` or
+  an `<a>` element; that lives in the single `export/download.ts` adapter (now
+  `src/lib/browser/download.ts`, outside the core — ADR-0019).
+- Cost: no SVG export, no vector paths, and large documents are rasterised rather than
+  incrementally redrawn. Those are roadmap items (Phase 3 owns the path model), not gaps hidden in
+  this decision.
+
+**Consequences.** An export cannot silently disagree with the artboard: both consume
+`buildRenderPlan`, and the raster tests assert on real pixels through `@napi-rs/canvas`. A layer type
+that the renderer does not understand produces a **blocking render issue**, so export refuses by
+name instead of emitting an empty file. Because the plan is data, it is also the place to add future
+outputs (SVG, PDF) without touching the editor.
+
+## ADR-0017 — No interaction is drag-only, and transient state never enters the document
+
+**Status:** Accepted
+
+**Context.** Direct manipulation invites two well-known shortcuts: features that only exist inside a
+drag gesture, and interaction state (selection, hover, in-flight drags) written into the saved
+document because it was convenient to keep it in the same object. The first makes the editor
+unusable without a pointing device; the second makes history noisy, exports unpredictable and files
+impossible to compare. Both are expensive to undo later, so Phase 2 fixed the rules up front.
+
+**Decision.**
+
+- **Every pointer action has a keyboard path.** Selection moves with Arrow keys (Shift extends),
+  `Home`/`End` jump to the edges, layers move with the arrow keys, resize is reachable from the
+  inspector's numeric fields, and reorder, duplicate, hide, rename and delete are buttons in the
+  layer tree with accessible names. The artboard itself is a labelled, focusable region.
+- **Transient state lives outside the document.** Selection, snapping toggles, guide visibility, the
+  marquee, an in-flight drag and the zoom level live in component state or `src/core/editor`, never
+  in `ForgeDocument`. They are therefore never persisted, never exported and never history entries —
+  the history list shows edits, not clicks.
+- **A gesture commits once.** Pointer moves preview locally; the release resolves the gesture
+  (`resolveGesture`) into a patch and commits it with one label. A gesture that changed nothing
+  resolves to `unchanged` and produces no commit and no history entry, and cancelling leaves the
+  document exactly as it was.
+- **Interaction state is not selectable by accident.** The artboard stops the default drag/text
+  selection behaviour, and pointer capture is released on both pointer-up and pointer-cancel so a
+  lost pointer cannot leave the editor stuck in a gesture.
+
+**Consequences.** Accessibility is a property of the architecture rather than a follow-up task, and
+undo history stays meaningful: one drag, one entry, with a label that names what moved. The cost is
+duplication — each pointer affordance needs a keyboard equivalent — and the test suite covers both
+paths (`document-stage.test.tsx` for the keyboard surface, `gesture.test.ts` for the pointer maths)
+so they cannot drift apart. Anything that can only be done by dragging is treated as a bug.
+
+## ADR-0018 — Browser behaviour is verified in a browser, in a separate CI job
+
+**Status:** accepted (Phase 2 review fixes).
+
+**Context.** The Phase 2 review found that the claims which depend on real browser behaviour — native
+pointer capture, the browser's own canvas rasteriser, and a file download actually starting — were
+covered only by reasoning and by a manual checklist. jsdom cannot supply any of the three: it has no
+canvas 2D context, no pointer capture, and no download mechanism, so unit tests over those paths can
+only ever assert that the code *called* something. That is not evidence for the claim, and saying
+"verified" on that basis would be exactly the kind of overclaiming these ADRs exist to prevent.
+
+**Decision.**
+
+- **A real browser verifies browser behaviour.** `e2e/**` runs `@playwright/test` against the
+  production build (`next start`), as its own CI job (`Browser (Chromium)`) that reports its own
+  result. It runs on Node 22 alongside — not instead of — the existing `Verify (22.x)` and
+  `Verify (24.x)` jobs, and it runs with retries disabled: a browser suite that only passes on the
+  second attempt is not evidence. It is deliberately *not* gated on those jobs: a failing unit test
+  must not be able to hide whether the product works in a browser, which is the whole reason for
+  having a second, independent signal.
+- **The harness reads the real product state.** Assertions are made against the document the
+  application persisted to `localStorage`, and against bytes the browser actually downloaded. No
+  application code is stubbed, mocked or replaced.
+- **The application does not depend on the harness.** Nothing under `src/**` imports from `e2e/**`.
+  The only hooks the tests use are inert `data-*` attributes that the component tests already rely
+  on, and they carry geometry the interface genuinely has (canvas size, zoom, layer ids).
+- **Residual gaps are written down, not glossed over.** Whatever the browser suite does not reach is
+  listed as a manual check in `docs/ROADMAP.md`, and the roadmap items it belongs to carry a `gap` or
+  stay `partial` in the ledger. Three gaps this record originally listed — rendered guide pixels,
+  hidden layers in exported pixels, zoom-level text rewrapping — were closed by later specs that
+  decode the canvas the browser drew (`e2e/snapping.spec.ts`, `e2e/export.spec.ts`,
+  `e2e/text-wrapping.spec.ts`); what is left is other browser engines, responsiveness with a 30-layer
+  document, and absolute font metrics that only a reference machine could assert.
+
+**Consequences.** The export, transform and selection claims now have executable evidence from the
+environment they are about. The cost is a build plus a Chromium download on every push, and a suite
+that has to be kept honest: it fails when the interface changes, which is the point. The risk to
+watch is a test that only asserts what a mock would have asserted anyway — so the browser specs
+assert persisted state and real file bytes, never the shape of a call.
+
+## ADR-0019 — Browser adapters live outside the core, and ESLint enforces the boundary
+
+**Context.** `AGENTS.md` and this document both say that `src/core/**` is framework-free: domain code
+that Node tests, the server renderer and the export pipeline can all run without a browser. Two Phase 2
+files broke that rule. `src/core/render/browser-canvas.ts` called `document.createElement('canvas')`,
+and `src/core/export/download.ts` used `window`, `document` and `URL.createObjectURL`. Both compiled and
+both were tested, but a reader could no longer tell from a path whether importing a module might reach
+for a DOM global.
+
+**Decision.**
+
+- **The adapters move out of the core.** `src/lib/browser/canvas.ts` owns the canvas element and the
+  `canRasteriseHere()` capability probe; `src/lib/browser/download.ts` owns `downloadBlob()`, the only
+  place a file is handed to the browser. Their responsibilities stay narrow: take values in, touch the
+  browser, report honestly (a `false` when there is no document to attach an anchor to, a thrown error
+  with a readable message when there is no canvas).
+- **The core keeps its architecture.** `src/core/export/raster.ts` still takes a *canvas factory* as an
+  argument, so the pipeline is unchanged — the live export passes the browser adapter, the tests pass a
+  recording canvas or a `@napi-rs/canvas` one. `src/core/export/project-file.ts` returns a payload
+  (`projectFilePayload`: contents, file name, MIME type) instead of performing a download, so serialising
+  a project file is testable with no browser and no DOM.
+- **The rule is executable, not aspirational.** `eslint.config.mjs` restricts, for `src/core/**`:
+  browser-only globals (`document`, `window`, `navigator`, storage, `HTMLCanvasElement`, `requestAnimationFrame`,
+  and the rest), `URL.createObjectURL`/`revokeObjectURL` by syntax selector (plain `URL` parsing stays
+  legal, and `Blob` stays legal because Node provides it), and imports of `src/lib/browser/**`,
+  `src/state/**`, `src/components/**`, `src/app/**`, React and Next. The single exemption is the storage
+  boundary — `src/core/persistence/storage.ts` and its tests — which probes `window.localStorage` behind a
+  server-render guard and reports the volatile fallback (ADR-0006).
+- **The fix also closed a hole in the old config.** Flat config replaces a rule's options rather than
+  merging them, so the ADR-0018 block that banned importing the Playwright harness from `src/**` was
+  silently replacing the components' persistence ban: a component could import
+  `src/core/persistence/**` and lint would stay green, while `AGENTS.md` claimed otherwise. The pattern
+  lists are now shared constants (`HARNESS_IMPORT_PATTERNS`, `PERSISTENCE_IMPORT_PATTERNS`,
+  `CORE_IMPORT_PATTERNS`) and every block that restricts imports states the harness ban alongside its own
+  patterns. The persistence patterns also now match the relative forms (`**/core/persistence/**`), which
+  the previous `../core/persistence/**` never matched from a component two directories down.
+
+**Consequences.** Every boundary that this repository talks about — components not reaching into
+persistence, core not knowing about React, the DOM, the state layer or routes — fails a lint run when it
+is crossed, and each was verified by introducing a deliberate violation and watching ESLint report it.
+A future module that needs a browser API has one obvious home, and a reviewer can accept or reject it as
+a one-line change of a pattern list rather than as an unwritten convention.

@@ -87,9 +87,15 @@ describe('capability ledger', () => {
     expect(getCapability('core.not-a-capability')).toBeUndefined();
   });
 
-  it('names the workspace panels honestly: the Design Studio entry is partial, not done', () => {
+  it('names the workspace panels honestly: the Design Studio entry stays partial until a browser run', () => {
     const design = PLATFORM_CAPABILITIES.find((capability) => capability.id === 'studios.design');
     expect(design?.status).toBe('partial');
-    expect(design?.description).toMatch(/no drawing tools/i);
+    // The editing tools exist and are described as existing...
+    expect(design?.description).toMatch(/artboard/i);
+    // ...and the gap names what the browser suite cannot cover rather than staying silent.
+    // Snapping, wrapping and the storage refusal are asserted in Chromium now, so the honest gap is
+    // about what still is not: other browsers, and editing performance.
+    expect(design?.gap).toMatch(/chromium only/i);
+    expect(design?.gap).toMatch(/30-layer|responsiveness/i);
   });
 });

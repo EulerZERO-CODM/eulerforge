@@ -1,9 +1,10 @@
 /**
  * Export and rendering formats.
  *
- * Format records describe *capabilities*, not implementation promises. In Phase 1 exactly one
- * format is implemented (`forge-json`: the project file itself); every other entry is marked
- * `planned` and the UI must present it as such (docs/DECISIONS.md -> ADR-0013).
+ * Format records describe *capabilities*, not implementation promises. `status` is the promise:
+ * `available` means this build really writes that file. Phase 1 shipped the project file only; Phase 2
+ * adds PNG and JPEG through the shared renderer (ADR-0016). Everything else stays `planned` and the UI
+ * must present it as such (docs/DECISIONS.md -> ADR-0013).
  */
 
 import type { DocumentTypeId } from '../documents/types';
@@ -59,9 +60,9 @@ export const EXPORT_FORMATS: readonly ExportFormat[] = [
     mediaType: 'image/png',
     kind: 'raster',
     capabilities: { transparency: true, animation: false, printReady: false, lossy: false },
-    status: 'planned',
+    status: 'available',
     notes:
-      'Lossless raster export with alpha. Requires the 2D raster renderer, which is not built yet.',
+      'Lossless raster export with alpha, drawn at the canvas size multiplied by the chosen scale. Transparency is preserved exactly.',
   },
   {
     id: formatId('jpg'),
@@ -70,8 +71,9 @@ export const EXPORT_FORMATS: readonly ExportFormat[] = [
     mediaType: 'image/jpeg',
     kind: 'raster',
     capabilities: { transparency: false, animation: false, printReady: true, lossy: true },
-    status: 'planned',
-    notes: 'Smaller photographic output, no alpha. Planned with quality controls.',
+    status: 'available',
+    notes:
+      'Smaller photographic output with a quality control. No alpha: transparent areas are flattened onto a background you choose.',
   },
   {
     id: formatId('webp'),

@@ -89,6 +89,14 @@ export class DocumentsStore {
     return this.store.getState();
   }
 
+  /**
+   * The state a server render saw: the store is created with this value and may load afterwards, and
+   * React needs the first of the two to hydrate against the markup the server sent (see `useStore`).
+   */
+  public get initialState(): DocumentsState {
+    return this.store.initialState;
+  }
+
   /** Loads the library. Safe to call repeatedly; the second call re-reads storage. */
   public async load(): Promise<Result<readonly ForgeDocument[]>> {
     this.store.setState((previous) => ({ ...previous, status: 'loading', error: null }));

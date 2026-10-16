@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 700" width="700" height="700" role="img" aria-label="Outlined hexagonal tiles">
+  <rect width="700" height="700" fill="#141821"/>
+  <g fill="none" stroke="#4f8cff" stroke-width="4">
+    <path d="M150 90l60 35v70l-60 35-60-35v-70z"/>
+    <path d="M330 90l60 35v70l-60 35-60-35v-70z"/>
+    <path d="M510 90l60 35v70l-60 35-60-35v-70z"/>
+    <path d="M240 190l60 35v70l-60 35-60-35v-70z"/>
+    <path d="M420 190l60 35v70l-60 35-60-35v-70z"/>
+    <path d="M150 290l60 35v70l-60 35-60-35v-70z"/>
+    <path d="M330 290l60 35v70l-60 35-60-35v-70z"/>
+    <path d="M510 290l60 35v70l-60 35-60-35v-70z"/>
+    <path d="M240 390l60 35v70l-60 35-60-35v-70z"/>
+    <path d="M420 390l60 35v70l-60 35-60-35v-70z"/>
+    <path d="M150 490l60 35v70l-60 35-60-35v-70z"/>
+    <path d="M330 490l60 35v70l-60 35-60-35v-70z"/>
+    <path d="M510 490l60 35v70l-60 35-60-35v-70z"/>
+  </g>
+</svg>
