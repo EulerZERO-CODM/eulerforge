@@ -187,12 +187,13 @@ and the commit it measured (`GITHUB_HEAD_SHA` in CI, `local` in the sandbox).
 
 Every complete CI run of this benchmark that has a durable report, newest first. `43c4008` is the commit
 that fixed the harness's preparation; **every commit after it changes documentation only**, so `9eb530e`,
-`5a81f69`, `a585815`, `ec28a27`, `bd9e4bc`, `712356f` and anything that follows them measure
+`5a81f69`, `a585815`, `ec28a27`, `bd9e4bc`, `712356f`, `30226cd` and anything that follows them measure
 byte-identical application code with a byte-identical benchmark — each row below is the same measurement,
 repeated, on a different runner instance.
 
 | Run | Workflows — pull request · push | Browser (Chromium) jobs | Verdict | Report |
 | --- | --- | --- | --- | --- |
+| `30226cd` | [38904344065](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38904344065) · [38904334965](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38904334965) | `116984071105` · `116984039385`, both **success** | every gated scenario inside its budget | [`perf-reports/30226cd.md`](perf-reports/30226cd.md) |
 | `712356f` | [38903342825](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38903342825) · [38903334641](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38903334641) | `116980722368` · `116980696527`, both **success** | every gated scenario inside its budget | [`perf-reports/712356f.md`](perf-reports/712356f.md) |
 | `bd9e4bc` | [38902518079](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38902518079) · [38902512572](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38902512572) | `116977966407` · `116977948966`, both **success** | every gated scenario inside its budget | [`perf-reports/bd9e4bc.md`](perf-reports/bd9e4bc.md) |
 | `ec28a27` | [38901511905](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38901511905) · [38901506376](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38901506376) | `116974623843` · `116974642009`, both **success** | every gated scenario inside its budget | [`perf-reports/ec28a27.md`](perf-reports/ec28a27.md) |
@@ -251,17 +252,19 @@ so gating on the fast phase would make the benchmark flaky rather than informati
 22.2–53.1 ms and p95 22.5–63.4 ms; drag gaps p50 16.7 ms with a worst of 50.0 ms over 276 / 251 / 224 gaps,
 0 % over 50 ms.
 
-The runs that followed — `ec28a27`, `bd9e4bc` and `712356f`, all documentation-only, so the same application
-and the same harness — are archived beside it and land in the same band on different runner instances:
+The runs that followed — `ec28a27`, `bd9e4bc`, `712356f` and `30226cd`, all documentation-only, so the same
+application and the same harness — are archived beside it and land in the same band on different runner
+instances:
 
 | Archived run | Gated interactions, p95 range | `select-layer` p95 | `undo` p95 | `redo` p95 | Drag gaps (5 drags each) | Longest block |
 | --- | ---: | ---: | ---: | ---: | --- | ---: |
+| `30226cd` | 16.7–56.2 ms | 55.5 ms | 43.9 ms | 56.2 ms | 405 / 389 / 329, 0 % over 50 ms | 52 ms |
 | `712356f` | 16.7–66.6 ms | 41.7 ms | 66.6 ms | 51.6 ms | 433 / 399 / 339, 0 % over 50 ms | 58 ms |
 | `bd9e4bc` | 16.7–86.1 ms | 27.9 ms | 86.1 ms | 48.5 ms | 370 / 391 / 308, 0 % over 50 ms | 83 ms |
 | `ec28a27` | 41.2–66.2 ms | 42.7 ms | 54.1 ms | 54.4 ms | 430 / 403 / 333, 0 % over 50 ms | 106 ms |
 
-The reported CPU moves between runs on identical code: `bd9e4bc` ran on an AMD EPYC **9V45**, `abc7982` on a
-9V74, and `a585815`, `ec28a27`, `43c4008` and `712356f` on a 7763. That is the runner class changing under the
+The reported CPU moves between runs on identical code: `bd9e4bc` ran on an AMD EPYC **9V45**, `abc7982` and
+`30226cd` on a 9V74, and `a585815`, `ec28a27`, `43c4008` and `712356f` on a 7763. That is the runner class changing under the
 job, not the application changing under the benchmark — which is why the budget is a regression gate rather
 than a stopwatch. Every one of these rows is inside the same fixed budget.
 
@@ -353,6 +356,7 @@ means to press, and fails a scenario if the document it is measuring is no longe
 
 | Run | `select-layer` p50 | `select-layer` p95 | `undo` p95 | `redo` p95 | Harness |
 | --- | ---: | ---: | ---: | ---: | --- |
+| `30226cd` | 22.2 ms | 55.5 ms | 43.9 ms | 56.2 ms | fixed (documentation-only commit) |
 | `712356f` | 24.9 ms | 41.7 ms | 66.6 ms | 51.6 ms | fixed (documentation-only commit) |
 | `bd9e4bc` | 25.7 ms | 27.9 ms | 86.1 ms | 48.5 ms | fixed (documentation-only commit) |
 | `ec28a27` | 25.5 ms | 42.7 ms | 54.1 ms | 54.4 ms | fixed (documentation-only commit) |
@@ -368,8 +372,8 @@ whichever rows it managed to measure. Two things about this table are deliberate
 - **It lists only runs whose numbers were written down when they ran.** The browser job rewrites one
   comment per pull request, so an earlier run's report is *replaced*, not added to. `5a81f69` passed the
   same benchmark on the same code, and its figures are no longer quotable anywhere: they were not copied out
-  before the next run overwrote them. That is why `a585815`, `ec28a27`, `bd9e4bc` and `712356f` have files
-  under `docs/perf-reports/`, and why every run transcribed from here on gets one.
+  before the next run overwrote them. That is why `a585815`, `ec28a27`, `bd9e4bc`, `712356f` and `30226cd`
+  have files under `docs/perf-reports/`, and why every run transcribed from here on gets one.
 - **`abc7982` is a pre-fix run**, shown for the trend in the rows it *did* measure (eleven of twelve): it is
   not a complete result and its `undo`/`redo` figures come from a different sequence of preceding edits.
 
