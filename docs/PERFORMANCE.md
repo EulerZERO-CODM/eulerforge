@@ -183,14 +183,19 @@ and the commit it measured (`GITHUB_HEAD_SHA` in CI, `local` in the sandbox).
 ### The acceptance run: CI, both phases, all twelve scenarios
 
 The commit that fixed the benchmark's preparation, `43c4008`, was the first run in which **every scenario
-completed in both phases** in CI; the same benchmark then ran again on the branch's last commit, `9eb530e`,
-which changes this file and nothing else, and reported the same outcome. Both are recorded here, because
-between them they are what “the benchmark passes on this branch” means:
+completed in both phases** in CI. Every commit after it changes documentation only, so the harness and the
+application under measurement are identical across them — CI re-ran the whole benchmark on each and
+reported the same verdict each time, and its report comment always names the commit it measured:
 
-| Run | Workflow | Browser (Chromium) job | Browser specs |
+| Run | Workflow | Browser (Chromium) job | Verdict |
 | --- | --- | --- | --- |
-| `43c4008` | pull request [38881828160](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38881828160) · push [38881820021](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38881820021) | 116910114267 · 116910141359, both **success** | 44 passed (5.0 m) |
-| `9eb530e` | pull request [38882742579](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38882742579) · push [38882736633](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38882736633) | 116913092201 · 116913111091, both **success** | see the run |
+| `43c4008` | pull request [38881828160](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38881828160) · push [38881820021](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38881820021) | 116910114267 · 116910141359, both **success** | 44 browser specs passed (5.0 m) |
+| `9eb530e` | pull request [38882742579](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38882742579) · push [38882736633](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38882736633) | 116913092201 · 116913111091, both **success** | every gated scenario inside its budget |
+| `5a81f69` | pull request [38883655191](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38883655191) · push [38883648322](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38883648322) | 116916083301 · 116916061574, both **success** | every gated scenario inside its budget |
+
+Any later commit on this branch is a documentation change like this one; the runner prints its own commit
+in the report header, so the comment on the pull request is always the authoritative pair of “what was
+measured” and “what it said”.
 
 The job publishes its report as a comment on the pull request (`<!-- eulerforge-perf-report -->`),
 rewriting the same comment on every run. The numbers below are copied unchanged from the final commit's
@@ -310,7 +315,8 @@ means to press, and fails a scenario if the document it is measuring is no longe
 
 Four CI runs of this benchmark on the same document reported `select-layer` p50 **18.8 ms** (`43c4008`),
 **24.5 ms** (`9eb530e`), **25.4 ms** (`abc7982`) and **39.8 ms** (`085f79a`) — a spread of more than a
-factor of two on identical application code, all of them passing. Shared CI runners have
+factor of two on identical application code, all of them passing. The tip run (`5a81f69`) reported
+`select-layer` p95 40.7 ms, `undo` 68.2 ms and `redo` 68.0 ms, and the same drag-gap shape. Shared CI runners have
 real, measurable variance, which is why the budget sits an order of magnitude above the observed cost
 rather than a margin around it, and why a single number from a single run is never the whole story. What
 the benchmark is for is catching a *gross* regression — a doubled critical path, a per-frame re-plan, a
