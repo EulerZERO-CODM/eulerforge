@@ -182,62 +182,62 @@ and the commit it measured (`GITHUB_HEAD_SHA` in CI, `local` in the sandbox).
 
 ### The acceptance run: CI, both phases, all twelve scenarios
 
-The commit that fixed the benchmark's preparation, `43c4008`, was the first run in which **every scenario
-completed in both phases** in CI. Every commit after it changes documentation only, so the harness and the
-application under measurement are identical across them — CI re-ran the whole benchmark on each and
-reported the same verdict each time, and its report comment always names the commit it measured:
+Every complete CI run of this benchmark on this branch, newest first. `43c4008` is the commit that fixed the
+harness's preparation; **every commit after it changes documentation only**, so the application code and the
+benchmark itself are byte-identical across `9eb530e`, `5a81f69`, `a585815` and anything that follows them —
+each run below is the same measurement, repeated, on a different runner instance.
 
-| Run | Workflow | Browser (Chromium) job | Verdict |
+| Run | Workflows — pull request · push | Browser (Chromium) jobs | Verdict |
 | --- | --- | --- | --- |
-| `43c4008` | pull request [38881828160](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38881828160) · push [38881820021](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38881820021) | 116910114267 · 116910141359, both **success** | 44 browser specs passed (5.0 m) |
-| `9eb530e` | pull request [38882742579](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38882742579) · push [38882736633](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38882736633) | 116913092201 · 116913111091, both **success** | every gated scenario inside its budget |
-| `5a81f69` | pull request [38883655191](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38883655191) · push [38883648322](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38883648322) | 116916083301 · 116916061574, both **success** | every gated scenario inside its budget |
+| **`a585815`** ← transcribed below | [38884557554](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38884557554) · [38884551247](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38884551247) | `116919037368` · `116919016584`, both **success** | 44 browser specs passed; every gated scenario inside its budget |
+| `5a81f69` | [38883655191](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38883655191) · [38883648322](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38883648322) | `116916083301` · `116916061574`, both **success** | every gated scenario inside its budget |
+| `9eb530e` | [38882742579](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38882742579) · [38882736633](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38882736633) | `116913092201` · `116913111091`, both **success** | every gated scenario inside its budget |
+| `43c4008` | [38881828160](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38881828160) · [38881820021](https://github.com/EulerZERO-CODM/eulerforge/actions/runs/38881820021) | `116910114267` · `116910141359`, both **success** | 44 browser specs passed (5.0 m); every gated scenario inside its budget |
 
-Any later commit on this branch is a documentation change like this one; the runner prints its own commit
-in the report header, so the comment on the pull request is always the authoritative pair of “what was
-measured” and “what it said”.
+The numbers below are the run CI published for **`a585815`**. The browser job writes its report as a comment
+on the pull request (`<!-- eulerforge-perf-report -->`, rewritten on every run and always naming the commit
+it measured), and this section transcribes that comment without editing:
 
-The job publishes its report as a comment on the pull request (`<!-- eulerforge-perf-report -->`),
-rewriting the same comment on every run. The numbers below are copied unchanged from the final commit's
-comment:
-
-- Commit: `9eb530ee1f98e88dd9011ab821b262f5dee4a138`
-- Browser: Chromium 156.0.8078.4 · Runtime: Node v22.23.3 on linux x64
+- Commit: `a585815d1be7c1134e314b512f7ab8163a84c9fc`
+- Browser: Chromium 156.0.8078.4 (Playwright) · Runtime: Node v22.23.3 on linux x64
 - CPU: 2 vCPU — AMD EPYC 7763 64-Core Processor (GitHub-hosted Ubuntu runner)
 - Gated phase: CDP `Emulation.setCPUThrottlingRate: 4`, 12 interaction samples and 5 drag samples per
   scenario, after one unrecorded warm-up pass
+- Comment: [pull/2#issuecomment-6209459826](https://github.com/EulerZERO-CODM/eulerforge/pull/2#issuecomment-6209459826)
+
+**Result: every gated scenario stayed inside its budget.**
 
 | Scenario | Phase | n | p50 | p95 | worst |
 | --- | --- | ---: | ---: | ---: | ---: |
-| `select-layer` | throttled | 12 | 24.5 ms | 40.7 ms | 40.7 ms |
-| `select-group` | throttled | 12 | 24.8 ms | 41.7 ms | 41.7 ms |
-| `hide-layer` | throttled | 12 | 25.1 ms | 41.7 ms | 41.7 ms |
-| `lock-layer` | throttled | 12 | 25.0 ms | 41.3 ms | 41.3 ms |
-| `inspector-x` | throttled | 12 | 37.7 ms | 55.0 ms | 55.0 ms |
-| `inspector-width` | throttled | 12 | 39.8 ms | 66.1 ms | 66.1 ms |
-| `opacity-key` | throttled | 12 | 24.7 ms | 34.1 ms | 34.1 ms |
-| `undo` | throttled | 12 | 41.7 ms | 68.2 ms | 68.2 ms |
-| `redo` | throttled | 12 | 39.3 ms | 68.0 ms | 68.0 ms |
-| `drag-layer` | throttled | 5 | 16.7 ms | 16.7 ms | 33.4 ms |
-| `drag-group` | throttled | 5 | 16.7 ms | 16.7 ms | 16.8 ms |
+| `select-layer` | throttled | 12 | 24.2 ms | 39.1 ms | 39.1 ms |
+| `select-group` | throttled | 12 | 23.6 ms | 40.0 ms | 40.0 ms |
+| `hide-layer` | throttled | 12 | 25.1 ms | 56.8 ms | 56.8 ms |
+| `lock-layer` | throttled | 12 | 23.5 ms | 40.6 ms | 40.6 ms |
+| `inspector-x` | throttled | 12 | 47.1 ms | 64.1 ms | 64.1 ms |
+| `inspector-width` | throttled | 12 | 47.2 ms | 63.6 ms | 63.6 ms |
+| `opacity-key` | throttled | 12 | 26.1 ms | 51.2 ms | 51.2 ms |
+| `undo` | throttled | 12 | 49.9 ms | 59.7 ms | 59.7 ms |
+| `redo` | throttled | 12 | 40.0 ms | 66.5 ms | 66.5 ms |
+| `drag-layer` | throttled | 5 | 16.7 ms | 16.8 ms | 33.4 ms |
+| `drag-group` | throttled | 5 | 16.7 ms | 16.8 ms | 33.3 ms |
 | `resize-handle` | throttled | 5 | 16.7 ms | 16.8 ms | 33.4 ms |
 
-The three drag rows are **gaps between animation frames**, not interaction latency: 16.7 ms is one frame
-at 60 Hz, so the drags kept painting at display rate. Pooled over the run: 422 gaps for `drag-layer`, 390
-for `drag-group`, 325 for `resize-handle`, with **0 % of them over 50 ms** in all three. Long tasks were
-0–4 per scenario with a worst block of 62 ms against the 600 ms freeze budget, and input events over
-16 ms ran 28–150 per scenario with a worst of 144 ms. Nothing came near a threshold; the slowest single
-interaction of the run was 68.2 ms against a 500 ms worst-case budget.
+The three drag rows are **gaps between animation frames**, not interaction latency: 16.7 ms is one frame at
+60 Hz, so the drags kept painting at display rate. Pooled over the run: 427 gaps for `drag-layer`, 399 for
+`drag-group`, 340 for `resize-handle`, with **0 % of them over 50 ms** in all three. Long tasks were 0–9 per
+scenario with a worst single block of 64 ms (`redo`) against the 600 ms freeze budget — one order of
+magnitude away from “frozen”. Input events over 16 ms ran 28–150 per scenario with a worst of 152 ms, and
+the slowest single interaction in the run was 66.5 ms (`redo`) against the 500 ms worst-case budget.
 
-For comparison, the earlier complete CI run (`43c4008`) reported `select-layer` 18.8 / 37.7 ms,
-`undo` 40.2 / 49.6 ms and `redo` 38.0 / 62.6 ms p50 / p95, with drag gaps 431, 398 and 338 at a 16.7 ms
-median and 0 % over 50 ms — the same shape, which is the point: this is a regression gate, not a
-stopwatch.
+The same run's unthrottled phase, published for context and deliberately **not** gated — GitHub runners vary,
+so gating on the fast phase would make the benchmark flaky rather than informative: interactions p50
+22.2–53.1 ms and p95 22.5–63.4 ms; drag gaps p50 16.7 ms with a worst of 50.0 ms over 276 / 251 / 224 gaps,
+0 % over 50 ms.
 
-The final commit's unthrottled phase, published for context and deliberately not gated: interactions p50
-24.6–41.9 ms, p95 25.2–63.6 ms; drag gaps p50 16.7 ms with a worst of 50.0 ms. The fast phase is the one
-most exposed to a noisy neighbour on a shared runner, so gating on it would make the benchmark flaky
-rather than informative.
+For comparison, the earlier complete run transcribed at the time — `43c4008`, the run that fixed the harness
+— reported `select-layer` 18.8 / 37.7 ms, `undo` 40.2 / 49.6 ms and `redo` 38.0 / 62.6 ms p50 / p95, with
+drag gaps 431, 398 and 338 at a 16.7 ms median and 0 % over 50 ms. Same shape, different runner: this is a
+regression gate, not a stopwatch, and a number from one run is never evidence about a machine class.
 
 ### The same harness in the sandbox, for reproduction
 
@@ -260,10 +260,14 @@ the same sample counts, three times in a row while the fix was being verified �
 | `resize-handle` | throttled | 5 | 16.7 ms | 16.7 ms | 16.8 ms |
 
 Same picture: every gated scenario inside its budget, drag gaps at display rate, 0 % over 50 ms. It is
-published because it shows the harness is reproducible outside CI — not as a substitute for the CI run
-above, whose browser build, CPU and runner class are different.
+published because it shows the harness is reproducible outside CI — not as a substitute for the CI runs
+above, whose browser build, CPU and runner class are different, and not as evidence about any particular
+machine.
 
-### The CI failure these measurements replaced, and why it failed
+### Historical: the CI failure these measurements replaced, and why it failed
+
+Everything in this subsection is **history**, kept because the fix is only credible with the failure it
+fixed. `abc7982` is not the head of anything and its numbers are not a current result.
 
 Before the fix, CI kept failing the same job on a *preparation*, not on latency. At `abc7982` the job
 (Browser (Chromium) check run `116862619447`) measured eleven scenarios and could not prepare the twelfth:
@@ -289,7 +293,8 @@ is never counted as a fast measurement. The report said so in its own words (“
 be measured”), the failing row read `scenario must run`, and the check-run annotation carried the selection
 state the page reported at that moment.
 
-Four harness defects were behind it:
+Four harness defects in the *old harness* were behind it — the current one is described in “The acceptance
+run” above:
 
 1. Rows were found by the layer's *name*. The name-keyed lookup stopped resolving the moment the layer was
    renamed by something else, turning a measurement into a twenty-second timeout that described nothing.
@@ -313,14 +318,31 @@ means to press, and fails a scenario if the document it is measuring is no longe
 
 ### Runner variance, stated plainly
 
-Four CI runs of this benchmark on the same document reported `select-layer` p50 **18.8 ms** (`43c4008`),
-**24.5 ms** (`9eb530e`), **25.4 ms** (`abc7982`) and **39.8 ms** (`085f79a`) — a spread of more than a
-factor of two on identical application code, all of them passing. The tip run (`5a81f69`) reported
-`select-layer` p95 40.7 ms, `undo` 68.2 ms and `redo` 68.0 ms, and the same drag-gap shape. Shared CI runners have
-real, measurable variance, which is why the budget sits an order of magnitude above the observed cost
-rather than a margin around it, and why a single number from a single run is never the whole story. What
-the benchmark is for is catching a *gross* regression — a doubled critical path, a per-frame re-plan, a
-synchronous decode — not adjudicating 15 ms.
+`select-layer`, in every CI run of this benchmark on this branch whose numbers were transcribed at the time:
+
+| Run | `select-layer` p50 | `select-layer` p95 | `undo` p95 | `redo` p95 | Harness |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `a585815` (transcribed in §6) | 24.2 ms | 39.1 ms | 59.7 ms | 66.5 ms | fixed |
+| `43c4008` | 18.8 ms | 37.7 ms | 49.6 ms | 62.6 ms | fixed |
+| `9eb530e` | 24.5 ms | 40.7 ms | 68.2 ms | 68.0 ms | fixed (documentation-only commit) |
+| `abc7982` | 25.4 ms | 44.4 ms | 25.9 ms | 54.0 ms | pre-fix; `resize-handle` never measured |
+| `085f79a` | 39.8 ms | 43.1 ms | — | — | pre-fix, earlier |
+
+That is a spread of more than a factor of two on identical application code, with every run passing
+whichever rows it managed to measure. Two things about this table are deliberate:
+
+- **It lists only runs whose numbers were written down when they ran.** The browser job rewrites one
+  comment per pull request, so an earlier run's report is *replaced*, not archived — `5a81f69` passed the
+  same benchmark on the same code and its figures are no longer quotable anywhere. That is a real limitation
+  of publishing the report as a comment, and it is why the two complete runs above are transcribed into this
+  file rather than left to be fetched later.
+- **`abc7982` is a pre-fix run**, shown for the trend in the rows it *did* measure (eleven of twelve): it is
+  not a complete result and its `undo`/`redo` figures come from a different sequence of preceding edits.
+
+Shared CI runners have real, measurable variance, which is why the budget sits an order of magnitude above
+the observed cost rather than a margin around it, and why a single number from a single run is never the
+whole story. What the benchmark is for is catching a *gross* regression — a doubled critical path, a
+per-frame re-plan, a synchronous decode — not adjudicating 15 ms.
 
 ## 7. What was profiled, and why nothing was optimised
 
