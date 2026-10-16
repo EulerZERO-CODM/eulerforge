@@ -127,7 +127,13 @@ export function freezeVectorContent(content: VectorContent): VectorContent {
  */
 export function pathFrameOf(path: VectorPath, fallback: Rect): Rect {
   const bounds = boundsOfPath(path);
-  if (!bounds) return createRect(fallback.x, fallback.y, Math.max(0, fallback.width), Math.max(0, fallback.height));
+  if (!bounds)
+    return createRect(
+      fallback.x,
+      fallback.y,
+      Math.max(0, fallback.width),
+      Math.max(0, fallback.height),
+    );
   return createRect(bounds.minX, bounds.minY, bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
 }
 
@@ -458,7 +464,10 @@ export function updateLayerSettings(
     case 'path':
       return patch.style
         ? updateLayer(scene, id, {
-            vector: { path: existing.vector.path, style: normaliseVectorStyle({ ...existing.vector.style, ...patch.style }) },
+            vector: {
+              path: existing.vector.path,
+              style: normaliseVectorStyle({ ...existing.vector.style, ...patch.style }),
+            },
           })
         : ok(scene);
   }
@@ -479,9 +488,13 @@ export function updatePathGeometry(
   if (!existing) return err(forgeError('not-found', 'That layer is no longer in the document.'));
   if (existing.type !== 'path') {
     return err(
-      forgeError('validation-failed', `Layer "${existing.name}" is a ${existing.type} layer, not a vector path.`, {
-        retryable: false,
-      }),
+      forgeError(
+        'validation-failed',
+        `Layer "${existing.name}" is a ${existing.type} layer, not a vector path.`,
+        {
+          retryable: false,
+        },
+      ),
     );
   }
   return updateLayer(scene, id, { vector: { path, style: existing.vector.style } });

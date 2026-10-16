@@ -93,7 +93,15 @@ const UNSUPPORTED_ELEMENTS = new Set([
 ]);
 
 /** Attributes whose value is a reference; a scheme or a rooted path is refused. */
-const REFERENCE_ATTRIBUTES = new Set(['href', 'xlink:href', 'src', 'xlink:show', 'from', 'to', 'values']);
+const REFERENCE_ATTRIBUTES = new Set([
+  'href',
+  'xlink:href',
+  'src',
+  'xlink:show',
+  'from',
+  'to',
+  'values',
+]);
 
 const NAMED_COLOURS: Readonly<Record<string, string>> = {
   black: '#000000',
@@ -257,7 +265,8 @@ class XmlScanner {
         this.position += 2;
         const closing = this.parseName();
         this.skipWhitespace();
-        if (this.source[this.position] !== '>') throw new XmlError(`Closing tag for "${closing}" is malformed.`, this.position);
+        if (this.source[this.position] !== '>')
+          throw new XmlError(`Closing tag for "${closing}" is malformed.`, this.position);
         this.position += 1;
         if (closing.toLowerCase() !== name.toLowerCase()) {
           throw new XmlError(`Element "${name}" is closed by "${closing}".`, this.position);
@@ -293,7 +302,9 @@ function decodeEntities(value: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
     .replace(/&#(\d+);/g, (_match, code: string) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_match, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_match, code: string) =>
+      String.fromCodePoint(Number.parseInt(code, 16)),
+    )
     .replace(/&amp;/g, '&');
 }
 
@@ -356,7 +367,9 @@ export function parseTransform(value: string): Matrix | null {
 
 function parseLength(value: string | undefined): number | null {
   if (value === undefined) return null;
-  const match = /^\s*([+-]?[0-9]*\.?[0-9]+(?:e[+-]?[0-9]+)?)\s*(px|pt|pc|mm|cm|in|%)?\s*$/i.exec(value);
+  const match = /^\s*([+-]?[0-9]*\.?[0-9]+(?:e[+-]?[0-9]+)?)\s*(px|pt|pc|mm|cm|in|%)?\s*$/i.exec(
+    value,
+  );
   if (!match) return null;
   const number = Number(match[1]);
   if (!Number.isFinite(number)) return null;
@@ -584,12 +597,20 @@ function geometryFor(element: RawElement, issues: SvgIssue[]): VectorPath | null
     case 'path': {
       const data = element.attributes.get('d');
       if (data === undefined) {
-        issues.push({ severity: 'warning', code: 'path.missing-d', message: '<path> without a "d" attribute was skipped.' });
+        issues.push({
+          severity: 'warning',
+          code: 'path.missing-d',
+          message: '<path> without a "d" attribute was skipped.',
+        });
         return null;
       }
       const parsed = parsePathData(data);
       if (!parsed.ok) {
-        issues.push({ severity: 'warning', code: 'path.invalid-d', message: `A <path> was skipped: ${parsed.error.message}` });
+        issues.push({
+          severity: 'warning',
+          code: 'path.invalid-d',
+          message: `A <path> was skipped: ${parsed.error.message}`,
+        });
         return null;
       }
       if (parsed.value.approximatedArcs > 0) {
@@ -614,14 +635,16 @@ function geometryFor(element: RawElement, issues: SvgIssue[]): VectorPath | null
         });
         return null;
       }
-      const rx = parseLength(element.attributes.get('rx')) ?? parseLength(element.attributes.get('ry')) ?? 0;
+      const rx =
+        parseLength(element.attributes.get('rx')) ?? parseLength(element.attributes.get('ry')) ?? 0;
       const ry = parseLength(element.attributes.get('ry')) ?? rx;
       const radius = Math.max(0, Math.min(rx, ry));
       if (radius > 0 && Math.abs(rx - ry) > 0.001) {
         issues.push({
           severity: 'approximated',
           code: 'rect.elliptical-corners',
-          message: 'A <rect> with different x and y corner radii was imported with the smaller of the two.',
+          message:
+            'A <rect> with different x and y corner radii was imported with the smaller of the two.',
         });
       }
       return rectanglePath({ minX: x, minY: y, maxX: x + width, maxY: y + height }, radius);
@@ -631,7 +654,11 @@ function geometryFor(element: RawElement, issues: SvgIssue[]): VectorPath | null
       const cy = parseLength(element.attributes.get('cy')) ?? 0;
       const r = parseLength(element.attributes.get('r'));
       if (r === null || r <= 0) {
-        issues.push({ severity: 'warning', code: 'circle.degenerate', message: 'A <circle> with no radius was skipped.' });
+        issues.push({
+          severity: 'warning',
+          code: 'circle.degenerate',
+          message: 'A <circle> with no radius was skipped.',
+        });
         return null;
       }
       return ellipsePath({ minX: cx - r, minY: cy - r, maxX: cx + r, maxY: cy + r });
@@ -642,7 +669,11 @@ function geometryFor(element: RawElement, issues: SvgIssue[]): VectorPath | null
       const rx = parseLength(element.attributes.get('rx'));
       const ry = parseLength(element.attributes.get('ry'));
       if (rx === null || ry === null || rx <= 0 || ry <= 0) {
-        issues.push({ severity: 'warning', code: 'ellipse.degenerate', message: 'An <ellipse> with no radius was skipped.' });
+        issues.push({
+          severity: 'warning',
+          code: 'ellipse.degenerate',
+          message: 'An <ellipse> with no radius was skipped.',
+        });
         return null;
       }
       return ellipsePath({ minX: cx - rx, minY: cy - ry, maxX: cx + rx, maxY: cy + ry });
@@ -718,9 +749,16 @@ function walk(element: RawElement, context: WalkContext, depth: number): void {
     return apply(context.matrixValue, parsed);
   })();
 
-  const style = styleFromAttributes(element.attributes, context.style, context.issues, null, 'style');
+  const style = styleFromAttributes(
+    element.attributes,
+    context.style,
+    context.issues,
+    null,
+    'style',
+  );
   const opacityAttribute = parseNumberOrNull(element.attributes.get('opacity'));
-  const opacity = context.opacity * (opacityAttribute === null ? 1 : Math.min(1, Math.max(0, opacityAttribute)));
+  const opacity =
+    context.opacity * (opacityAttribute === null ? 1 : Math.min(1, Math.max(0, opacityAttribute)));
 
   const isRoot = name === 'svg';
   if (name === 'g' || isRoot || name === 'defs') {
@@ -830,10 +868,14 @@ export function parseSvg(source: string): Result<SvgImportResult> {
   }
   if (source.length > SVG_LIMITS.maxBytes) {
     return err(
-      forgeError('validation-failed', `The file is larger than the ${String(Math.round(SVG_LIMITS.maxBytes / 1024))} KB import limit.`, {
-        detail: 'Reduce the drawing or export it at a smaller size.',
-        retryable: false,
-      }),
+      forgeError(
+        'validation-failed',
+        `The file is larger than the ${String(Math.round(SVG_LIMITS.maxBytes / 1024))} KB import limit.`,
+        {
+          detail: 'Reduce the drawing or export it at a smaller size.',
+          retryable: false,
+        },
+      ),
     );
   }
   if (!/<svg[\s>]/i.test(source)) {
@@ -846,9 +888,13 @@ export function parseSvg(source: string): Result<SvgImportResult> {
   } catch (error) {
     if (error instanceof XmlError) {
       return err(
-        forgeError('validation-failed', `The file could not be read at character ${String(error.position)}: ${error.message}`, {
-          retryable: false,
-        }),
+        forgeError(
+          'validation-failed',
+          `The file could not be read at character ${String(error.position)}: ${error.message}`,
+          {
+            retryable: false,
+          },
+        ),
       );
     }
     return err(forgeError('unknown', 'The file could not be read.', { detail: String(error) }));
@@ -856,7 +902,10 @@ export function parseSvg(source: string): Result<SvgImportResult> {
 
   if (root.name.toLowerCase() !== 'svg') {
     return err(
-      forgeError('validation-failed', `The root element is <${root.name}>; an SVG file must start with <svg>.`),
+      forgeError(
+        'validation-failed',
+        `The root element is <${root.name}>; an SVG file must start with <svg>.`,
+      ),
     );
   }
 
@@ -867,7 +916,11 @@ export function parseSvg(source: string): Result<SvgImportResult> {
     if (error instanceof ForbiddenSvgError) {
       return err(forgeError('unsupported', error.message, { retryable: false }));
     }
-    return err(forgeError('unknown', 'The file could not be checked for unsafe content.', { detail: String(error) }));
+    return err(
+      forgeError('unknown', 'The file could not be checked for unsafe content.', {
+        detail: String(error),
+      }),
+    );
   }
 
   const viewBoxAttribute = root.attributes.get('viewBox');
@@ -939,17 +992,25 @@ export function parseSvg(source: string): Result<SvgImportResult> {
   for (const child of root.children) walk(child, context, 1);
   if (context.elements.length > SVG_LIMITS.maxElements) {
     return err(
-      forgeError('validation-failed', `The file has more than ${String(SVG_LIMITS.maxElements)} elements.`, {
-        retryable: false,
-      }),
+      forgeError(
+        'validation-failed',
+        `The file has more than ${String(SVG_LIMITS.maxElements)} elements.`,
+        {
+          retryable: false,
+        },
+      ),
     );
   }
 
   if (context.shapes.length > SVG_LIMITS.maxShapes) {
     return err(
-      forgeError('validation-failed', `The file has more than ${String(SVG_LIMITS.maxShapes)} shapes.`, {
-        retryable: false,
-      }),
+      forgeError(
+        'validation-failed',
+        `The file has more than ${String(SVG_LIMITS.maxShapes)} shapes.`,
+        {
+          retryable: false,
+        },
+      ),
     );
   }
 

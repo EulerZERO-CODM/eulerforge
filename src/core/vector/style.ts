@@ -50,7 +50,7 @@ export const DEFAULT_VECTOR_STYLE: VectorStyle = Object.freeze({
   strokeOpacity: 1,
   lineCap: 'butt' as const,
   lineJoin: 'miter' as const,
-  dashArray: Object.freeze([]) as readonly number[],
+  dashArray: Object.freeze([]),
 });
 
 const HEX_COLOUR = /^#[0-9a-f]{6}$/i;
@@ -111,11 +111,13 @@ export function normaliseVectorStyle(input: Partial<VectorStyle>): VectorStyle {
     lineCap: input.lineCap ?? DEFAULT_VECTOR_STYLE.lineCap,
     lineJoin: input.lineJoin ?? DEFAULT_VECTOR_STYLE.lineJoin,
     dashArray: Object.freeze(
-      (input.dashArray ?? []).slice(0, VECTOR_STYLE_LIMITS.maxDashEntries).map((entry) =>
-        Number.isFinite(entry)
-          ? Math.min(VECTOR_STYLE_LIMITS.maxDashLength, Math.max(0, entry))
-          : 0,
-      ),
+      (input.dashArray ?? [])
+        .slice(0, VECTOR_STYLE_LIMITS.maxDashEntries)
+        .map((entry) =>
+          Number.isFinite(entry)
+            ? Math.min(VECTOR_STYLE_LIMITS.maxDashLength, Math.max(0, entry))
+            : 0,
+        ),
     ),
   });
 }

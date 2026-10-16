@@ -92,8 +92,9 @@ export const EXPORT_FORMATS: readonly ExportFormat[] = [
     mediaType: 'image/svg+xml',
     kind: 'vector',
     capabilities: { transparency: true, animation: false, printReady: true, lossy: false },
-    status: 'planned',
-    notes: 'Vector export requires the vector scene graph from the Illustration Studio work.',
+    status: 'available',
+    notes:
+      'Vector export of paths, rectangles and ellipses, written to a real file by the browser. Text is not outlined and graphic layers are raster, so a document containing them is exported only after the panel names them (or not at all).',
   },
   {
     id: formatId('pdf'),

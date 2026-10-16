@@ -68,11 +68,13 @@ function styleAttributes(style: SvgShapeStyle, digits: number): readonly string[
   else if (!isDefaultFill(style)) attributes.push(`fill="${escapeXmlAttribute(style.fill)}"`);
 
   if (style.fillRule !== 'nonzero') attributes.push(`fill-rule="${style.fillRule}"`);
-  if (style.fillOpacity !== 1) attributes.push(`fill-opacity="${formatSvgNumber(style.fillOpacity, digits)}"`);
+  if (style.fillOpacity !== 1)
+    attributes.push(`fill-opacity="${formatSvgNumber(style.fillOpacity, digits)}"`);
 
   if (style.stroke !== null) {
     attributes.push(`stroke="${escapeXmlAttribute(style.stroke)}"`);
-    if (style.strokeWidth !== 1) attributes.push(`stroke-width="${formatSvgNumber(style.strokeWidth, digits)}"`);
+    if (style.strokeWidth !== 1)
+      attributes.push(`stroke-width="${formatSvgNumber(style.strokeWidth, digits)}"`);
     if (style.strokeOpacity !== 1) {
       attributes.push(`stroke-opacity="${formatSvgNumber(style.strokeOpacity, digits)}"`);
     }
@@ -88,10 +90,15 @@ function styleAttributes(style: SvgShapeStyle, digits: number): readonly string[
   return attributes;
 }
 
-function shapeElement(shape: SvgShape, options: Required<Pick<SerializeOptions, 'digits' | 'pretty' | 'includeNames'>>, indent: string): string {
+function shapeElement(
+  shape: SvgShape,
+  options: Required<Pick<SerializeOptions, 'digits' | 'pretty' | 'includeNames'>>,
+  indent: string,
+): string {
   const data = toPathData(shape.path, { digits: options.digits });
   const attributes = [`d="${data}"`, ...styleAttributes(shape.style, options.digits)];
-  if (shape.opacity !== 1) attributes.push(`opacity="${formatSvgNumber(shape.opacity, options.digits)}"`);
+  if (shape.opacity !== 1)
+    attributes.push(`opacity="${formatSvgNumber(shape.opacity, options.digits)}"`);
 
   const element = `${indent}<path ${attributes.join(' ')}/>`;
   if (!options.includeNames) return element;
@@ -142,7 +149,17 @@ export function serializeSvg(artwork: SvgArtwork, options: SerializeOptions = {}
               },
             ],
           },
-          style: { fill: background, fillRule: 'nonzero', fillOpacity: 1, stroke: null, strokeWidth: 1, strokeOpacity: 1, lineCap: 'butt', lineJoin: 'miter', dashArray: [] },
+          style: {
+            fill: background,
+            fillRule: 'nonzero',
+            fillOpacity: 1,
+            stroke: null,
+            strokeWidth: 1,
+            strokeOpacity: 1,
+            lineCap: 'butt',
+            lineJoin: 'miter',
+            dashArray: [],
+          },
           opacity: 1,
         };
 
@@ -180,7 +197,10 @@ export function iconIdFor(name: string): string {
   return slug.length > 0 ? slug : 'icon';
 }
 
-export function serializeIconSprite(entries: readonly IconEntry[], options: SerializeOptions = {}): Result<string> {
+export function serializeIconSprite(
+  entries: readonly IconEntry[],
+  options: SerializeOptions = {},
+): Result<string> {
   if (entries.length === 0) {
     return err(forgeError('validation-failed', 'An icon set needs at least one icon.'));
   }
@@ -208,5 +228,7 @@ export function serializeIconSprite(entries: readonly IconEntry[], options: Seri
     );
   }
 
-  return ok(`<svg xmlns="http://www.w3.org/2000/svg" style="display:none">${symbols.join('')}</svg>`);
+  return ok(
+    `<svg xmlns="http://www.w3.org/2000/svg" style="display:none">${symbols.join('')}</svg>`,
+  );
 }

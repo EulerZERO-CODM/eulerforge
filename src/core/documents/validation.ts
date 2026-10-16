@@ -301,7 +301,12 @@ export function validateVectorContent(content: VectorContent): readonly FieldVal
       message: `Stroke width must be between 0 and ${String(VECTOR_STYLE_LIMITS.maxStrokeWidth)}.`,
     });
   }
-  if (style.fillOpacity < 0 || style.fillOpacity > 1 || style.strokeOpacity < 0 || style.strokeOpacity > 1) {
+  if (
+    style.fillOpacity < 0 ||
+    style.fillOpacity > 1 ||
+    style.strokeOpacity < 0 ||
+    style.strokeOpacity > 1
+  ) {
     issues.push({ field: 'vector.style.opacity', message: 'Opacity must be between 0 and 1.' });
   }
   return issues;

@@ -133,13 +133,13 @@ const versionOneRecord = {
   updatedAt: '2025-12-02T10:00:00.000Z',
 };
 
-describe('migrateDocument — v1 to v2', () => {
+describe('migrateDocument — legacy records to the current schema', () => {
   it('opens an existing saved project with an empty scene instead of inventing artwork', () => {
     const result = migrateDocument(versionOneRecord);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.value.schemaVersion).toBe(2);
+    expect(result.value.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(result.value.scene).toEqual({ layers: [] });
     expect(result.value.attribution).toEqual([]);
   });
@@ -165,12 +165,12 @@ describe('migrateDocument — v1 to v2', () => {
     expect(result.value.canvas.width).toBe(1080);
   });
 
-  it('runs v0 records through both steps in order', () => {
+  it('runs v0 records through every step in order', () => {
     const result = migrateDocument(legacyRecord);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.value.schemaVersion).toBe(2);
+    expect(result.value.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(result.value.scene.layers).toEqual([]);
     expect(result.value.canvas.width).toBe(1240);
   });
@@ -187,7 +187,10 @@ describe('migrateDocument — v1 to v2', () => {
   });
 
   it('rejects a document from a newer schema instead of dropping its scene', () => {
-    const result = migrateDocument({ ...versionOneRecord, schemaVersion: CURRENT_SCHEMA_VERSION + 1 });
+    const result = migrateDocument({
+      ...versionOneRecord,
+      schemaVersion: CURRENT_SCHEMA_VERSION + 1,
+    });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('unsupported');
   });

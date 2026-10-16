@@ -129,14 +129,19 @@ export type ArtworkIssue = {
  * depends on the consumer's error handling, so this is checked before serialisation rather than
  * after.
  */
-export function validateArtwork(artwork: SvgArtwork): Result<{ readonly issues: readonly ArtworkIssue[] }> {
+export function validateArtwork(
+  artwork: SvgArtwork,
+): Result<{ readonly issues: readonly ArtworkIssue[] }> {
   const issues: ArtworkIssue[] = [];
   if (!Number.isFinite(artwork.width) || !Number.isFinite(artwork.height)) {
     return err(forgeError('validation-failed', 'The artwork has a non-finite size.'));
   }
   if (artwork.width <= 0 || artwork.height <= 0) {
     return err(
-      forgeError('validation-failed', `The artwork measures ${artwork.width} × ${artwork.height}; both sides must be positive.`),
+      forgeError(
+        'validation-failed',
+        `The artwork measures ${artwork.width} × ${artwork.height}; both sides must be positive.`,
+      ),
     );
   }
 
@@ -182,10 +187,14 @@ export function validateArtwork(artwork: SvgArtwork): Result<{ readonly issues: 
   const blocking = issues.filter((entry) => entry.severity === 'invalid');
   if (blocking.length > 0) {
     return err(
-      forgeError('validation-failed', `The artwork contains geometry that cannot be exported: ${blocking[0]?.message ?? ''}`, {
-        detail: `${String(blocking.length)} shape(s) failed validation.`,
-        retryable: false,
-      }),
+      forgeError(
+        'validation-failed',
+        `The artwork contains geometry that cannot be exported: ${blocking[0]?.message ?? ''}`,
+        {
+          detail: `${String(blocking.length)} shape(s) failed validation.`,
+          retryable: false,
+        },
+      ),
     );
   }
   return ok({ issues });

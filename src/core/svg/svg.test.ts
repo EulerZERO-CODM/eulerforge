@@ -28,8 +28,6 @@ import { serializeNaiveSvg } from './naive';
 import { parseSvg, parseTransform } from './parse';
 import { formatSvgNumber, iconIdFor, serializeIconSprite, serializeSvg } from './serialize';
 
-
-
 /** Test fixture helper: a throwing wrapper so a bad literal fails loudly in the test body. */
 type ParsedData = Extract<ReturnType<typeof parsePathData>, { ok: true }>['value'];
 
@@ -120,7 +118,9 @@ describe('serialization', () => {
 
   it('writes a background rectangle only when the artwork declares one', () => {
     const withBackground = createArtwork({ width: 20, height: 20 }, [], { background: '#ffcc00' });
-    expect(serialized(withBackground)).toContain('<path d="M0 0L20 0 20 20 0 20Z" fill="#ffcc00"/>');
+    expect(serialized(withBackground)).toContain(
+      '<path d="M0 0L20 0 20 20 0 20Z" fill="#ffcc00"/>',
+    );
     expect(serialized(createArtwork({ width: 20, height: 20 }, []))).not.toContain('#ffcc00');
   });
 
@@ -274,7 +274,9 @@ describe('compact output versus the naive baseline', () => {
       expect(compactBounds?.maxX).toBeCloseTo(naiveBounds?.maxX ?? Number.NaN, 3);
       expect(compactBounds?.minY).toBeCloseTo(naiveBounds?.minY ?? Number.NaN, 3);
       expect(compactBounds?.maxY).toBeCloseTo(naiveBounds?.maxY ?? Number.NaN, 3);
-      expect(allSegments(compactPath.value.path)).toHaveLength(allSegments(naivePath.value.path).length);
+      expect(allSegments(compactPath.value.path)).toHaveLength(
+        allSegments(naivePath.value.path).length,
+      );
     });
 
     // Styling survives too: the naive file states every property, this one states what differs.
@@ -285,10 +287,14 @@ describe('compact output versus the naive baseline', () => {
 
   it('keeps its size advantage on a realistic icon-set document', () => {
     const shapes = Array.from({ length: 12 }, (_value, index) =>
-      createShape(`Shape ${String(index + 1)}`, rectanglePath({ minX: index * 10, minY: 0, maxX: index * 10 + 8, maxY: 8 }), {
-        fill: index % 2 === 0 ? '#123456' : null,
-        ...(index % 3 === 0 ? { stroke: '#654321', strokeWidth: 1.5 } : {}),
-      }),
+      createShape(
+        `Shape ${String(index + 1)}`,
+        rectanglePath({ minX: index * 10, minY: 0, maxX: index * 10 + 8, maxY: 8 }),
+        {
+          fill: index % 2 === 0 ? '#123456' : null,
+          ...(index % 3 === 0 ? { stroke: '#654321', strokeWidth: 1.5 } : {}),
+        },
+      ),
     );
     const artwork = createArtwork({ width: 128, height: 128 }, shapes);
     const compact = serialized(artwork);
@@ -424,7 +430,9 @@ describe('import: supported elements', () => {
   });
 
   it('falls back to 100 × 100 when the file declares no size at all', () => {
-    const result = parseSvg(`<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L10 0 L10 10 Z"/></svg>`);
+    const result = parseSvg(
+      `<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0 L10 0 L10 10 Z"/></svg>`,
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.artwork.width).toBe(100);
@@ -516,38 +524,39 @@ describe('import: unsupported content is reported, never dropped silently', () =
 });
 
 describe('import: safety', () => {
-  const refusals: readonly { readonly name: string; readonly svg: string; readonly why: string }[] = [
-    {
-      name: 'script element',
-      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><script>alert(1)</script><path d="M0 0 L10 0 L10 10 Z"/></svg>`,
-      why: 'may not run code',
-    },
-    {
-      name: 'event handler attribute',
-      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0 L10 0 L10 10 Z" onload="alert(1)"/></svg>`,
-      why: 'may not run code',
-    },
-    {
-      name: 'foreignObject',
-      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><foreignObject width="10" height="10"><div>hi</div></foreignObject></svg>`,
-      why: 'may not run code',
-    },
-    {
-      name: 'external reference',
-      svg: `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 10 10"><image xlink:href="https://example.com/track.png" width="10" height="10"/></svg>`,
-      why: 'may not load external content',
-    },
-    {
-      name: 'javascript URL',
-      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0 L10 0 L10 10 Z" fill="none" stroke="javascript:alert(1)"/></svg>`,
-      why: 'may not contain script',
-    },
-    {
-      name: 'DOCTYPE',
-      svg: `<!DOCTYPE svg [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0 L10 0 L10 10 Z"/></svg>`,
-      why: 'DOCTYPE',
-    },
-  ];
+  const refusals: readonly { readonly name: string; readonly svg: string; readonly why: string }[] =
+    [
+      {
+        name: 'script element',
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><script>alert(1)</script><path d="M0 0 L10 0 L10 10 Z"/></svg>`,
+        why: 'may not run code',
+      },
+      {
+        name: 'event handler attribute',
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0 L10 0 L10 10 Z" onload="alert(1)"/></svg>`,
+        why: 'may not run code',
+      },
+      {
+        name: 'foreignObject',
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><foreignObject width="10" height="10"><div>hi</div></foreignObject></svg>`,
+        why: 'may not run code',
+      },
+      {
+        name: 'external reference',
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 10 10"><image xlink:href="https://example.com/track.png" width="10" height="10"/></svg>`,
+        why: 'may not load external content',
+      },
+      {
+        name: 'javascript URL',
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0 L10 0 L10 10 Z" fill="none" stroke="javascript:alert(1)"/></svg>`,
+        why: 'may not contain script',
+      },
+      {
+        name: 'DOCTYPE',
+        svg: `<!DOCTYPE svg [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0 L10 0 L10 10 Z"/></svg>`,
+        why: 'DOCTYPE',
+      },
+    ];
 
   for (const refusal of refusals) {
     it(`refuses the whole file for a ${refusal.name}`, () => {
@@ -589,13 +598,17 @@ describe('import: malformed files explain themselves', () => {
   });
 
   it('rejects an unclosed element', () => {
-    const result = parseSvg(`<svg xmlns="http://www.w3.org/2000/svg"><g><path d="M0 0 L10 0"/></svg>`);
+    const result = parseSvg(
+      `<svg xmlns="http://www.w3.org/2000/svg"><g><path d="M0 0 L10 0"/></svg>`,
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.message).toContain('closed');
   });
 
   it('reports a file with nothing it can draw', () => {
-    const result = parseSvg(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><text>x</text></svg>`);
+    const result = parseSvg(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><text>x</text></svg>`,
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.code).toBe('unsupported');
@@ -604,7 +617,9 @@ describe('import: malformed files explain themselves', () => {
   });
 
   it('refuses a file with a zero size', () => {
-    const result = parseSvg(`<svg xmlns="http://www.w3.org/2000/svg" width="0" height="10"><path d="M0 0 L1 0 L1 1 Z"/></svg>`);
+    const result = parseSvg(
+      `<svg xmlns="http://www.w3.org/2000/svg" width="0" height="10"><path d="M0 0 L1 0 L1 1 Z"/></svg>`,
+    );
     expect(result.ok).toBe(false);
   });
 
@@ -617,7 +632,9 @@ describe('import: malformed files explain themselves', () => {
 
   it('stops importing beyond the node budget and says so', () => {
     const block = '<path d="M0 0 L10 0 L10 10 L0 10 Z"/>'.repeat(2_500);
-    const result = parseSvg(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">${block}</svg>`);
+    const result = parseSvg(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">${block}</svg>`,
+    );
     // Either the shape cap or the node cap fires; both are honest refusals with a message.
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.message).toMatch(/more than|limit/);
@@ -706,7 +723,9 @@ describe('round trip', () => {
 
   it('keeps a circle within the flattening tolerance after export and import', () => {
     const circle = createArtwork({ width: 100, height: 100 }, [
-      createShape('Circle', ellipsePath({ minX: 10, minY: 10, maxX: 90, maxY: 90 }), { fill: '#000000' }),
+      createShape('Circle', ellipsePath({ minX: 10, minY: 10, maxX: 90, maxY: 90 }), {
+        fill: '#000000',
+      }),
     ]);
     const back = roundTripped(circle);
     const original = back.shapes[0]!.path;
@@ -714,7 +733,9 @@ describe('round trip', () => {
     // The four cubic handles survive with the same precision the serialiser wrote.
     const expected = boundsOfPath(circle.shapes[0]!.path);
     const actual = boundsOfPath(original);
-    expect(Math.abs((actual?.maxY ?? 0) - (expected?.maxY ?? 0))).toBeLessThan(ROUND_TRIP_TOLERANCE);
+    expect(Math.abs((actual?.maxY ?? 0) - (expected?.maxY ?? 0))).toBeLessThan(
+      ROUND_TRIP_TOLERANCE,
+    );
   });
 
   it('round-trips artwork that has been transformed', () => {
@@ -744,7 +765,9 @@ describe('round trip', () => {
     expect(back.shapes[0]?.path.contours).toHaveLength(2);
     expect(back.shapes[0]?.path.contours[1]?.nodes).toHaveLength(4);
     expect(back.shapes[0]?.style.fillRule).toBe('evenodd');
-    expect(transformPath(back.shapes[0]!.path, { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }).contours).toHaveLength(2);
+    expect(
+      transformPath(back.shapes[0]!.path, { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }).contours,
+    ).toHaveLength(2);
   });
 
   it('does not round-trip text, and says so rather than pretending', () => {

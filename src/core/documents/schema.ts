@@ -265,7 +265,9 @@ export const pathContourSchema = z.object({
 
 export const vectorPathSchema = z
   .object({
-    contours: z.array(pathContourSchema).max(MAX_CONTOURS, `a path may hold at most ${MAX_CONTOURS} contours`),
+    contours: z
+      .array(pathContourSchema)
+      .max(MAX_CONTOURS, `a path may hold at most ${MAX_CONTOURS} contours`),
   })
   .superRefine((path, ctx) => {
     const total = path.contours.reduce((sum, contour) => sum + contour.nodes.length, 0);
@@ -324,7 +326,12 @@ export const pathLayerSchema = z
   .superRefine((layer, ctx) => {
     const bounds = boundsOfPath(layer.vector.path);
     const expected = bounds
-      ? { x: bounds.minX, y: bounds.minY, width: bounds.maxX - bounds.minX, height: bounds.maxY - bounds.minY }
+      ? {
+          x: bounds.minX,
+          y: bounds.minY,
+          width: bounds.maxX - bounds.minX,
+          height: bounds.maxY - bounds.minY,
+        }
       : null;
     if (!expected) {
       ctx.addIssue({
@@ -488,10 +495,7 @@ export type _ImageLayerSchemaMatchesDomain = Assignable<
   z.infer<typeof imageLayerSchema>,
   ImageLayer
 >;
-export type _PathLayerSchemaMatchesDomain = Assignable<
-  z.infer<typeof pathLayerSchema>,
-  PathLayer
->;
+export type _PathLayerSchemaMatchesDomain = Assignable<z.infer<typeof pathLayerSchema>, PathLayer>;
 export type _AttributionSchemaMatchesDomain = Assignable<
   z.infer<typeof attributionRecordSchema>,
   AttributionRecord

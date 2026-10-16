@@ -7,6 +7,9 @@
  */
 
 import { fitsWithinCanvasLimits } from '../documents/validation';
+import { validatePath } from '../vector';
+import { SVG_CARRYABLE_LAYER_TYPES, svgUnsupportedReasons } from '../svg/from-scene';
+import { vectorGeometryOf } from '../documents/interchange';
 import type { ForgeDocument } from '../documents/types';
 import { MAX_CANVAS_PX, PRINT_DPI, SCREEN_DPI } from '../documents/units';
 import { forgeDocumentSchema } from '../documents/schema';
@@ -109,6 +112,13 @@ function projectFileChecks(document: ForgeDocument): readonly ExportCheck[] {
 export type ExportCheckContext = {
   /** `false` when the environment has no 2D canvas context (some SSR or headless setups). */
   readonly rasteriserAvailable?: boolean | undefined;
+  /**
+   * `false` when this environment cannot hand a file to the browser.
+   *
+   * A generated string is not a download: the SVG checks treat "the browser cannot save files here"
+   * as blocking, so the panel never claims an export happened when it did not.
+   */
+  readonly downloadAvailable?: boolean | undefined;
   /** Issues the scene planner found, so a missing graphic blocks instead of being reported later. */
   readonly renderIssues?:
     readonly { readonly message: string; readonly blocking: boolean }[] | undefined;
@@ -225,6 +235,90 @@ function rasterChecks(
   return checks;
 }
 
+/**
+ * Checks for the vector formats.
+ *
+ * SVG is a *lossy* destination for some documents and a lossless one for others, so the first check is
+ * always "can this document be written at all". When it cannot, the check names the layers in the way
+ * rather than reporting a generic failure — that is the difference between a user being able to fix it
+ * and a user being stuck.
+ */
+function svgChecks(
+  document: ForgeDocument,
+  context: ExportCheckContext,
+  format: ExportFormat,
+): readonly ExportCheck[] {
+  const checks: ExportCheck[] = [];
+  const unsupported = svgUnsupportedReasons(document.scene);
+  const carryable = document.scene.layers.filter(
+    (layer) => layer.visible && SVG_CARRYABLE_LAYER_TYPES.includes(layer.type),
+  );
+
+  checks.push(
+    check(
+      'vector-content',
+      'Document contains vector artwork',
+      carryable.length > 0 ? 'pass' : 'blocked',
+      carryable.length > 0
+        ? `${String(carryable.length)} layer(s) can be written as geometry.`
+        : 'Nothing in this document is a path, rectangle or ellipse, so the file would be empty.',
+      carryable.length > 0 ? undefined : 'Draw with the vector tools, or add a shape layer.',
+    ),
+  );
+
+  checks.push(
+    check(
+      'svg-support',
+      'Every visible layer has a vector representation',
+      unsupported.length === 0 ? 'pass' : 'blocked',
+      unsupported.length === 0
+        ? 'Text and graphic layers are the only unsupported kinds, and this document has neither.'
+        : `${format.label} cannot represent ${String(unsupported.length)} layer(s): ${unsupported
+            .map((layer) => layer.layerName)
+            .join(', ')}.`,
+      unsupported.length === 0
+        ? undefined
+        : 'Hide or delete those layers, or export a raster format instead.',
+    ),
+  );
+
+  const geometryIssues: string[] = [];
+  for (const layer of document.scene.layers) {
+    if (!layer.visible) continue;
+    const geometry = vectorGeometryOf(layer);
+    if (!geometry) continue;
+    const issues = validatePath(geometry).filter((issue) => issue.severe);
+    if (issues.length > 0) geometryIssues.push(`${layer.name}: ${issues[0]?.message ?? ''}`);
+  }
+  checks.push(
+    check(
+      'svg-geometry',
+      'Geometry passes validation',
+      geometryIssues.length === 0 ? 'pass' : 'blocked',
+      geometryIssues.length === 0
+        ? 'Every path has finite coordinates, within the supported limits, and no repeated closing node.'
+        : geometryIssues.join(' '),
+      geometryIssues.length === 0 ? undefined : 'Undo the change that produced the invalid nodes.',
+    ),
+  );
+
+  checks.push(
+    check(
+      'svg-download',
+      'This environment can save the file',
+      context.downloadAvailable === false ? 'blocked' : 'pass',
+      context.downloadAvailable === false
+        ? 'The SVG can be generated, but this environment cannot hand a file to the browser, so nothing would be saved.'
+        : 'The SVG is written by the browser as a real download.',
+      context.downloadAvailable === false
+        ? 'Open the workspace in a browser and try again.'
+        : undefined,
+    ),
+  );
+
+  return checks;
+}
+
 function plannedFormatChecks(format: ExportFormat): readonly ExportCheck[] {
   return [
     check(
@@ -256,9 +350,11 @@ export function buildExportChecklist(
   const checks =
     format.id === PROJECT_FILE_FORMAT_ID
       ? projectFileChecks(document)
-      : implemented
-        ? rasterChecks(document, format, context)
-        : [...plannedFormatChecks(format), ...rasterChecks(document, format, context)];
+      : format.kind === 'vector' && implemented
+        ? svgChecks(document, context, format)
+        : implemented
+          ? rasterChecks(document, format, context)
+          : [...plannedFormatChecks(format), ...rasterChecks(document, format, context)];
 
   const blocked = checks.filter((entry) => entry.status === 'blocked');
   const warnings = checks.filter((entry) => entry.status === 'warning');
