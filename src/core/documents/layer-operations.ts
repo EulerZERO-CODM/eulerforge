@@ -363,6 +363,10 @@ function patchMatchesLayerType(layer: Layer, patch: LayerPatch): boolean {
   if (patch.shape !== undefined && layer.type !== 'rect' && layer.type !== 'ellipse') return false;
   if (patch.vector !== undefined && layer.type !== 'path') return false;
   if (patch.vector !== undefined && nodeCount(patch.vector.path) > MAX_NODES_TOTAL) return false;
+  // A path layer's frame is derived from its outline, so patching the frame directly would leave the
+  // two disagreeing. Moving or resizing vector artwork transforms its *nodes* instead.
+  if (patch.frame !== undefined && layer.type === 'path' && patch.vector === undefined)
+    return false;
   return true;
 }
 
@@ -388,7 +392,15 @@ export function updateLayer(scene: Scene, id: LayerId | string, patch: LayerPatc
     );
   }
 
-  const merged = { ...existing, ...patch } as Layer;
+  const mergedBase = { ...existing, ...patch } as Layer;
+  // A path layer's frame *is* its geometry's bounding box, so a geometry patch recomputes it here.
+  // This is the only place that recalculation happens, which is what makes the invariant impossible
+  // to break from a caller: the schema refuses a stored path layer whose frame has drifted, so a
+  // patch that skipped this step would produce a document that no longer loads.
+  const merged: Layer =
+    mergedBase.type === 'path' && patch.vector !== undefined
+      ? withFrozenVector(mergedBase)
+      : mergedBase;
 
   // The layer is re-checked *after* the merge, so a patch can never leave the scene in a state the
   // schema would refuse. A gesture that would do so (dragging a layer to an impossible coordinate)

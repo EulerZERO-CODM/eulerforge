@@ -94,9 +94,58 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     area: 'core',
     label: 'Project file export (.forge.json)',
     description:
-      'The document definition can be downloaded and read back. This is the only implemented export format.',
+      'The document definition can be downloaded and read back. PNG/JPEG raster and SVG are the other implemented exports; the format registry labels PDF, WebP and video as planned.',
     status: 'implemented',
     verification: ['src/core/export/project-file.test.ts'],
+  },
+  {
+    id: 'core.vector-model',
+    area: 'core',
+    label: 'Vector path kernel (framework-free)',
+    description:
+      'An immutable path model — move/line/curve segments, open and closed contours — with validation, bounds, transforms, arc-length sampling, stroke/fill hit-testing, node and handle editing, shape generation and serialisable path data. It lives under `src/core/vector` and imports no DOM, React, storage or SVG type, so the editor and the exporter both read the same geometry.',
+    status: 'implemented',
+    verification: [
+      'src/core/vector/path.test.ts',
+      'src/core/vector/geometry.test.ts',
+      'src/core/vector/path-data.test.ts',
+      'src/core/vector/validity.test.ts',
+      'src/core/vector/ops.test.ts',
+      'src/core/vector/shapes.test.ts',
+      'src/core/vector/pen.test.ts',
+      'src/core/vector/pick.test.ts',
+    ],
+    gap: 'Every contour is a single closed or open boundary with no self-intersection repair, and the kernel exposes no offset/inflate operation.',
+  },
+  {
+    id: 'core.vector-booleans',
+    area: 'core',
+    label: 'Boolean path operations',
+    description:
+      'Union, difference, intersection and exclusive-or combine flattened contours through `polygon-clipping` (MIT, chosen over hand-rolling a Bentley–Ottmann/Martinez kernel — see ADR-0021). Results are re-validated as contours and reported with the flattening tolerance, flattened segment counts and any topology problems.',
+    status: 'implemented',
+    verification: [
+      'src/core/vector/boolean.test.ts',
+      'src/core/vector/validity.test.ts',
+      'src/core/editor/vector-commands.test.ts',
+      'src/components/illustration/illustration-workspace.test.tsx',
+    ],
+    gap: 'Inputs are flattened to line segments at `TOLERANCE.flatten` (0.05 px) first, so a boolean result is polygonal: curve handles do not survive the operation, and anything built on it carries that approximation.',
+  },
+  {
+    id: 'core.svg-io',
+    area: 'core',
+    label: 'SVG serialisation and safe import',
+    description:
+      'A deterministic serializer writes paths, shapes, fills, strokes, opacity and transforms with a computed `viewBox`, drops redundant markup and omits defaults. The importer rejects scripts, event handlers, `foreignObject`, external references and doctypes, reports malformed input with a message, and re-imports its own output within a documented tolerance (1e-3 in user units).',
+    status: 'implemented',
+    verification: [
+      'src/core/svg/svg.test.ts',
+      'src/core/svg/from-scene.test.ts',
+      'src/core/svg/icon-set.test.ts',
+      'src/core/export/checklist.test.ts',
+    ],
+    gap: 'Import supports the artwork subset the serializer writes plus common shorthand: text, filters, masks, clip paths, gradients and CSS style sheets are reported as unsupported rather than approximated.',
   },
   {
     id: 'core.rendering',
@@ -267,9 +316,24 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     gap: 'The browser suite runs on Chromium only, so Firefox and WebKit rendering is unverified. Thirty-layer responsiveness is measured in a real browser against a budget fixed in advance (docs/PERFORMANCE.md), but under a four-fold CPU slowdown on CI hardware rather than on a mid-range laptop, so it is a regression gate and not a claim about a particular machine. Grouping, alignment tools, vector paths and PDF output are later phases and are labelled as such.',
   },
   {
-    id: 'studios.photo-video-motion-illustration',
+    id: 'studios.illustration',
     area: 'studios',
-    label: 'Photo, Video, Motion and Illustration studios',
+    label: 'Illustration Studio vector editor',
+    description:
+      'A real vector workspace on the shared kernel: draw with the pen, place rectangles/ellipses/polygons, drag out shapes, edit nodes and Bezier handles, marquee-select, nudge and transform, set real fill/stroke/opacity/cap/join/dash, run boolean operations, convert shapes to editable paths, import and export SVG, export an icon set, and hand artwork to the Design Studio and back. Every edit is one labelled undoable action, and the studio links its limitations (no gradients, no tracing, no rotation-preserving interchange) instead of hiding them.',
+    status: 'partial',
+    verification: [
+      'src/components/illustration/illustration-workspace.test.tsx',
+      'src/core/editor/vector-commands.test.ts',
+      'src/core/documents/interchange.test.ts',
+      'src/components/create/creation-flow.test.tsx',
+    ],
+    gap: 'Gradient and pattern fills, tracing a raster image, text on a path, and ungrouped multi-artboard documents are not implemented and are labelled planned in the registry. Node editing works on one path at a time. The browser suite runs on Chromium only, so Firefox and WebKit are unverified.',
+  },
+  {
+    id: 'studios.photo-video-motion',
+    area: 'studios',
+    label: 'Photo, Video and Motion studios',
     description: 'The remaining specialist editors.',
     status: 'planned',
     verification: [],

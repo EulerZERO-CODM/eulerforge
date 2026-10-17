@@ -118,11 +118,42 @@ What is still *not* covered automatically, and therefore stays a manual check:
 Run these by hand before claiming them; the roadmap items that depend on automated evidence cite the
 spec files directly, and the gaps are recorded against the items they belong to.
 
-## Planned after Phase 2
+## Phase 3 — Vector engine and Illustration Studio (in progress, one item partial)
 
-### Phase 3 — Vector engine and Illustration Studio
+### Path and geometry kernel — done
 
-Path/geometry kernel, SVG view layer and export, then the Illustration Studio workspace on top of it.
+`src/core/vector/**` is an immutable, framework-free path model (contours of nodes with Bezier
+handles), with bounds, transforms, arc-length sampling, fill/stroke hit-testing, node and handle
+operations, pen construction and path-data serialisation. Boolean union/difference/intersection/xor go
+through `polygon-clipping` (MIT) on flattened contours and every result is re-validated for topology.
+Covered by `src/core/vector/*.test.ts` and `src/core/editor/vector-commands.test.ts`.
+
+Known limits: booleans flatten curves first, so their output is polygonal; the interface reports the
+tolerance and segment counts rather than hiding it. There is no offset/inflate operation.
+
+### SVG view layer and export — done
+
+`src/core/svg/**` serialises the model deterministically (computed `viewBox`, defaults omitted,
+stable number formatting) and imports a defended subset back. The importer refuses scripts, event
+handlers, `foreignObject`, external references and doctypes; it names anything it cannot carry instead
+of approximating it. Round-trip tolerance is `1e-3` in user units (`src/core/svg/svg.test.ts`), and
+`e2e/illustration.spec.ts` exports a file in Chromium, reads its bytes and re-imports them.
+
+Known limits: text, gradients, filters, masks, clip paths and CSS style sheets are not importable; they
+are reported, not dropped silently.
+
+### Illustration Studio workspace — partial
+
+`/studios/illustration` is a real, `available` studio with a working editor
+(`src/components/illustration/**`): pen drawing, shapes, node/handle editing, marquee and keyboard
+nudge, fill/stroke/opacity/cap/join/dash, boolean combination, shape-to-path conversion, SVG import and
+export, icon-set zip export, and Design ⇄ Illustration interchange with a per-layer report. Every edit
+is one labelled history entry.
+
+Still missing, and therefore still labelled planned in the registry: gradient and pattern fills,
+tracing a raster image, text on a path, multi-artboard documents, and curve-exact booleans. Interchange
+refuses rotated layers rather than baking the rotation into a frame. The browser suite is Chromium
+only.
 
 ### Phase 4 — Raster engine and Photo Studio
 

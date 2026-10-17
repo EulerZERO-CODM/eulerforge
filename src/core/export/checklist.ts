@@ -119,6 +119,14 @@ export type ExportCheckContext = {
    * as blocking, so the panel never claims an export happened when it did not.
    */
   readonly downloadAvailable?: boolean | undefined;
+  /**
+   * `true` when the user has opted into a partial SVG export that leaves out layers SVG cannot hold.
+   *
+   * Without the opt-in those layers *block* the export, because silently writing a file missing the
+   * text in the document is worse than refusing. With it, the same layers become a warning that names
+   * them, and the export is allowed.
+   */
+  readonly allowPartialSvg?: boolean | undefined;
   /** Issues the scene planner found, so a missing graphic blocks instead of being reported later. */
   readonly renderIssues?:
     readonly { readonly message: string; readonly blocking: boolean }[] | undefined;
@@ -270,7 +278,7 @@ function svgChecks(
     check(
       'svg-support',
       'Every visible layer has a vector representation',
-      unsupported.length === 0 ? 'pass' : 'blocked',
+      unsupported.length === 0 ? 'pass' : context.allowPartialSvg === true ? 'warning' : 'blocked',
       unsupported.length === 0
         ? 'Text and graphic layers are the only unsupported kinds, and this document has neither.'
         : `${format.label} cannot represent ${String(unsupported.length)} layer(s): ${unsupported
@@ -278,7 +286,9 @@ function svgChecks(
             .join(', ')}.`,
       unsupported.length === 0
         ? undefined
-        : 'Hide or delete those layers, or export a raster format instead.',
+        : context.allowPartialSvg === true
+          ? 'Those layers will be left out of the file; the export reports their names afterwards.'
+          : 'Hide or delete those layers, export a raster format instead, or tick “export the rest anyway”.',
     ),
   );
 

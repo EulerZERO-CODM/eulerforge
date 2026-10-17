@@ -325,11 +325,12 @@ export const ILLUSTRATION_STUDIO: StudioDefinition = {
   name: 'Illustration Studio',
   tagline: 'Vector drawing, paths and illustration.',
   purpose:
-    'Illustration Studio will cover bezier drawing, shape building, strokes and fills, and asset-friendly SVG output. Its path model is the piece Motion Studio reuses for animated vector graphics, which is why the two disciplines are scheduled to share one vector engine.',
+    'Illustration Studio is the vector discipline: a pen tool for Bezier drawing, shape tools, node editing, real fills and strokes, boolean combination and asset-friendly SVG output. Its path model is the piece Motion Studio will reuse for animated vector graphics, which is why the two disciplines share one vector engine and one document model.',
   icon: 'pen',
   accent: 'violet',
-  availability: 'planned',
-  maturityNote: 'Not started. Path model and boolean operations are still being designed.',
+  availability: 'available',
+  maturityNote:
+    'A working vector workspace: pen and shape tools, node and handle editing with keyboard access, fill/stroke/dash/cap/join controls, union/subtract/intersect/exclude, SVG import and export, icon-set export, and interchange with the Design Studio. Not implemented: gradients and patterns, per-node pressure or variable-width strokes, text outlining, auto-trace, and rotation of a whole shape (the document model has no rotation).',
   produces: [
     'Icons and pictograms',
     'Logos and marks',
@@ -341,26 +342,58 @@ export const ILLUSTRATION_STUDIO: StudioDefinition = {
     {
       id: 'paths.drawing',
       label: 'Bezier path drawing',
-      status: 'planned',
-      detail: 'Pen, curve and corner tools with precise handle control.',
+      status: 'available',
+      detail:
+        'A pen tool that places corner nodes and drags smooth Bezier handles, a node tool for moving nodes and handles, and keyboard access to both.',
+    },
+    {
+      id: 'shapes.basics',
+      label: 'Rectangle, ellipse and star shapes',
+      status: 'available',
+      detail:
+        'Drag shapes out on the artboard, or convert a design rectangle or ellipse into the same outline as editable paths.',
     },
     {
       id: 'shapes.boolean',
       label: 'Shape building and booleans',
-      status: 'planned',
-      detail: 'Union, subtract, intersect and pathfinder-style combination.',
+      status: 'available',
+      detail:
+        'Union, subtract, intersect and exclude on two or more shapes, validating the result for topological consistency. Curves are flattened at a documented tolerance, so a combined shape is polygonal rather than curved — the panel reports the segment counts after every operation.',
     },
     {
       id: 'strokes.fills',
-      label: 'Strokes, fills and gradients',
-      status: 'planned',
-      detail: 'Pressure, variable width, dashes and gradient fills.',
+      label: 'Strokes, fills and dashes',
+      status: 'available',
+      detail:
+        'Flat fill and stroke colours, fill rule, stroke width, opacity, line cap, line join and dash patterns — all stored in the document and written to every export.',
     },
     {
-      id: 'svg.output',
-      label: 'Clean SVG output',
+      id: 'gradients.fills',
+      label: 'Gradient, pattern and filtered fills',
       status: 'planned',
-      detail: 'Readable, optimised markup suitable for production websites.',
+      detail:
+        'Needs a paint-model extension: the document currently stores one flat colour per paint.',
+    },
+    {
+      id: 'svg.io',
+      label: 'SVG import and export',
+      status: 'available',
+      detail:
+        'A deterministic serialiser writes the artboard as SVG, and an importer brings paths, rectangles, ellipses, polygons and lines back as editable geometry. Scripts, event handlers, foreignObject and external references are refused rather than ignored.',
+    },
+    {
+      id: 'export.icon-set',
+      label: 'Icon-set export',
+      status: 'available',
+      detail:
+        'Every visible vector layer becomes one SVG, plus a sprite and a manifest, packaged into a single zip download.',
+    },
+    {
+      id: 'interchange.design',
+      label: 'Interchange with the Design Studio',
+      status: 'available',
+      detail:
+        'Rectangles and ellipses become equivalent paths in both directions, and layers that cannot make the trip are listed by name instead of being dropped.',
     },
     {
       id: 'trace.exploratory',
@@ -370,13 +403,15 @@ export const ILLUSTRATION_STUDIO: StudioDefinition = {
     },
   ],
   engine: {
-    renderer: 'SVG view layer over a framework-free path model',
-    pipeline: 'Path/geometry kernel shared with Motion Studio; boolean ops and hit-testing in core',
-    integrationPoint: 'src/studios/illustration with src/engines/vector',
+    renderer:
+      'Canvas 2D artboard painted through the shared renderer, with DOM overlays for nodes and handles (ADR-0017)',
+    pipeline:
+      'Framework-free path/geometry kernel in src/core/vector, serialised by src/core/svg; booleans and hit-testing in core, downloads in the browser adapter',
+    integrationPoint: 'src/components/illustration with src/core/vector',
     rationale:
-      'A vector document is a geometry problem, not a pixel problem. Keeping the model independent of SVG lets the same artboard be exported as SVG, rendered to canvas for animation, or rasterised for print.',
+      'A vector document is a geometry problem, not a pixel problem. Keeping the model independent of SVG lets the same artboard be exported as SVG, rendered to canvas for animation, or rasterised for print — and it lets the whole editing surface be tested without a browser.',
   },
-  entry: { route: null, label: 'Illustration Studio' },
+  entry: { route: '/studios/illustration', label: 'Open Illustration Studio' },
   learningSlugs: ['vector-versus-raster'],
   consumesFrom: [DESIGN_STUDIO.id],
   definitionVersion: 1,

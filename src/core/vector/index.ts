@@ -117,3 +117,24 @@ export type {
   DeleteNodeOutcome,
   InsertNodeOutcome,
 } from './ops';
+export {
+  penStart,
+  penAddNode,
+  penDragHandle,
+  penSetPointer,
+  penCanClose,
+  penClose,
+  penToPath,
+  penPreview,
+  PEN_CLOSE_DISTANCE,
+} from './pen';
+export type { PenDraft } from './pen';
+export {
+  PICK_RADIUS,
+  pickPathTarget,
+  nodesInBox,
+  insertionPointFor,
+  visibleHandles,
+  segmentTotal,
+} from './pick';
+export type { PickTarget, PickOptions, NodeReference } from './pick';

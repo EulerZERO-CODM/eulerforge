@@ -29,14 +29,29 @@ describe('shipped studio registry', () => {
     ]);
   });
 
-  it('is honest about maturity: only Design Studio is available today', () => {
-    expect(listStudiosByAvailability('available').map((studio) => studio.id)).toEqual(['design']);
+  it('is honest about maturity: Design and Illustration are available, the rest are not', () => {
+    // Every entry here is a claim backed by a working workspace; the studios that are still planned
+    // must not creep into this list because a route or a placeholder appeared.
+    expect(listStudiosByAvailability('available').map((studio) => studio.id)).toEqual([
+      'design',
+      'illustration',
+    ]);
     expect(studioRegistry.countByAvailability()).toEqual({
-      available: 1,
+      available: 2,
       'in-development': 0,
-      planned: 4,
+      planned: 3,
       exploratory: 1,
     });
+  });
+
+  it('only lists capabilities as available when the studio itself is available', () => {
+    for (const studio of listStudios()) {
+      const implemented = studio.capabilities.filter(
+        (capability) => capability.status === 'available',
+      );
+      if (studio.availability === 'available') continue;
+      expect(implemented, `${studio.id} lists implemented capabilities`).toEqual([]);
+    }
   });
 
   it('exposes an entry route only for studios that are actually available', () => {

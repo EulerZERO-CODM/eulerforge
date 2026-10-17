@@ -66,6 +66,14 @@ The parts every studio must share. Each module is small, pure where possible, an
   through an injected measure function. Nothing here imports React or touches a DOM: the browser
   canvas adapter lives in `src/lib/browser/canvas.ts` and is passed in as a factory (ADR-0016,
   ADR-0019).
+- **`vector/`** — the framework-free path kernel: an immutable path model (contours of nodes with
+  Bezier handles), bounds, transforms, flattening, arc-length sampling, fill/stroke hit-testing,
+  node/handle operations, pen construction, shape generation, path-data serialisation, validation,
+  and the boolean operations that go through `polygon-clipping` (ADR-0020, ADR-0021). One module,
+  `tolerance.ts`, owns every numeric epsilon, and every fallible operation returns a `Result`.
+- **`svg/`** — the SVG boundary: a deterministic serializer, a defended importer, the artwork model
+  that sits between a scene and a file, the naive serializer the compact one is measured against, a
+  stored-mode zip writer and the icon-set builder. It consumes the path model and never the editor.
 - **`editor/`** — the interaction model: `selection.ts` (what is selected, never persisted),
   `commands.ts` (each edit as a label plus the patch that performs it) and `gesture.ts` (move and
   resize previews in document coordinates, resolved once on release, with snapping).
@@ -162,6 +170,27 @@ Three rules hold this together:
    `buildRenderPlan(document)` and both paint through `paintPlan`, so "what you see is what you
    export" is a property of the code rather than a promise (ADR-0016).
 
+### The vector editing pipeline
+
+The Illustration Studio reuses that pipeline end to end, with the path kernel in place of the frame
+model:
+
+```
+pointer / keyboard on the vector stage (components/illustration/vector-stage.tsx)
+        ↓ a gesture or a discrete action is resolved into one editor/vector-commands command
+        ↓ each command re-derives the path layer's frame from its geometry
+WorkspaceApi.run(command) → DocumentSession.commit(label, patch)   (same validation, same history)
+        ↓
+core/render/plan.ts paints path layers through the same painter the Design Studio uses
+core/svg/from-scene.ts turns the same geometry into an SVG file
+core/documents/interchange.ts converts the same layers for the other studio
+```
+
+Two boundaries are deliberate. The kernel never learns about SVG syntax or React (ADR-0020), so the
+editor, the painter and the exporter are three consumers of one geometry. And a path layer's frame is
+derived from its nodes rather than stored independently, so a moved node and a transformed box cannot
+disagree; `setLayerFramesCommand` converts a box transform into a path transform.
+
 ## Data flow of a real edit
 
 ```
@@ -231,6 +260,11 @@ tests use too. The same suite decodes the artboard's own canvas pixels, so the p
 snapping guides occupy and the words each line of a text layer lands on are asserted as well, at 25%,
 100% and 200% zoom (`e2e/snapping.spec.ts`, `e2e/text-wrapping.spec.ts`), and a session started with
 browser storage refused is driven through the whole creation-and-edit flow
-(`e2e/storage-restricted.spec.ts`). What even that cannot reach — other browser engines, the
+(`e2e/storage-restricted.spec.ts`). Phase 3 adds `e2e/illustration.spec.ts`, which creates a vector
+document through the studio's real entry point, draws with the pen, edits nodes and Bezier handles,
+performs a boolean operation in the browser (the regression that unit tests could not see: the
+dependency resolves differently under the browser bundler), imports hostile SVG, downloads an SVG and
+re-imports its own bytes, downloads an icon-set zip and checks its signature and manifest, and converts
+artwork between the Design and Illustration documents in both directions. What even that cannot reach — other browser engines, the
 responsiveness of a 30-layer document, font metrics that would only hold on one machine — is listed as
 a manual check in `docs/ROADMAP.md` rather than quietly assumed.

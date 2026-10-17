@@ -572,3 +572,162 @@ persistence, core not knowing about React, the DOM, the state layer or routes �
 is crossed, and each was verified by introducing a deliberate violation and watching ESLint report it.
 A future module that needs a browser API has one obvious home, and a reviewer can accept or reject it as
 a one-line change of a pattern list rather than as an unwritten convention.
+
+## ADR-0020 — The path kernel is its own model, and geometry never learns about SVG or React
+
+**Status:** accepted (Phase 3).
+
+**Context.** Phase 3 needs a vector capability that the Illustration Studio can edit, the renderer can
+paint, the export pipeline can serialise and a later Motion Studio can animate. The obvious shortcut is
+to make SVG path syntax the in-memory representation: `M/L/C/A` strings, parsed on demand, with the
+editor mutating document text. That shortcut fails the requirements in three separate ways. It puts a
+*markup* format at the centre of a data model that has to answer geometric questions (bounds,
+hit-testing, transforms, boolean combination) cheaply and unambiguously; it makes every edit a string
+rewrite, so a node drag has no natural target to address and no round-trip identity; and it welds the
+editor's keyboard and pointer behaviour to whatever the last serialiser happened to emit.
+
+The second shortcut is to let the kernel reach for the browser: measure a curve with
+`SVGGeometryElement.getTotalLength`, hit-test with `isPointInStroke`, or compute bounds from a rendered
+`<path>`. Those APIs are only available in a DOM and only for vector shapes that are attached to a
+document, which would make the kernel untestable in Node and unusable in the export path.
+
+**Decision.**
+
+- **One immutable path model, addressed by index.** `src/core/vector/types.ts` defines a path as
+  contours of nodes; each node carries a point, an optional `handleIn`/`handleOut`, and a kind
+  (corner / smooth / asymmetric). Segments are therefore *between* nodes, and an edit targets
+  `{ contourIndex, nodeIndex, side }` — the identity the UI needs and the identity a test can assert.
+  A contour that closes records `closed: true` rather than repeating its first node, so a closed shape
+  has no duplicate vertex to keep in sync.
+- **Geometry is framework-free and dependency-light.** `src/core/vector/**` imports no DOM, no React,
+  no storage and no SVG module; ESLint bans those imports for `src/core/**` (ADR-0019), and the kernel
+  is covered by Node tests (`path`, `geometry`, `path-data`, `validity`, `ops`, `shapes`, `pen`,
+  `pick`, `boolean`). Numbers are the only currency: flattening, arc-length sampling and area
+  computation are hand-written where they are small and well understood, and all of them are
+  deterministic.
+- **SVG is a boundary, not a model.** `src/core/svg/**` converts between the model and markup in both
+  directions. The serialiser is deterministic (sorted attribute order, computed `viewBox`, stable
+  number formatting at a fixed digit count) and the importer parses markup into the same model. A
+  round-trip is therefore a property of the conversion, not of the editor: the tests compare
+  coordinates within a documented tolerance (`1e-3` in user units) rather than comparing strings.
+- **Tolerances are declared once.** `src/core/vector/tolerance.ts` is the single source: point
+  coincidence `1e-6`, flattening step `0.05` px, area epsilon `1e-6`, stroke hit slack `3` px. Nothing
+  else is allowed to invent an epsilon, and an operation that changes the effective tolerance (a
+  boolean, which flattens first) has to *report* it — which is why the boolean command returns the
+  flattening tolerance and the flattened segment counts to the interface.
+- **Invalid geometry is a value, not an exception.** Because paths can come from a file, every
+  operation returns a `Result<T>` and `validatePath`/`validateVectorContent` name the specific problem
+  (`degenerate-contour`, `non-finite-point`, `too-many-nodes`, …). A closed contour with fewer than
+  three distinct nodes is rejected rather than silently repaired.
+
+**Consequences.** The editing surface, the painter, the SVG exporter and the interchange path all
+consume exactly the same geometry, so an edit cannot mean one thing on screen and another in a file;
+the kernel is unit-testable in Node with no canvas; and boolean results can be re-validated for
+topological consistency before they are offered to the user. The cost is conversion code in two
+places (SVG and the render plan) and a flattening step before boolean operations, which is a visible,
+reported approximation rather than a hidden one. Curve-preserving boolean operations remain future
+work, and the interface says so where it matters.
+
+## ADR-0021 — Boolean operations come from a reviewed dependency, and the result is checked
+
+**Status:** accepted (Phase 3).
+
+**Context.** Union, difference, intersection and exclusive-or over paths are the part of a vector
+editor where hand-written code goes wrong quietly: self-intersections, coincident edges, overlapping
+holes and degenerate slivers each produce output that *looks* plausible and is not topologically valid.
+The Phase 3 brief asks for reliable output and for a mature library to be evaluated before writing
+computational geometry from scratch.
+
+Four candidate libraries were compared on the criteria that matter here — licence, algorithm,
+dependency weight, DOM-independence and maintenance: `polygon-clipping` (MIT, Martinez–Rueda sweep on
+polygons, no dependencies, plain JavaScript), `martinez-polygon-clipping` (MIT, the upstream of the
+same algorithm), `js-angusj-clipper` (a WebAssembly port of Clipper, permissive licence but a WASM
+artefact), and `paper.js` (a full graphics framework under a permissive licence). The last two were
+rejected for weight and for pulling a framework into the core; the first two are the same algorithm,
+with `polygon-clipping` being the maintained one that ships a modern entry point.
+
+**Decision.**
+
+- **Depend on `polygon-clipping@0.15.7` (MIT)** in `src/core/vector/boolean.ts` only. It is pure
+  JavaScript with no DOM dependency, so the kernel stays usable in Node; it takes and returns plain
+  nested arrays, so no library type leaks into the model.
+- **Import it as a default import.** The published module is CommonJS/UMD with an ESM wrapper that
+  exports the operations object as the *default*; `import * as` resolves to `undefined` in a browser
+  bundle while still working under Node. The regression was found by the browser CI job, so a
+  Chromium E2E performs a real boolean operation as a guard.
+- **Own the approximation.** Curves are flattened to line segments at `TOLERANCE.flatten` before
+  clipping, because the library is polygonal. That is a real limitation, so the command reports the
+  tolerance and both flattened segment counts, and the result is a polygonal path with corner nodes —
+  the interface states this instead of implying that curves survived.
+- **Validate the output.** Every result is re-parsed through `validatePath` and checked for
+  topological consistency in `boolean.test.ts`: contour count and nesting for holes, no repeated
+  degenerate contours, area identities for difference and intersection, coincidence handling, and the
+  documented refusals for empty or invalid input. A boolean that cannot produce a sound path fails
+  with a message rather than returning geometry that would silently corrupt a document.
+- **Keep the licence record honest.** The dependency is listed with its licence in the repository's
+  dependency documentation, and no other vector dependency is added.
+
+**Consequences.** Boolean operations behave predictably on the cases that break naive implementations,
+and the failure mode for the polygonal approximation is *visible* rather than silent. The cost is one
+runtime dependency in the core, a flattening step that loses curve handles inside the affected shapes,
+and output that is denser than its input. Those costs are the reason `gradients.fills` and curve-exact
+booleans stay `planned` in the studio registry.
+
+## ADR-0022 — Vector artwork crosses the Design/Illustration boundary as a translation with a report
+
+**Status:** accepted (Phase 3).
+
+**Context.** The two studios hold artwork in different documents, and Phase 3 requires a tested
+interchange in both directions *for the supported subset*, with unsupported content named rather than
+dropped. The tempting shortcut is to copy the layer list and hope: a text layer becomes a path with no
+glyphs, an image layer becomes an empty shape, and the user discovers the loss after the fact.
+
+**Decision.**
+
+- **Interchange is an explicit conversion, not a shared container.** `src/core/documents/interchange.ts`
+  takes layers and returns a `Result` with the converted layers, a per-layer list of what was carried
+  and a per-layer list of what was refused with a reason (`INTERCHANGE_LIMITATIONS` names each case in
+  the interface). Neither studio gains a dependency on the other's editor, and the conversion is
+  unit-tested from both directions.
+- **The supported subset is stated in one place.** Path layers travel whole, with geometry and style;
+  rectangle and ellipse layers travel as their generated paths (their shape has an exact path
+  equivalent in the kernel); text, graphics/images, groups with unsupported members, and any style the
+  target document type does not support are refused *by name*. Nothing is approximated silently.
+- **Rotation, effects and metadata are refused rather than baked.** A rotated layer cannot be
+  represented losslessly in a frame-only target without rasterising it, so it is reported; ids, names
+  and z-order are preserved so the converted document is still recognisable next to the original.
+- **The converted document is a new document, created through the normal path.** The interface calls
+  the same `documents.create` used by the creation flow (with the target studio's primary document
+  type), so a converted project is validated, persisted and reopenable like any other — and the
+  interface links to it.
+
+**Consequences.** A user sees exactly what will move before they press the button, and a refusal is
+impossible to mistake for success. The cost is that the conversion is conservative: some artwork a
+person might expect to travel does not, and the interface has to say so in plain language.
+
+## ADR-0023 — SVG export is only `available` when the bytes are produced in a browser
+
+**Status:** accepted (Phase 3).
+
+**Context.** `src/core/export/formats.ts` drives what the export panel offers, and a format marked
+`available` is a promise that pressing the button writes a real file. Phase 3's SVG payload is built in
+the core, but handing bytes to the browser is not: it needs an object URL, an anchor and a click
+(same boundary as ADR-0019). A format that is `available` while the panel falls through to the raster
+branch would be exactly the kind of misleading capability claim this project forbids.
+
+**Decision.**
+
+- **The core builds a payload; the browser adapter performs the download.**
+  `src/core/export/svg-export.ts` returns `{ contents, fileName, mimeType, bytes, unsupported }` with a
+  `Result` when the document cannot produce a valid file; `src/lib/browser/download.ts` hands it over.
+  Everything except the final click is unit-testable.
+- **The readiness checks and the download agree.** `export/checklist.ts` evaluates the same payload, so
+  the panel cannot show a green checklist and then download a different file. When layers are omitted
+  the export is *blocked* by default; the user may opt in to a partial export, and the interface then
+  names how many layers were left out and the payload records them.
+- **Evidence comes from the browser.** A Chromium spec performs the export, captures the download,
+  reads the file's bytes and re-imports them; the format stays `available` only while that spec passes.
+  Format status is also part of the format registry's own tests.
+- **Icon sets go through the same path.** The zip writer is pure (a stored-mode ZIP written by hand),
+  so the archive is unit-tested, and the browser spec checks the downloaded bytes start with the ZIP
+  signature and that the manifest names one file per object.

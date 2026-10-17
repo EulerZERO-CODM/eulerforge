@@ -339,43 +339,58 @@ export const ROADMAP: readonly RoadmapPhase[] = [
     id: 'phase-3',
     name: 'Phase 3 — Vector engine and Illustration Studio',
     summary: 'A shared path model, bezier editing, boolean operations and SVG export.',
-    status: 'planned',
+    status: 'in-progress',
     items: [
       {
         id: 'p3.path-model',
         title: 'Path and geometry kernel',
         description:
           'Framework-free path representation, hit-testing, transforms and boolean operations.',
-        status: 'planned',
+        status: 'done',
         dependsOn: ['p1.core'],
         completionCriteria: [
           'Boolean results are topologically valid',
           'Kernel has no DOM dependency and is fully unit tested',
         ],
-        capabilityIds: [],
+        evidence: [
+          'src/core/vector/path.test.ts',
+          'src/core/vector/geometry.test.ts',
+          'src/core/vector/validity.test.ts',
+          'src/core/vector/boolean.test.ts',
+          'src/core/vector/ops.test.ts',
+          'src/core/editor/vector-commands.test.ts',
+        ],
+        capabilityIds: ['core.vector-model', 'core.vector-booleans'],
       },
       {
         id: 'p3.svg-view',
         title: 'SVG view layer and export',
         description: 'Render the path model to SVG and export production-quality files.',
-        status: 'planned',
+        status: 'done',
         dependsOn: ['p3.path-model'],
         completionCriteria: [
           'Round trip: draw → export SVG → re-import matches geometry within tolerance',
         ],
-        capabilityIds: [],
+        evidence: [
+          'src/core/svg/svg.test.ts',
+          'src/core/svg/from-scene.test.ts',
+          'src/core/svg/icon-set.test.ts',
+          'e2e/illustration.spec.ts (exports a real SVG, reads its bytes and re-imports them)',
+        ],
+        capabilityIds: ['core.svg-io'],
       },
       {
         id: 'p3.illustration',
         title: 'Illustration Studio workspace',
         description: 'Pen, node editing, shape building and stroke controls on the shared kernel.',
-        status: 'planned',
+        status: 'partial',
         dependsOn: ['p3.svg-view'],
         completionCriteria: [
           'A user can draw and export an icon set',
           'Studio flips to `available` in the registry with a working entry point',
         ],
-        capabilityIds: ['studios.photo-video-motion-illustration'],
+        capabilityIds: ['studios.illustration'],
+        gap: 'Gradient/pattern fills, tracing a raster image and text on a path are not implemented and stay labelled planned. Interchange refuses rotated layers rather than baking the rotation, so it is lossless within a smaller subset than the editor itself.',
       },
     ],
     exitCriteria: [
@@ -436,7 +451,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'A RAW-free JPEG workflow is possible end to end',
           'Studio flips to `available` with a working entry point',
         ],
-        capabilityIds: ['studios.photo-video-motion-illustration'],
+        capabilityIds: ['studios.photo-video-motion'],
       },
     ],
     exitCriteria: [
@@ -483,7 +498,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'A title animation can be produced and exported',
           'Studio flips to `available` with a working entry point',
         ],
-        capabilityIds: ['studios.photo-video-motion-illustration'],
+        capabilityIds: ['studios.photo-video-motion'],
       },
     ],
     exitCriteria: [
@@ -533,7 +548,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'A short edit exports and plays back correctly',
           'Export failure states are explained, not silent',
         ],
-        capabilityIds: ['studios.photo-video-motion-illustration'],
+        capabilityIds: ['studios.photo-video-motion'],
       },
     ],
     exitCriteria: [

@@ -132,7 +132,14 @@ function between(value: number, min: number, max: number): boolean {
  * coordinate limits are generous. What they must not be is unbounded, because a saved document is
  * re-opened by the same renderer that draws it.
  */
-export function validateLayerFrame(frame: Rect): readonly FieldValidation[] {
+export function validateLayerFrame(
+  frame: Rect,
+  options: { readonly minimumSize?: number | undefined } = {},
+): readonly FieldValidation[] {
+  // A path layer's frame is derived from its outline, and a straight line is legitimate artwork
+  // whose box is genuinely one pixel tall and zero wide. Refusing it here would mean the editor
+  // could not draw a line that the storage schema is perfectly happy to hold.
+  const minimum = options.minimumSize ?? MIN_LAYER_SIZE;
   const issues: FieldValidation[] = [];
   if (!finite(frame.x) || Math.abs(frame.x) > MAX_FRAME_COORDINATE) {
     issues.push({
@@ -148,10 +155,10 @@ export function validateLayerFrame(frame: Rect): readonly FieldValidation[] {
   }
   for (const axis of ['width', 'height'] as const) {
     const value = frame[axis];
-    if (!between(value, MIN_LAYER_SIZE, MAX_LAYER_SIZE)) {
+    if (!between(value, minimum, MAX_LAYER_SIZE)) {
       issues.push({
         field: axis,
-        message: `Layer ${axis} must be between ${MIN_LAYER_SIZE} and ${MAX_LAYER_SIZE} px.`,
+        message: `Layer ${axis} must be between ${minimum} and ${MAX_LAYER_SIZE} px.`,
       });
     }
   }
@@ -251,7 +258,9 @@ export function validateImageSettings(image: ImageSettings): readonly FieldValid
 
 /** Field-level validation for a single layer, whichever type it is. */
 export function validateLayer(layer: Layer): readonly FieldValidation[] {
-  const issues: FieldValidation[] = [...validateLayerFrame(layer.frame)];
+  const issues: FieldValidation[] = [
+    ...validateLayerFrame(layer.frame, layer.type === 'path' ? { minimumSize: 0 } : {}),
+  ];
 
   if (layer.name.trim().length === 0 || layer.name.length > MAX_LAYER_NAME_LENGTH) {
     issues.push({
@@ -292,6 +301,10 @@ export function validateLayer(layer: Layer): readonly FieldValidation[] {
 export function validateVectorContent(content: VectorContent): readonly FieldValidation[] {
   const issues: FieldValidation[] = [];
   for (const issue of validatePath(content.path)) {
+    // Only *severe* kernel issues block an edit. A non-severe one (a closed contour with two nodes,
+    // for instance — a shape the storage schema accepts and the renderer draws) is a note about the
+    // geometry, not a reason to refuse the change the user just made.
+    if (!issue.severe) continue;
     issues.push({ field: 'vector.path', message: issue.message });
   }
   const { style } = content;

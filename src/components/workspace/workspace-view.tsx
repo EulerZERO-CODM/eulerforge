@@ -20,6 +20,7 @@ import { storageBadge } from '../../state/storage-status';
 import type { Result } from '../../core/result';
 import type { CommitOptions, DocumentPatch } from '../../state/document-session';
 import type { SceneCommand } from '../../core/editor/commands';
+import { IllustrationWorkspace, isVectorDocument } from '../illustration/illustration-workspace';
 import { ContextHelp } from './context-help';
 import { DocumentAside } from './document-aside';
 import { DocumentStage } from './document-stage';
@@ -175,6 +176,10 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
   const doc = state.document;
   const studio = getStudio(doc.studioId);
   const api: WorkspaceApi = { doc, commit, run, undo, redo };
+  // The document type decides the editing surface: a vector artboard gets the Illustration Studio's
+  // stage and inspector, everything else keeps the design workspace. The shell, the session, undo and
+  // persistence are shared, so neither surface has its own private editing path.
+  const vectorDocument = isVectorDocument(String(doc.documentTypeId));
 
   return (
     <div className="mx-auto max-w-[100rem] space-y-5 p-4 sm:p-6">
@@ -261,22 +266,8 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
         </InlineNote>
       ) : null}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_26rem]">
-        <div className="min-w-0 space-y-5">
-          <DocumentStage
-            api={api}
-            selection={selection}
-            onSelectionChange={setSelection}
-            images={images}
-            snapping={snapping}
-            onSnappingChange={setSnapping}
-            showGuides={showGuides}
-            onGuidesChange={setShowGuides}
-          />
-          <ContextHelp studioId={doc.studioId} />
-        </div>
-
-        <DocumentAside
+      {vectorDocument ? (
+        <IllustrationWorkspace
           api={api}
           scene={doc.scene}
           images={images}
@@ -288,7 +279,36 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
           onUndo={undo}
           onRedo={redo}
         />
-      </div>
+      ) : (
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_26rem]">
+          <div className="min-w-0 space-y-5">
+            <DocumentStage
+              api={api}
+              selection={selection}
+              onSelectionChange={setSelection}
+              images={images}
+              snapping={snapping}
+              onSnappingChange={setSnapping}
+              showGuides={showGuides}
+              onGuidesChange={setShowGuides}
+            />
+            <ContextHelp studioId={doc.studioId} />
+          </div>
+
+          <DocumentAside
+            api={api}
+            scene={doc.scene}
+            images={images}
+            selection={selection}
+            onSelectionChange={setSelection}
+            history={state.history}
+            canUndo={state.canUndo}
+            canRedo={state.canRedo}
+            onUndo={undo}
+            onRedo={redo}
+          />
+        </div>
+      )}
 
       <ConfirmDialog
         open={deleteOpen}

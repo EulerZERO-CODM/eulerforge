@@ -11,6 +11,7 @@ import {
   setLayerVisibilityCommand,
 } from '../../core/editor/commands';
 import { isSelected, type Selection } from '../../core/editor/selection';
+import { InterchangePanel } from '../illustration/interchange-panel';
 import { ExportPanel } from './export-panel';
 import { HistoryPanel } from './history-panel';
 import { InspectorPanel } from './inspector-panel';
@@ -99,6 +100,10 @@ export function DocumentAside({
 
       <div className="border-line border-t pt-4">
         <ExportPanel api={api} images={images} />
+      </div>
+
+      <div className="border-line border-t pt-4">
+        <InterchangePanel api={api} direction="to-vector" selectedIds={selection.map(String)} />
       </div>
 
       <div className="border-line border-t pt-4">
