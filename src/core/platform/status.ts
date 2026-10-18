@@ -406,13 +406,70 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     gap: 'The browser decides the encoder, so a PNG colour profile is whatever the browser writes; gamma and ICC embedding are not implemented.',
   },
   {
-    id: 'studios.motion-video',
+    id: 'studios.motion',
     area: 'studios',
-    label: 'Motion and Video studios',
-    description: 'The remaining specialist editors.',
+    label: 'Motion Studio',
+    description:
+      'A real motion-graphics editor on the shared document model: text, rectangle and ellipse layers, per-property keyframes for position, scale and opacity, linear/eased/held/custom-cubic interpolation, a timeline with a draggable playhead and draggable keyframes, playback with frame stepping, a value-graph editor, undo/redo, autosave, and a genuine PNG frame sequence with a JSON manifest in a zip.',
+    status: 'partial',
+    verification: [
+      'src/core/motion/evaluate.test.ts',
+      'src/core/motion/easing.test.ts',
+      'src/core/motion/commands.test.ts',
+      'src/core/motion/export.test.ts',
+      'src/components/motion/motion-workspace.test.tsx',
+      'e2e/motion.spec.ts',
+    ],
+    gap: 'Export is a PNG sequence, not a video file: no codec is claimed. Imported illustration artboards, path layers, masks, transitions, text-on-path animation and expressions are not implemented and stay listed as planned on the studio page. Motion is verified in Chromium only.',
+  },
+  {
+    id: 'motion.evaluator',
+    area: 'studios',
+    label: 'Deterministic motion evaluator',
+    description:
+      'A pure, framework-free evaluator that answers what the document looks like at time t and is shared by the preview and the frame export, so the same timestamp produces the same geometry and the same pixels.',
+    status: 'implemented',
+    verification: [
+      'src/core/motion/evaluate.test.ts (known geometry, boundaries, hold, centre-scaling, repeated evaluation)',
+      'e2e/motion.spec.ts (an exported PNG frame at t = 1 s matches the preview canvas at t = 1 s pixel for pixel)',
+    ],
+  },
+  {
+    id: 'motion.keyframes',
+    area: 'studios',
+    label: 'Keyframes, interpolation and graph editing',
+    description:
+      'Per-property keyframes with linear, ease-in, ease-out, ease-in-out, hold and custom cubic easing; a timeline that shows and drags them; a graph editor that drags the two Bézier control points; every edit is one labelled undoable command.',
+    status: 'implemented',
+    verification: [
+      'src/core/motion/easing.test.ts',
+      'src/core/motion/commands.test.ts',
+      'src/components/motion/motion-workspace.test.tsx',
+      'e2e/motion.spec.ts',
+    ],
+  },
+  {
+    id: 'motion.export',
+    area: 'studios',
+    label: 'Frame-sequence export',
+    description:
+      'Renders the planned frames through the same render plan and painter as the preview, encodes PNG with the browser, and zips the frames with a manifest that records the times, size and frame rate. Cancellation and every refusal are states the panel shows.',
+    status: 'implemented',
+    verification: [
+      'src/core/motion/export.test.ts',
+      'src/lib/browser/motion-engine.ts',
+      'e2e/motion.spec.ts (a downloaded zip is parsed: exact entry list, manifest times, decoded frame compared with the preview)',
+    ],
+    gap: 'The archive is a frame sequence, not a video file. There is no audio track and no codec.',
+  },
+  {
+    id: 'studios.video',
+    area: 'studios',
+    label: 'Video Studio',
+    description: 'The remaining specialist editor.',
     status: 'planned',
     verification: [],
-    gap: 'Entry points exist and explain what each studio will do; neither edits timeline media yet, and no interface in them claims to.',
+    gap: 'An entry point explains what the studio will do; it does not edit timeline media yet, and no interface in it claims to.',
   },
   {
     id: 'studios.three-d',

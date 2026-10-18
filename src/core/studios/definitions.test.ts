@@ -29,18 +29,19 @@ describe('shipped studio registry', () => {
     ]);
   });
 
-  it('is honest about maturity: Design, Photo and Illustration are available, the rest are not', () => {
+  it('is honest about maturity: Design, Photo, Illustration and Motion are available, the rest are not', () => {
     // Every entry here is a claim backed by a working workspace; the studios that are still planned
     // must not creep into this list because a route or a placeholder appeared.
     expect(listStudiosByAvailability('available').map((studio) => studio.id)).toEqual([
       'design',
       'photo',
+      'motion',
       'illustration',
     ]);
     expect(studioRegistry.countByAvailability()).toEqual({
-      available: 3,
+      available: 4,
       'in-development': 0,
-      planned: 2,
+      planned: 1,
       exploratory: 1,
     });
   });

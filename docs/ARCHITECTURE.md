@@ -216,6 +216,29 @@ can be compared byte for byte in a test. And the tool, brush radius, hardness, c
 "show original" toggle are transient (ADR-0017): they configure the next stroke, so they never
 reach the document, the history or storage.
 
+### The motion evaluation pipeline
+
+Motion Studio is the first studio whose output is a *time series* rather than one picture, so the
+pipeline has one extra boundary: the clock.
+
+```
+playback clock (components/motion/use-motion-playback.ts) ─┐
+                                                           ├─ t ─→ core/motion/evaluate.ts
+export plan (core/motion/export.ts: times[]) ──────────────┘         │
+                                                                     ▼
+                                       evaluateDocumentAt(document, t) → a ForgeDocument
+                                                                     │
+                                   buildRenderPlan + paintPlan (the Design renderer)
+                                                                     │
+                            preview canvas                     exportRasterImage → PNG → zip
+```
+
+The evaluator is a pure function of `(document, t)`: no clock, no randomness, no DOM. That is what
+makes the preview and the export agree, and it is why the test can assert an exported frame against
+the preview canvas pixel for pixel rather than approximately. The playhead itself is transient
+component state (ADR-0017); the composition's length and frame rate are document state and travel
+through the normal command path.
+
 ## Data flow of a real edit
 
 ```

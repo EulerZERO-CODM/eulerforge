@@ -654,7 +654,14 @@ export function CreationFlow() {
             ) : null}
 
             <InlineNote tone="tip" icon={<Sparkles aria-hidden />}>
-              {documentType?.id === 'photo.image' ? (
+              {documentType?.id === 'motion.scene' ? (
+                <p>
+                  After creating, the workspace opens Motion Studio: add text and shapes, keyframe
+                  position, scale or opacity at the playhead, shape the timing with presets or a
+                  custom curve, scrub and play the composition, undo anything, and export a real PNG
+                  frame sequence with a manifest in a zip.
+                </p>
+              ) : documentType?.id === 'photo.image' ? (
                 <p>
                   After creating, the workspace opens Photo Studio: import a PNG, JPEG or WebP,
                   build an ordered adjustment stack, paint brush or lasso masks, clone and heal,

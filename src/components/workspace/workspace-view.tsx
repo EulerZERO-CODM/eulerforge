@@ -21,6 +21,7 @@ import type { Result } from '../../core/result';
 import type { CommitOptions, DocumentPatch } from '../../state/document-session';
 import type { SceneCommand } from '../../core/editor/commands';
 import { IllustrationWorkspace, isVectorDocument } from '../illustration/illustration-workspace';
+import { MotionWorkspace, isMotionDocument } from '../motion/motion-workspace';
 import { PhotoWorkspace, isPhotoDocument } from '../photo/photo-workspace';
 import { ContextHelp } from './context-help';
 import { DocumentAside } from './document-aside';
@@ -183,6 +184,8 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
   const vectorDocument = isVectorDocument(String(doc.documentTypeId));
   const photoDocument = isPhotoDocument(String(doc.documentTypeId));
   const photoPayload = doc.studioPayload?.kind === 'photo' ? doc.studioPayload : null;
+  const motionDocument = isMotionDocument(String(doc.documentTypeId));
+  const motionPayload = doc.studioPayload?.kind === 'motion' ? doc.studioPayload : null;
 
   return (
     <div className="mx-auto max-w-[100rem] space-y-5 p-4 sm:p-6">
@@ -269,7 +272,30 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
         </InlineNote>
       ) : null}
 
-      {photoDocument ? (
+      {motionDocument ? (
+        motionPayload ? (
+          <MotionWorkspace
+            api={api}
+            payload={motionPayload}
+            history={state.history}
+            canUndo={state.canUndo}
+            canRedo={state.canRedo}
+            onUndo={undo}
+            onRedo={redo}
+          />
+        ) : (
+          <InlineNote
+            tone="danger"
+            icon={<CircleAlert aria-hidden />}
+            title="This motion project is missing its animation data"
+          >
+            <p>
+              The document has no motion payload, so there is nothing to play. Export the project
+              file and reopen it, or create a new motion project.
+            </p>
+          </InlineNote>
+        )
+      ) : photoDocument ? (
         photoPayload ? (
           <PhotoWorkspace
             api={api}

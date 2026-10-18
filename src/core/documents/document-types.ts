@@ -61,8 +61,8 @@ export const DOCUMENT_TYPES: readonly DocumentTypeDefinition[] = [
     description: 'Keyframed composition of shapes, text and imported artwork.',
     studioId: 'motion',
     unit: 's',
-    availability: 'planned',
-    renderer: 'Scene graph evaluated per frame; SVG/Canvas2D preview, frame-accurate export later',
+    availability: 'available',
+    renderer: 'Scene evaluated per frame with the shared render plan; PNG frame sequence export',
   },
   {
     id: typeId('illustration.artboard'),

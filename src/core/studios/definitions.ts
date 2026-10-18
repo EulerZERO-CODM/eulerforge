@@ -266,11 +266,12 @@ export const MOTION_STUDIO: StudioDefinition = {
   name: 'Motion Studio',
   tagline: 'Keyframes, animation and motion graphics.',
   purpose:
-    'Motion Studio will animate the same visual vocabulary as Design Studio: shapes, text and imported artwork placed on a timeline with keyframes, easing and expressions. Because it evaluates a scene graph at a given time, it can share the vector rendering path and stay deterministic for export.',
+    'Motion Studio animates the same visual vocabulary as Design Studio: shapes and text placed on a timeline with per-property keyframes, easing curves and a graph editor. A pure evaluator drives both the preview and the frame export, so the same timestamp produces the same picture in both.',
   icon: 'keyframe',
   accent: 'teal',
-  availability: 'planned',
-  maturityNote: 'Not started. Depends on the vector scene model from the Illustration work.',
+  availability: 'available',
+  maturityNote:
+    'Working in this browser: text, rectangle and ellipse layers, keyframes for position, scale and opacity, linear/eased/held and custom cubic easing with a draggable graph, a timeline you can scrub and drag keyframes on, playback with frame stepping, undo/redo, autosave and a real PNG frame sequence with a JSON manifest in a zip. Not implemented: video-file export (a codec is a different promise), masks, transitions, imported artboards and expressions.',
   produces: [
     'Animated titles and lower thirds',
     'Logo reveals and stingers',
@@ -282,20 +283,23 @@ export const MOTION_STUDIO: StudioDefinition = {
     {
       id: 'keyframes',
       label: 'Keyframes with easing',
-      status: 'planned',
-      detail: 'Animate any property with linear, eased and stepped interpolation.',
+      status: 'available',
+      detail:
+        'Animate position, scale and opacity with linear, eased, held and custom cubic interpolation; every edit is one undoable command.',
     },
     {
       id: 'graph.editor',
       label: 'Value graph editor',
-      status: 'planned',
-      detail: 'Fine-tune timing by dragging curves instead of typing easing values.',
+      status: 'available',
+      detail:
+        'Drag the two control points of a segment’s cubic curve, or type the four values; presets convert to a custom curve as soon as a handle moves.',
     },
     {
       id: 'scene.vector',
       label: 'Vector scene composition',
       status: 'planned',
-      detail: 'Shapes, paths and text shared with the Illustration Studio model.',
+      detail:
+        'Text, rectangle and ellipse layers already share the Design Studio document model and renderer; imported illustration artboards, path layers and true vector masks are not yet offered in the motion workspace.',
     },
     {
       id: 'expressions',
@@ -306,22 +310,24 @@ export const MOTION_STUDIO: StudioDefinition = {
     {
       id: 'export.frames',
       label: 'Frame-accurate export',
-      status: 'planned',
-      detail: 'Deterministic frame rendering to video or image sequences.',
+      status: 'available',
+      detail:
+        'A deterministic PNG sequence plus a JSON manifest, zipped by the project’s own writer. Not a video codec: the studio says frame sequence rather than pretending otherwise.',
     },
   ],
   engine: {
     renderer: 'SVG/Canvas2D scene view with a deterministic evaluator',
     pipeline:
       'Pure-function scene evaluation at time t; the same evaluator drives preview and export',
-    integrationPoint: 'src/studios/motion with src/engines/vector shared with Illustration Studio',
+    integrationPoint:
+      'src/core/motion (evaluator, commands, export plan) and src/lib/browser/motion-engine.ts',
     rationale:
-      'Motion graphics are usually vector and text driven, so a resolution-independent evaluator gives crisper output and easier export than a raster-first engine. Determinism (same input → same frame) is a hard requirement for trustworthy export.',
+      'Motion graphics are usually vector and text driven, so a resolution-independent evaluator gives crisper output and easier export than a raster-first engine. Determinism (same input → same frame) is a hard requirement for trustworthy export, and the evaluator is pure so the tests can assert it directly.',
   },
-  entry: { route: null, label: 'Motion Studio' },
+  entry: { route: '/studios/motion', label: 'Open Motion Studio' },
   learningSlugs: ['keyframes-explained'],
   consumesFrom: [DESIGN_STUDIO.id, PHOTO_STUDIO.id],
-  definitionVersion: 1,
+  definitionVersion: 2,
 };
 
 export const ILLUSTRATION_STUDIO: StudioDefinition = {

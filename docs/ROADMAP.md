@@ -179,8 +179,21 @@ once at the stored size.
 
 ### Phase 5 — Motion Studio
 
-Deterministic scene evaluator, keyframes/interpolation/graph editor, then the Motion Studio
-workspace.
+Complete. `src/core/motion` is a pure evaluator: `evaluateDocumentAt(document, t)` returns the
+document's scene at that time, and both the preview canvas and the frame exporter call it. Every
+property is a keyframe track (position, scale around the frame's centre, opacity) with linear,
+ease-in, ease-out, ease-in-out, hold and custom cubic Bézier easing; the graph editor drags the two
+control points and the four values are also keyboard-editable.
+
+The workspace has a timeline per animated property, a draggable playhead and draggable keyframes,
+transport with frame stepping, layer creation, per-keyframe value editing, undo/redo and autosave.
+Export renders a PNG sequence through the same render plan and painter as the preview and zips it
+with a JSON manifest of the exact frame times; a Chromium spec decodes an exported frame and
+compares it with the preview canvas at the same timestamp **pixel for pixel**.
+
+Still missing, and labelled planned on the studio page: video-file export (a codec is a different
+promise), imported illustration artboards, path layers, masks, transitions and expressions. The
+browser suite is Chromium only.
 
 ### Phase 6 — Video Studio
 

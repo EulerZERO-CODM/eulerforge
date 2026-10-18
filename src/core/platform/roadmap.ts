@@ -487,43 +487,63 @@ export const ROADMAP: readonly RoadmapPhase[] = [
   {
     id: 'phase-5',
     name: 'Phase 5 — Motion Studio',
-    summary: 'Deterministic scene evaluation, keyframes, easing and frame-accurate export.',
-    status: 'planned',
+    summary:
+      'Deterministic scene evaluation, keyframes with easing and a graph editor, a timeline and transport, and a PNG frame-sequence export whose frames match the preview at the same timestamp.',
+    status: 'complete',
     items: [
       {
         id: 'p5.evaluator',
         title: 'Deterministic scene evaluator',
         description: 'Pure evaluation of a scene graph at time t, shared by preview and export.',
-        status: 'planned',
+        status: 'done',
         dependsOn: ['p3.path-model'],
         completionCriteria: [
           'The same time value produces byte-identical geometry in preview and export',
         ],
-        capabilityIds: [],
+        evidence: [
+          'src/core/motion/evaluate.ts',
+          'src/core/motion/evaluate.test.ts',
+          'e2e/motion.spec.ts',
+        ],
+        capabilityIds: ['motion.evaluator'],
       },
       {
         id: 'p5.keyframes',
         title: 'Keyframes, interpolation and graph editor',
         description: 'Per-property keyframes with easing profiles and a curve editor.',
-        status: 'planned',
+        status: 'done',
         dependsOn: ['p5.evaluator'],
         completionCriteria: [
           'Interpolation types are unit tested against known values',
           'Keyframe edits are undoable commands',
         ],
-        capabilityIds: [],
+        evidence: [
+          'src/core/motion/easing.test.ts',
+          'src/core/motion/commands.test.ts',
+          'src/components/motion/keyframe-panel.tsx',
+          'src/components/motion/easing-curve-editor.tsx',
+          'src/components/motion/motion-workspace.test.tsx',
+        ],
+        capabilityIds: ['motion.keyframes'],
       },
       {
         id: 'p5.motion-studio',
         title: 'Motion Studio workspace',
         description: 'Timeline, property panel, playback controls and export.',
-        status: 'planned',
+        status: 'done',
         dependsOn: ['p5.keyframes'],
         completionCriteria: [
           'A title animation can be produced and exported',
           'Studio flips to `available` with a working entry point',
         ],
-        capabilityIds: ['studios.motion-video'],
+        evidence: [
+          'src/components/motion/motion-workspace.tsx',
+          'src/components/motion/motion-workspace.test.tsx',
+          'e2e/motion.spec.ts',
+          'src/core/studios/definitions.test.ts (the entry point is `available` and routes to /studios/motion)',
+          'src/components/create/creation-flow.test.tsx',
+        ],
+        capabilityIds: ['studios.motion', 'motion.export'],
       },
     ],
     exitCriteria: [
@@ -573,7 +593,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'A short edit exports and plays back correctly',
           'Export failure states are explained, not silent',
         ],
-        capabilityIds: ['studios.motion-video'],
+        capabilityIds: ['studios.video'],
       },
     ],
     exitCriteria: [

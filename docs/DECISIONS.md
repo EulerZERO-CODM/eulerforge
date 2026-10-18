@@ -778,3 +778,37 @@ stop and nobody would notice until a user compared a preview with an export.
 the UI never pretends otherwise. The cost is that GPU-specific effects (blur, distortion) cannot be
 added to one renderer alone, and every adjustment has to be expressible as a per-pixel function plus
 a separable blur — which is also what makes the parity test possible.
+
+## ADR-0025 — Motion export is a frame sequence, and the evaluator is the shared truth
+
+**Status:** accepted (Phase 5).
+
+**Context.** A motion editor promises "what you see is what you export". The tempting shape is a
+preview implementation and an export implementation that are "kept in sync" — which is precisely how
+the two drift apart. A video file would raise the same promise to "what you export plays back
+correctly", and a codec is a much larger claim: container, muxing, keyframes, audio and a browser
+support matrix that would have to be measured on real devices.
+
+**Decision.**
+
+- **One pure evaluator, two callers.** `src/core/motion/evaluate.ts` takes a document and a time and
+  returns the document at that time. The preview paints the result; the exporter evaluates the same
+  times and paints through the same `buildRenderPlan`/`paintPlan` pair. Neither has a private path.
+- **Export is a PNG sequence plus a manifest, in a zip.** The manifest records the composition, the
+  frame rate, the exact times and the file names, so the sequence can be reassembled elsewhere. The
+  panel and the studio page say "frame sequence", never "video".
+- **Times come from a plan, not from a clock.** `planMotionExport` computes the frame grid (inclusive
+  start, exclusive end) before a canvas exists, refuses an empty range, more than 1800 frames, or an
+  out-of-range scale, and reports those refusals as sentences. A 30 fps, 2 s export is exactly 60
+  frames — not "about 60".
+- **Frames are rendered one at a time.** Holding 30 canvases at 1080 px would allocate hundreds of
+  megabytes; the exporter renders, encodes and releases each frame, reports progress by count and
+  discards the partial archive when it is cancelled.
+- **The graph editor edits the same curve the evaluator solves.** Easing is stored as CSS-style cubic
+  control points, the editor drags those points, and the preset names map to the same numbers in one
+  table — so a curve cannot look different in the editor and in the output.
+
+**Consequences.** The parity claim is testable rather than aspirational: a Chromium spec downloads
+the archive, decodes a PNG and compares it with the live preview canvas at the same timestamp. The
+cost is that a user who expected an MP4 does not get one, and the studio must say so plainly — which
+it does, in the export panel and in the capability ledger.
