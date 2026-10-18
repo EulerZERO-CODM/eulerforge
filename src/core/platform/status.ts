@@ -320,7 +320,7 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     area: 'studios',
     label: 'Illustration Studio vector editor',
     description:
-      'A real vector workspace on the shared kernel: draw with the pen, place rectangles/ellipses/polygons, drag out shapes, edit nodes and Bezier handles, marquee-select, nudge and transform, set real fill/stroke/opacity/cap/join/dash, run boolean operations, convert shapes to editable paths, import and export SVG, export an icon set, and hand artwork to the Design Studio and back. Every edit is one labelled undoable action, and the studio links its limitations (no gradients, no tracing, no rotation-preserving interchange) instead of hiding them.',
+      'A real vector workspace on the shared kernel: draw with the pen, place rectangles/ellipses/polygons, drag out shapes, edit nodes and Bezier handles, marquee-select, nudge and transform, set real fill/stroke/opacity/cap/join/dash, run boolean operations, convert shapes to editable paths, import and export SVG, export an icon set from the selection (unselected, hidden and non-path layers are never packaged; anything it cannot carry is named), and hand artwork to the Design Studio and back. Every edit is one labelled undoable action, and the studio links its limitations (no gradients, no tracing, no rotation-preserving interchange) instead of hiding them.',
     status: 'partial',
     verification: [
       'src/components/illustration/illustration-workspace.test.tsx',

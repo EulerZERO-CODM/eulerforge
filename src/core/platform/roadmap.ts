@@ -390,7 +390,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Studio flips to `available` in the registry with a working entry point',
         ],
         capabilityIds: ['studios.illustration'],
-        gap: 'Gradient/pattern fills, tracing a raster image and text on a path are not implemented and stay labelled planned. Interchange refuses rotated layers rather than baking the rotation, so it is lossless within a smaller subset than the editor itself.',
+        gap: 'Gradient/pattern fills, tracing a raster image and text on a path are not implemented and stay labelled planned. Interchange refuses rotated layers rather than baking the rotation, so it is lossless within a smaller subset than the editor itself. Icon sets contain path layers only: a selected rectangle, ellipse, text or graphic layer is named as skipped rather than converted.',
       },
     ],
     exitCriteria: [
