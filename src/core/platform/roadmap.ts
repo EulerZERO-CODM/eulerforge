@@ -555,45 +555,89 @@ export const ROADMAP: readonly RoadmapPhase[] = [
     id: 'phase-6',
     name: 'Phase 6 — Video Studio',
     summary:
-      'Media import, timeline editing, audio and encoding, built on browser media APIs where they exist.',
-    status: 'planned',
+      'Media import on the browser’s own decoders, multi-track editing with overwrite/trim/split commands, titles and per-clip levels, decoded playback and scrubbing, a deterministic frame-sequence export and a real-time WebM capture.',
+    status: 'in-progress',
     items: [
       {
         id: 'p6.media-pipeline',
-        title: 'Media decoding and proxy pipeline',
+        title: 'Media import and decoding',
         description:
-          'Import local files, decode with WebCodecs where available, generate scrub-friendly proxies.',
-        status: 'planned',
+          'Import local video and audio files, read their real duration and picture size from the decoder, and keep the bytes in this browser’s IndexedDB with the metadata in the document.',
+        status: 'done',
         dependsOn: ['p1.core', 'p4.raster-engine'],
         completionCriteria: [
-          'Feature detection downgrades explicitly rather than failing silently',
-          'Proxy generation keeps scrubbing above 24 fps',
+          'A file the browser cannot decode is refused at import with the reason',
+          'Media survives a reload and a missing file is reported, never painted as black',
         ],
-        capabilityIds: [],
+        evidence: [
+          'src/lib/browser/media-import.ts',
+          'src/lib/browser/media-store.ts',
+          'src/core/video/media-store.ts',
+          'e2e/video.spec.ts',
+        ],
+        capabilityIds: ['studios.video', 'video.playback'],
       },
       {
         id: 'p6.timeline',
         title: 'Timeline model and editing operations',
-        description: 'Tracks, clips, trimming, ripple/overwrite edits and undo integration.',
-        status: 'planned',
+        description: 'Tracks, clips, trimming, overwrite edits and undo integration.',
+        status: 'done',
         dependsOn: ['p6.media-pipeline'],
         completionCriteria: [
           'Editing operations are commands with labels',
           'Timeline serialises into the document model',
         ],
-        capabilityIds: [],
+        evidence: [
+          'src/core/video/timeline.ts',
+          'src/core/video/commands.ts',
+          'src/core/video/commands.test.ts',
+          'src/components/video/video-timeline.tsx',
+          'src/components/video/video-workspace.test.tsx',
+        ],
+        capabilityIds: ['video.timeline'],
       },
       {
         id: 'p6.video-studio',
         title: 'Video Studio workspace and export',
-        description: 'Playback, audio mixing, transitions and MP4/WebM export.',
-        status: 'planned',
+        description:
+          'Decoded playback and scrubbing, titles, per-clip levels, and two real exports: a PNG frame sequence with a manifest, and a real-time WebM capture.',
+        status: 'done',
         dependsOn: ['p6.timeline'],
         completionCriteria: [
           'A short edit exports and plays back correctly',
           'Export failure states are explained, not silent',
         ],
-        capabilityIds: ['studios.video'],
+        evidence: [
+          'src/components/video/video-workspace.tsx',
+          'src/components/video/video-workspace.test.tsx',
+          'src/core/video/export.test.ts',
+          'e2e/video.spec.ts',
+        ],
+        capabilityIds: ['video.export'],
+      },
+      {
+        id: 'p6.proxies',
+        title: 'Proxy generation for smooth scrubbing',
+        description:
+          'Generate a low-resolution proxy per imported file so scrubbing a large source stays responsive.',
+        status: 'planned',
+        dependsOn: ['p6.media-pipeline'],
+        completionCriteria: [
+          'Scrubbing a 4K source stays above 24 fps on the reference machine',
+          'Proxies are stored and invalidated alongside the media they mirror',
+        ],
+        capabilityIds: [],
+      },
+      {
+        id: 'p6.transitions',
+        title: 'Transitions, fades and speed',
+        description: 'Cross-dissolves, dips, fades and speed ramps between clips.',
+        status: 'planned',
+        dependsOn: ['p6.timeline'],
+        completionCriteria: [
+          'A dissolve renders identically in the preview, the sequence export and the capture',
+        ],
+        capabilityIds: [],
       },
     ],
     exitCriteria: [

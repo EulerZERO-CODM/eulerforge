@@ -119,9 +119,9 @@ describe('creation flow', () => {
     const user = userEvent.setup();
     renderFlow(services);
 
-    const video = screen.getByRole('button', { name: /Video Studio/ });
-    expect(video).toBeDisabled();
-    expect(video).toHaveAttribute('aria-pressed', 'false');
+    const threeD = screen.getByRole('button', { name: /3D Studio/ });
+    expect(threeD).toBeDisabled();
+    expect(threeD).toHaveAttribute('aria-pressed', 'false');
 
     await createProject(user, 'Poster');
     await waitFor(() => {

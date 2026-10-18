@@ -201,12 +201,12 @@ export const VIDEO_STUDIO: StudioDefinition = {
   name: 'Video Studio',
   tagline: 'Cut, arrange and export video with audio.',
   purpose:
-    'Video Studio will be a timeline editor: importing clips, trimming, arranging tracks, adding titles, transitions and audio, then exporting. It depends on media decoding and encoding that the browser only exposes reliably through newer APIs, so its entry point comes after the raster foundation.',
+    'Video Studio is a timeline editor: import local video and audio files, trim and arrange clips on tracks, split at the playhead, add titles, set per-clip levels, scrub and play the composition with real decoders, then export a PNG frame sequence or record a real-time WebM take.',
   icon: 'film',
   accent: 'plum',
-  availability: 'planned',
+  availability: 'available',
   maturityNote:
-    'Not started. Timeline data model and playback technology are still being evaluated.',
+    'Available and covered by browser tests. It decodes with the browser’s own media elements, so it edits exactly the codecs this browser can play; it records WebM in real time and exports frame sequences, but it does not encode MP4 and does not claim to.',
   produces: [
     'Short-form social edits',
     'Promo and explainer cuts',
@@ -218,14 +218,16 @@ export const VIDEO_STUDIO: StudioDefinition = {
     {
       id: 'timeline.multitrack',
       label: 'Multi-track timeline',
-      status: 'planned',
-      detail: 'Video, audio, title and overlay tracks with trimming and ripple edits.',
+      status: 'available',
+      detail:
+        'Video, audio and title tracks with trimming, splitting and overwrite editing; a track holds at most one clip at any position. Ripple and roll edits are not implemented.',
     },
     {
       id: 'media.import',
-      label: 'Media import and proxies',
-      status: 'planned',
-      detail: 'Import local files, generate lightweight proxies for smooth scrubbing.',
+      label: 'Media import',
+      status: 'available',
+      detail:
+        'Import local MP4, WebM, MOV, MP3, WAV, M4A and Ogg files; the browser decodes them and the bytes stay on this device in IndexedDB. No proxies are generated.',
     },
     {
       id: 'transitions',
@@ -235,26 +237,29 @@ export const VIDEO_STUDIO: StudioDefinition = {
     },
     {
       id: 'audio.mix',
-      label: 'Audio levels and fades',
-      status: 'planned',
-      detail: 'Per-clip gain, fades, ducking and a simple master bus.',
+      label: 'Audio levels',
+      status: 'available',
+      detail:
+        'Per-clip gain and mute, mixed into playback and into a real-time capture. Fades, ducking and a master bus are not implemented.',
     },
     {
       id: 'export.video',
       label: 'Video export',
-      status: 'planned',
-      detail: 'MP4/WebM export via browser encoders where available, with a documented fallback.',
+      status: 'available',
+      detail:
+        'A deterministic PNG frame sequence with a manifest, and a real-time WebM capture through MediaRecorder. No other container or codec is produced by this build.',
     },
   ],
   engine: {
-    renderer: 'Timeline view (DOM) plus a decoded-frame preview surface',
+    renderer: 'Timeline view (DOM) plus a 2D canvas compositing the decoded video elements',
     pipeline:
-      'WebCodecs decode/encode where supported; demux/mux layer; frame-accurate scrub cache',
-    integrationPoint: 'src/studios/video with src/engines/media for decode/encode',
+      'Browser media elements decode; a 2D canvas composites picture and titles; PNG frames are zipped, and MediaRecorder captures a real-time take with the audio graph mixed in',
+    integrationPoint:
+      'src/core/video for the timeline, src/lib/browser/video-engine for decode and export',
     rationale:
-      'Video cannot share the raster engine: it is a time-based model with different caching, memory and determinism requirements. It shares only Forge Core concepts (documents, assets, history, export interface).',
+      'Video cannot share the raster engine: it is a time-based model with different caching, memory and determinism requirements. It shares the document model, history, media storage and the download boundary, and it reuses the project’s zip writer for its frame archives.',
   },
-  entry: { route: null, label: 'Video Studio' },
+  entry: { route: '/studios/video', label: 'Video Studio' },
   learningSlugs: ['timeline-basics'],
   consumesFrom: [PHOTO_STUDIO.id, DESIGN_STUDIO.id],
   definitionVersion: 1,

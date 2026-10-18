@@ -94,7 +94,7 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     area: 'core',
     label: 'Project file export (.forge.json)',
     description:
-      'The document definition can be downloaded and read back. PNG/JPEG raster and SVG are the other implemented exports; the format registry labels PDF, WebP and video as planned.',
+      'The document definition can be downloaded and read back. Raster PNG/JPEG/WebP, vector SVG, a PNG frame sequence and — from Video Studio — a real-time WebM capture are the other implemented exports; the format registry labels PDF and MP4 as planned.',
     status: 'implemented',
     verification: ['src/core/export/project-file.test.ts'],
   },
@@ -162,7 +162,7 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
       "e2e/export.spec.ts (the browser's own rasteriser writes the file)",
       'e2e/text-wrapping.spec.ts (the same wrapped lines at every zoom, read back from the artboard canvas)',
     ],
-    gap: 'SVG, PDF, WebP and video output are still planned; the format registry keeps them labelled as such.',
+    gap: 'The painter writes raster only. PDF is still planned, and video is produced by Video Studio from decoded media and a canvas capture rather than from this render plan.',
   },
   {
     id: 'shell.navigation',
@@ -466,10 +466,58 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     id: 'studios.video',
     area: 'studios',
     label: 'Video Studio',
-    description: 'The remaining specialist editor.',
-    status: 'planned',
-    verification: [],
-    gap: 'An entry point explains what the studio will do; it does not edit timeline media yet, and no interface in it claims to.',
+    description:
+      'A real timeline editor on the shared document model: import local video and audio, place, move, trim and split clips, overwrite overlapping ranges, add titles with position and colour, set per-clip gain and mute, scrub and play with the browser’s own decoders, undo anything, and export a deterministic PNG frame sequence or record a real-time WebM take.',
+    status: 'partial',
+    verification: [
+      'src/core/video/commands.test.ts',
+      'src/core/video/evaluate.test.ts',
+      'src/core/video/export.test.ts',
+      'src/core/video/timeline.test.ts',
+      'src/components/video/video-workspace.test.tsx',
+      'e2e/video.spec.ts',
+    ],
+    gap: 'No proxy generation and no ripple/roll editing; transitions, fades and ducking are not implemented. It decodes only what the browser decodes, and it records WebM in real time rather than encoding MP4. Media bytes live in this browser’s IndexedDB, so a project moved to another machine asks for the files again.',
+  },
+  {
+    id: 'video.timeline',
+    area: 'studios',
+    label: 'Timeline editing',
+    description:
+      'Tracks of clips with millisecond-rounded times; placing a clip overwrites the range it covers by trimming, splitting or removing neighbours, so each track holds at most one clip at any moment. Trims cannot invent footage beyond the source file, and every edit is one labelled undoable command.',
+    status: 'implemented',
+    verification: [
+      'src/core/video/commands.test.ts (overwrite, trim clamping, split, limits, refusals)',
+      'src/core/video/timeline.test.ts',
+      'src/components/video/video-workspace.test.tsx',
+    ],
+  },
+  {
+    id: 'video.playback',
+    area: 'studios',
+    label: 'Decoded playback and scrubbing',
+    description:
+      'One media element per imported file, played by the browser’s decoder and composited onto a canvas; seeking is exact when paused and drift-corrected while playing. Two exports share that evaluation: a frame sequence rendered by seeking every clip, and a real-time capture.',
+    status: 'implemented',
+    verification: [
+      'src/core/video/evaluate.test.ts',
+      'src/lib/browser/video-engine.ts',
+      'e2e/video.spec.ts (a real WebM fixture is imported, scrubbed, exported and captured in Chromium)',
+    ],
+    gap: 'There is no proxy pipeline and no GPU compositor: a large file seeks as fast as this browser can decode it.',
+  },
+  {
+    id: 'video.export',
+    area: 'studios',
+    label: 'Video export',
+    description:
+      'A PNG frame sequence with a manifest of exact times, and a WebM take recorded through MediaRecorder with the timeline’s audio mixed in. The panel reports the container the browser actually negotiated.',
+    status: 'implemented',
+    verification: [
+      'src/core/video/export.test.ts',
+      'e2e/video.spec.ts (downloaded frames match the preview canvas; a recorded take is a real WebM file)',
+    ],
+    gap: 'No MP4 encoding, no offline render: a capture runs in real time and can drop frames on a slow machine.',
   },
   {
     id: 'studios.three-d',

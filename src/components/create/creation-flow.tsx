@@ -654,7 +654,14 @@ export function CreationFlow() {
             ) : null}
 
             <InlineNote tone="tip" icon={<Sparkles aria-hidden />}>
-              {documentType?.id === 'motion.scene' ? (
+              {documentType?.id === 'video.timeline' ? (
+                <p>
+                  After creating, the workspace opens Video Studio: import local video and audio
+                  files, place and trim clips on tracks, split at the playhead, add titles, set
+                  levels, play and scrub with real decoders, undo anything, then export a PNG frame
+                  sequence or record a real-time WebM take.
+                </p>
+              ) : documentType?.id === 'motion.scene' ? (
                 <p>
                   After creating, the workspace opens Motion Studio: add text and shapes, keyframe
                   position, scale or opacity at the playhead, shape the timing with presets or a

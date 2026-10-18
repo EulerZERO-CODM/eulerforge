@@ -239,6 +239,32 @@ the preview canvas pixel for pixel rather than approximately. The playhead itsel
 component state (ADR-0017); the composition's length and frame rate are document state and travel
 through the normal command path.
 
+### The media pipeline
+
+Video Studio is the first studio whose source material is too large to live in the document. That
+forces two boundaries the other studios do not need: a byte store, and a decoder.
+
+```
+File (components/video/media-bin.tsx)
+   ↓ lib/browser/media-import.ts probeMediaFile — decode metadata, refuse what this browser cannot play
+   ↓ core/video/media-store.ts MediaStore.put — bytes → IndexedDB (`lib/browser/media-store.ts`)
+   ↓ registerMediaCommand — metadata only → studioPayload.media          (one history entry)
+   ↓ placeClipCommand     — a clip window → studioPayload.tracks[].clips (one history entry)
+
+playback:  core/video/evaluate.ts @ t → lib/browser/video-engine.ts
+           one <video>/<audio> element per media file, played by the browser's decoder
+           paintVideoFrame: background → letterboxed clips → titles → canvas
+
+export:    planVideoExport (pure) → seek every clip to its source time → PNG → zip + manifest
+           planVideoCapture       → play in real time → MediaRecorder(canvas + audio graph) → WebM
+```
+
+Three things are deliberately *not* in the document: the bytes (IndexedDB), the decoded elements
+(the pool) and the playhead (component state, ADR-0017). The document holds only what must survive a
+save: media metadata, clip windows and the composition's length and frame rate. That is why a video
+project stays a small JSON object, and why reopening it on another machine honestly reports the
+missing files instead of pretending to have them.
+
 ## Data flow of a real edit
 
 ```

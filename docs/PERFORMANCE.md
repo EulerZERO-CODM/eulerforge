@@ -382,7 +382,7 @@ the observed cost rather than a margin around it, and why a single number from a
 whole story. What the benchmark is for is catching a *gross* regression — a doubled critical path, a
 per-frame re-plan, a synchronous decode — not adjudicating 15 ms.
 
-## 7. What was profiled, and why nothing was optimised
+## 7. What was profiled, and what the benchmark changed
 
 Before writing the benchmark, the render and interaction paths were measured directly (Node, via
 `vite-node`, over the pure functions the editor calls) on the same thirty-layer scene:
@@ -399,11 +399,47 @@ The only large number was a **cold** `paintPlan` at 458 ms, which is first-call 
 the canvas context warming up — and is exactly the cost the benchmark's unrecorded warm-up pass exists to
 keep out of the recorded samples.
 
-There was no hot spot to fix, so none was fixed: no speculative architecture rewrite, no change to the
-render plan, no edit to the gesture path. Optimising where the evidence does not point is how an editor
-gets a benchmark-shaped bug. What the profiling did produce is the coalescing work already in the
-history (`replaceLatest` with an explicit coalescing key for a single interaction, so a drag or a slider
-is one undo step), which is a correctness fix first and a cost fix second.
+There was no hot spot in that pipeline to fix, so none was invented: no speculative architecture
+rewrite, no change to the render plan, no change to the maths of a gesture. Optimising where the
+evidence does not point is how an editor gets a benchmark-shaped bug. What the profiling did produce is
+the coalescing work already in the history (`replaceLatest` with an explicit coalescing key for a single
+interaction, so a drag or a slider is one undo step), which is a correctness fix first and a cost fix
+second.
+
+### A drag applies one pointer move per animation frame
+
+The first CI run to fail the gated phase was `c4cdda3` (Phase 5). Its browser job took 11.4 minutes
+against the usual 5–7, and three drag scenarios crossed the p95 budget while every other spec passed:
+
+| Scenario | CI `c4cdda3` p95 | CI worst | Budget |
+| --- | ---: | ---: | --- |
+| `drag-layer` | 100.1 ms | 133.3 ms | p95 100 ms / worst 400 ms |
+| `drag-group` | 83.3 ms | 133.2 ms | p95 100 ms / worst 400 ms |
+| `resize-handle` | 116.7 ms | 149.9 ms | p95 100 ms / worst 400 ms |
+
+The same commit passed the same gate in this sandbox (`p95` 16.8 ms on the drag scenarios), so this is
+a runner-under-load result, not a measurement of the code on a normal machine — which is exactly why
+the budget is not a stopwatch. The response was still to reduce work per frame rather than to touch
+the budget: a pointer reports at up to 120 Hz, and the artboard applied **every** event — re-resolving
+snapping, re-rendering the workspace and repainting thirty layers two or three times per visible frame.
+`artboard.tsx` now stores the newest pointer position and applies it once per `requestAnimationFrame`,
+flushing the last pending point on pointer-up so no movement is lost. The same change also fixed a
+latent double commit: a resize handle inside the capture surface delivered one pointer-up twice, and
+both copies committed; with coalescing the second copy could commit a *stale* frame, so one pointer-up
+now ends exactly one interaction.
+
+The local run of the production build afterwards, same throttle and sample counts, reported:
+
+| Scenario | n | p50 | p95 | worst | Gaps over 50 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `drag-layer` | 5 | 16.7 ms | 16.8 ms | 66.6 ms | 0 % of 438 |
+| `drag-group` | 5 | 16.7 ms | 16.8 ms | 33.4 ms | 0 % of 420 |
+| `resize-handle` | 5 | 16.7 ms | 16.8 ms | 33.3 ms | 0 % of 353 |
+
+Both the pre-change and post-change builds pass locally, so these numbers do not prove the CI
+failure is gone; they show the change did not cost anything, and the next CI run on the new head is
+what answers whether one update per frame is enough headroom for a loaded shared runner. The budget
+itself is unchanged.
 
 ## 8. Limitations
 

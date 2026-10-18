@@ -197,8 +197,31 @@ browser suite is Chromium only.
 
 ### Phase 6 — Video Studio
 
-Media decoding and proxy pipeline, timeline model and editing operations, then the workspace and
-export.
+Shipped, and still open. The timeline is real: video, audio and title tracks; clips placed, moved,
+trimmed and split with millisecond-rounded times; an overwrite edit trims or removes whatever a new
+clip covers, so a track never has two clips at the same moment. Trimming cannot invent footage past
+either end of the source file. Every edit is one labelled command, so undo shows what happened.
+
+Media bytes live in this browser's IndexedDB and the document keeps only metadata (name, duration,
+size, dimensions). Import asks the browser's own decoder for the truth — a file it cannot decode is
+refused with the reason rather than placed as a black rectangle — and a file whose header has no
+duration (MediaRecorder output) gets the documented seek-past-the-end treatment. Playback composites
+the decoded `<video>` elements onto a canvas, seeking exactly when paused and correcting drift while
+playing; titles are drawn by the same function in the preview and in both exports.
+
+Two exports exist and neither overclaims: a **PNG frame sequence** with a manifest of exact times
+and the title text, rendered by seeking every clip frame by frame and zipped by the project's own
+writer; and a **real-time WebM take** through `MediaRecorder` with the timeline's audio mixed in.
+The browser spec downloads both: it parses the archive, decodes the frame whose manifest time is
+0.4 s and compares it with the live preview canvas at 0.4 s, checks that a title's glyph coverage in
+an exported frame matches the preview, and checks the recording's EBML magic number and byte count.
+There is no MP4 encoder and the panel says so.
+
+Still missing, and therefore still labelled planned: proxy generation, ripple and roll editing,
+transitions, fades and ducking, and any offline (faster-than-real-time) encode. The roadmap's
+three-minute exit criterion is **not** met: a frame sequence is capped at 1 800 frames and a capture
+at two minutes, so a three-minute edit can be assembled and played but not exported in one piece yet.
+The browser suite is Chromium only.
 
 ### Phase 7 — Persistence, accounts and collaboration
 

@@ -23,6 +23,7 @@ import type { SceneCommand } from '../../core/editor/commands';
 import { IllustrationWorkspace, isVectorDocument } from '../illustration/illustration-workspace';
 import { MotionWorkspace, isMotionDocument } from '../motion/motion-workspace';
 import { PhotoWorkspace, isPhotoDocument } from '../photo/photo-workspace';
+import { VideoWorkspace, isVideoDocument } from '../video/video-workspace';
 import { ContextHelp } from './context-help';
 import { DocumentAside } from './document-aside';
 import { DocumentStage } from './document-stage';
@@ -186,6 +187,8 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
   const photoPayload = doc.studioPayload?.kind === 'photo' ? doc.studioPayload : null;
   const motionDocument = isMotionDocument(String(doc.documentTypeId));
   const motionPayload = doc.studioPayload?.kind === 'motion' ? doc.studioPayload : null;
+  const videoDocument = isVideoDocument(String(doc.documentTypeId));
+  const videoPayload = doc.studioPayload?.kind === 'video' ? doc.studioPayload : null;
 
   return (
     <div className="mx-auto max-w-[100rem] space-y-5 p-4 sm:p-6">
@@ -315,6 +318,29 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
             <p>
               The document has no photo payload, so there is nothing to edit. Export the project
               file and reopen it, or create a new photo project.
+            </p>
+          </InlineNote>
+        )
+      ) : videoDocument ? (
+        videoPayload ? (
+          <VideoWorkspace
+            api={api}
+            payload={videoPayload}
+            history={state.history}
+            canUndo={state.canUndo}
+            canRedo={state.canRedo}
+            onUndo={undo}
+            onRedo={redo}
+          />
+        ) : (
+          <InlineNote
+            tone="danger"
+            icon={<CircleAlert aria-hidden />}
+            title="This video project is missing its timeline"
+          >
+            <p>
+              The document has no video payload, so there is nothing to play. Export the project
+              file and reopen it, or create a new video project.
             </p>
           </InlineNote>
         )

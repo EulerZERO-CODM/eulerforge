@@ -812,3 +812,38 @@ support matrix that would have to be measured on real devices.
 the archive, decodes a PNG and compares it with the live preview canvas at the same timestamp. The
 cost is that a user who expected an MP4 does not get one, and the studio must say so plainly — which
 it does, in the export panel and in the capability ledger.
+
+## ADR-0026 — Browser decoders, IndexedDB for bytes, and two honest exports
+
+**Status:** accepted (Phase 6).
+
+**Context.** Video is the first studio whose input and output are files the browser has to encode
+and decode. Three temptations had to be refused: storing media in the document, pretending a
+`<video>` element is frame-accurate, and offering "MP4 export" behind a button that cannot deliver
+one. The available primitives are the media elements (universally supported, codec support decided by
+the browser), `MediaRecorder` (widely supported, real-time only) and WebCodecs (powerful, not
+available in every browser this project must run in — notably not in the CI browser).
+
+**Decision.**
+
+- **Bytes in IndexedDB, metadata in the document.** `MediaStore` is a small promise-based interface
+  with an IndexedDB implementation and an in-memory fallback; the document references a media id and
+  carries only name, duration, dimensions and size. A photo project embeds its image because it is
+  capped at 2048 px; a video cannot.
+- **Decode with media elements.** One element per file, created lazily and kept in a pool. This
+  edits exactly the codecs the user's browser can play, which is the only claim that can be tested
+  on their machine. WebCodecs would be faster and frame-exact, and is left as a future upgrade
+  behind the same pool interface.
+- **Two exports, each labelled for what it is.** A PNG frame sequence is deterministic: the plan
+  fixes the times, every clip is seeked to its source time and the frame is painted by the same
+  `paintVideoFrame` the preview uses, then zipped with a manifest. A WebM take is a real-time
+  `MediaRecorder` capture of the same canvas plus the mixed audio graph; it is a *recording*, the
+  panel says so, and the report names the container the browser negotiated. There is no MP4 claim.
+- **Playback is a clock, not a fact about the file.** The transport owns time; elements are seeked
+  when paused and drift-corrected while playing. Scrubbing is therefore exact, and a slow decode
+  shows a `Decoding…` state rather than a silent freeze.
+
+**Consequences.** The parity claim is testable: the browser suite compares a decoded exported frame
+with the live preview at the same timestamp. The cost is a real limit — no proxy pipeline, so a very
+large file scrubs as fast as the browser can seek it, and a capture takes as long as the edit. Both
+limits are stated in the studio, the ledger and the roadmap rather than hidden.

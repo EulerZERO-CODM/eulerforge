@@ -49,11 +49,12 @@ export const DOCUMENT_TYPES: readonly DocumentTypeDefinition[] = [
   {
     id: typeId('video.timeline'),
     label: 'Video timeline',
-    description: 'Time-based sequence with tracks, clips, transitions and audio.',
+    description: 'Time-based sequence with video, audio and title tracks.',
     studioId: 'video',
     unit: 's',
-    availability: 'planned',
-    renderer: 'Timeline model + decoded frame preview (WebCodecs where available)',
+    availability: 'available',
+    renderer:
+      'Timeline model + decoded <video> elements composited onto a 2D canvas; MediaRecorder for a real-time capture',
   },
   {
     id: typeId('motion.scene'),
