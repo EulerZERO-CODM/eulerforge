@@ -9,6 +9,7 @@
 import type { Branded } from '../types/brand';
 import { type PartialProps, type Undefinable } from '../types/optional';
 import type { AttributionRecord, Scene } from './layer-types';
+import type { StudioPayload } from './payload';
 import type { LengthUnit } from './units';
 
 export type DocumentId = Branded<string, 'DocumentId'>;
@@ -93,6 +94,13 @@ export type ForgeDocument = {
   readonly metadata: DocumentMetadata;
   readonly status: DocumentStatus;
   readonly revision: number;
+  /**
+   * Studio-specific data, discriminated by `kind` and matching `documentTypeId`.
+   *
+   * `null` for the design canvas and the vector artboard, which need nothing beyond the shared
+   * model; photo, motion and video documents carry their own bounded payload (see `./payload.ts`).
+   */
+  readonly studioPayload: StudioPayload | null;
   /** ISO-8601 timestamps. */
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -110,6 +118,11 @@ export type CreateDocumentInput = {
   readonly tags?: Undefinable<readonly string[]>;
   /** Startup artwork, used by starters that seed a real layer stack. Omit for an empty artboard. */
   readonly scene?: Undefinable<Scene>;
+  /**
+   * Studio-specific payload. Omitted for design/vector documents, and for the three payload
+   * studios a sensible empty payload is supplied by `defaultStudioPayload`.
+   */
+  readonly studioPayload?: Undefinable<StudioPayload>;
 };
 
 export type CanvasPresetCategory = 'social' | 'video' | 'web' | 'print' | 'presentation' | 'custom';

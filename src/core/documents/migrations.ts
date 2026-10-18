@@ -13,9 +13,10 @@ import { err, forgeError, ok, type Result } from '../result';
 import { freezeDocument } from './freeze';
 import { formatIssues, forgeDocumentSchema } from './schema';
 import type { ForgeDocument } from './types';
+import { defaultStudioPayload } from './payload';
 import { SCREEN_DPI } from './units';
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 export type Migration = {
   readonly from: number;
@@ -120,7 +121,31 @@ const migrateV2ToV3: Migration = {
   migrate: (raw) => ({ ...raw, schemaVersion: 3 }),
 };
 
-export const MIGRATIONS: readonly Migration[] = [migrateV0ToV1, migrateV1ToV2, migrateV2ToV3];
+/**
+ * v3 → v4: documents gained a studio payload for Photo, Motion and Video.
+ *
+ * Existing projects are design canvases and vector artboards, which carry no payload, so the honest
+ * migration is `null`. A v3 file that already names one of the payload document types (created by a
+ * development build) gets the empty payload for its type instead of failing validation.
+ */
+const migrateV3ToV4: Migration = {
+  from: 3,
+  to: 4,
+  description: 'Added the studio payload block used by Photo, Motion and Video documents.',
+  migrate: (raw) => ({
+    ...raw,
+    schemaVersion: 4,
+    studioPayload:
+      raw.studioPayload ?? defaultStudioPayload(stringOr(raw.documentTypeId, 'design.canvas')),
+  }),
+};
+
+export const MIGRATIONS: readonly Migration[] = [
+  migrateV0ToV1,
+  migrateV1ToV2,
+  migrateV2ToV3,
+  migrateV3ToV4,
+];
 
 export function readSchemaVersion(raw: unknown): number | undefined {
   const record = asRecord(raw);

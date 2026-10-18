@@ -49,6 +49,11 @@ import type {
   ForgeDocument,
   GuideSettings,
 } from './types';
+import { payloadKindForDocumentType } from './payload';
+import { studioPayloadSchema, studioPayloadValueSchema } from './payload-schema';
+import { hexColorSchema } from './schema-shared';
+
+export { hexColorSchema };
 import { MAX_CANVAS_PX, MIN_CANVAS_PX } from './units';
 
 /** Branded-but-validated identifier: lowercase-ish slug ids such as `design.canvas`. */
@@ -62,10 +67,6 @@ export const idSchema = <TName extends string>(_name: TName) =>
       'may only contain letters, numbers, dot, dash, colon, underscore',
     )
     .transform((value): Branded<string, TName> => brand<TName>(value));
-
-export const hexColorSchema = z
-  .string()
-  .regex(/^#[0-9a-fA-F]{6}$/, 'must be a 6-digit hex colour such as #1f2933');
 
 export const canvasSchema = z.object({
   width: z
@@ -416,43 +417,77 @@ export const attributionSchema = z
   )
   .readonly();
 
-export const forgeDocumentSchema = z.object({
-  id: idSchema('DocumentId'),
-  schemaVersion: z.number().int().min(1),
-  studioId: z.string().min(1),
-  documentTypeId: idSchema('DocumentTypeId'),
-  title: z
-    .string()
-    .min(1, 'a document needs a title')
-    .max(120, 'title must be 120 characters or fewer'),
-  summary: z.string().max(400),
-  canvas: canvasSchema,
-  guides: guideSettingsSchema,
-  palette: z.array(hexColorSchema).max(12).readonly(),
-  scene: sceneSchema,
-  attribution: attributionSchema,
-  metadata: documentMetadataSchema,
-  status: z.enum(['draft', 'in-review', 'ready', 'archived']),
-  revision: z.number().int().min(1),
-  createdAt: z.iso.datetime(),
-  updatedAt: z.iso.datetime(),
-});
+export const forgeDocumentSchema = z
+  .object({
+    id: idSchema('DocumentId'),
+    schemaVersion: z.number().int().min(1),
+    studioId: z.string().min(1),
+    documentTypeId: idSchema('DocumentTypeId'),
+    title: z
+      .string()
+      .min(1, 'a document needs a title')
+      .max(120, 'title must be 120 characters or fewer'),
+    summary: z.string().max(400),
+    canvas: canvasSchema,
+    guides: guideSettingsSchema,
+    palette: z.array(hexColorSchema).max(12).readonly(),
+    scene: sceneSchema,
+    attribution: attributionSchema,
+    metadata: documentMetadataSchema,
+    status: z.enum(['draft', 'in-review', 'ready', 'archived']),
+    revision: z.number().int().min(1),
+    studioPayload: studioPayloadSchema,
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+  })
+  .superRefine((document, context) => {
+    // One payload kind per document type, and no payload on studios that do not use one. This is
+    // what stops a motion scene being loaded into the photo surface (or vice versa).
+    const expected = payloadKindForDocumentType(document.documentTypeId);
+    const actual = document.studioPayload?.kind ?? null;
+    if (expected !== actual) {
+      context.addIssue({
+        code: 'custom',
+        path: ['studioPayload'],
+        message:
+          expected === null
+            ? `a ${String(document.documentTypeId)} document must not carry a studio payload`
+            : `a ${String(document.documentTypeId)} document must carry a ${expected} payload`,
+      });
+    }
+  });
 
-export const createDocumentInputSchema = z.object({
-  title: z
-    .string()
-    .trim()
-    .min(1, 'give the project a name')
-    .max(120, 'project names are limited to 120 characters'),
-  summary: z.string().trim().max(400).optional(),
-  studioId: z.string().min(1),
-  documentTypeId: idSchema('DocumentTypeId'),
-  canvas: canvasSchema,
-  guides: guideSettingsSchema.partial().optional(),
-  palette: z.array(hexColorSchema).max(12).readonly().optional(),
-  tags: z.array(z.string().trim().min(1).max(40)).max(12).readonly().optional(),
-  scene: sceneSchema.optional(),
-});
+export const createDocumentInputSchema = z
+  .object({
+    title: z
+      .string()
+      .trim()
+      .min(1, 'give the project a name')
+      .max(120, 'project names are limited to 120 characters'),
+    summary: z.string().trim().max(400).optional(),
+    studioId: z.string().min(1),
+    documentTypeId: idSchema('DocumentTypeId'),
+    canvas: canvasSchema,
+    guides: guideSettingsSchema.partial().optional(),
+    palette: z.array(hexColorSchema).max(12).readonly().optional(),
+    tags: z.array(z.string().trim().min(1).max(40)).max(12).readonly().optional(),
+    scene: sceneSchema.optional(),
+    studioPayload: studioPayloadValueSchema.optional(),
+  })
+  .superRefine((input, context) => {
+    if (input.studioPayload === undefined) return;
+    const expected = payloadKindForDocumentType(input.documentTypeId);
+    if (input.studioPayload.kind !== expected) {
+      context.addIssue({
+        code: 'custom',
+        path: ['studioPayload'],
+        message:
+          expected === null
+            ? `${String(input.documentTypeId)} documents do not take a studio payload`
+            : `${String(input.documentTypeId)} documents take a ${expected} payload`,
+      });
+    }
+  });
 
 /** Human-readable, field-addressed messages for anything shaped like a Zod error. */
 export function formatIssues(

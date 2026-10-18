@@ -83,12 +83,27 @@ describe('forgeDocumentSchema', () => {
     metadata: { authorLabel: '', tags: [], notes: '' },
     status: 'draft',
     revision: 1,
+    studioPayload: null,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   } as const;
 
   it('accepts a complete document', () => {
     expect(forgeDocumentSchema.safeParse(document).success).toBe(true);
+  });
+
+  it('rejects a studio payload on a document type that does not use one', () => {
+    const result = forgeDocumentSchema.safeParse({
+      ...document,
+      studioPayload: {
+        kind: 'motion',
+        version: 1,
+        duration: 5,
+        fps: 30,
+        tracks: [],
+      },
+    });
+    expect(result.success).toBe(false);
   });
 
   it('rejects timestamps that are not ISO datetimes', () => {

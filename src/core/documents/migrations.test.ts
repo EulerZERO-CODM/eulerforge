@@ -205,9 +205,13 @@ describe('pendingMigrations', () => {
     expect(pendingMigrations(CURRENT_SCHEMA_VERSION)).toHaveLength(0);
   });
 
-  it('adds the vector-layer step as the last step, so nothing older is rewritten', () => {
+  it('appends one step per published version and never rewrites an older one', () => {
     const steps = pendingMigrations(2);
-    expect(steps.map((step) => `${String(step.from)}->${String(step.to)}`)).toEqual(['2->3']);
+    expect(steps.map((step) => `${String(step.from)}->${String(step.to)}`)).toEqual([
+      '2->3',
+      '3->4',
+    ]);
     expect(steps[0]?.description).toMatch(/vector path layers/i);
+    expect(steps[1]?.description).toMatch(/studio payload/i);
   });
 });
