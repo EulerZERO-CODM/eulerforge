@@ -24,8 +24,21 @@ import { parsePathData } from '../../core/vector/path-data';
 import type { DocumentSession } from '../../state/document-session';
 import { useDocumentSession } from '../../state/hooks';
 import { EMPTY_SELECTION, type Selection } from '../../core/editor/selection';
+import { readZipEntry, readZipEntryNames } from '../../core/svg/zip';
+import type * as DownloadAdapter from '../../lib/browser/download';
+import { downloadBytes } from '../../lib/browser/download';
 import type { SceneImages } from '../workspace/use-scene-images';
 import { useState } from 'react';
+
+/**
+ * The browser adapter is the boundary the component hands a file to. It is replaced here so a test
+ * can read the bytes that *would* be downloaded; writing them is Chromium's job, and
+ * `e2e/illustration.spec.ts` checks the real download.
+ */
+vi.mock('../../lib/browser/download', async (importOriginal) => {
+  const actual = await importOriginal<typeof DownloadAdapter>();
+  return { ...actual, downloadBytes: vi.fn(() => true) };
+});
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/workspace/doc-vector',
@@ -487,15 +500,116 @@ describe('SVG and icon-set panels', () => {
     expect(button).toBeEnabled();
   });
 
-  it('offers the icon set only when there is vector artwork, and explains the contents', async () => {
-    const layer = pathLayer('Square', 'M20 20 L120 20 L120 120 L20 120 Z');
-    await mount(services, [layer]);
+  it('counts and packages exactly the selected visible vector layers', async () => {
+    const user = userEvent.setup();
+    vi.mocked(downloadBytes).mockClear();
+    const square = pathLayer('Square', 'M20 20 L120 20 L120 120 L20 120 Z');
+    const circle = pathLayer(
+      'Circle',
+      'M60 20 C80 20 100 40 100 60 C100 80 80 100 60 100 C40 100 20 80 20 60 C20 40 40 20 60 20 Z',
+    );
+    const star = pathLayer(
+      'Star',
+      'M60 20 L72 52 L104 52 L78 72 L88 104 L60 84 L32 104 L42 72 L16 52 L48 52 Z',
+    );
+    await mount(services, [square, circle, star]);
 
     const button = screen.getByTestId('icon-set-export');
+    const summary = screen.getByTestId('icon-set-summary');
+    // Nothing selected: the panel says what to do and offers no download.
+    expect(button).toBeDisabled();
+    expect(summary).toHaveTextContent(/Select one or more visible vector layers/i);
+
+    await user.click(screen.getByTestId(`layer-name-${String(square.id)}`));
+    await user.keyboard('{Control>}');
+    await user.click(screen.getByTestId(`layer-name-${String(circle.id)}`));
+    await user.keyboard('{/Control}');
+    expect(summary).toHaveTextContent(/^2 selected visible vector layer\(s\) will be written/);
     expect(button).toBeEnabled();
-    expect(
-      screen.getByText(/will be written as icons, each into its own file/i),
-    ).toBeInTheDocument();
+
+    await user.click(button);
+
+    const call = vi.mocked(downloadBytes).mock.calls.at(-1);
+    if (!call) throw new Error('the icon set never reached the download adapter');
+    const [bytes, fileName] = call;
+    expect(fileName).toBe('icon-set.zip');
+    // Exactly the two chosen icons, the sprite and the manifest: not the unselected star.
+    expect(readZipEntryNames(bytes)).toEqual([
+      'square.svg',
+      'circle.svg',
+      'icons.svg',
+      'icons.json',
+    ]);
+    const manifest = JSON.parse(
+      new TextDecoder().decode(readZipEntry(bytes, 'icons.json') ?? new Uint8Array()),
+    ) as { icons: { name: string; file: string }[] };
+    expect(manifest.icons.map((icon) => icon.name)).toEqual(['Square', 'Circle']);
+    expect(manifest.icons.map((icon) => icon.file)).toEqual(['square.svg', 'circle.svg']);
+    expect(screen.getByTestId('icon-set-report')).toHaveTextContent('2 icon file(s)');
+    expect(screen.getByTestId('icon-set-report')).toHaveTextContent('square.svg, circle.svg');
+    expect(screen.getByTestId('icon-set-report')).not.toHaveTextContent('star.svg');
+
+    // Clearing the selection disables the export and retires the report it described.
+    const surface = screen.getByTestId('vector-surface');
+    await user.click(screen.getByTestId('tool-select'));
+    fireEvent.pointerDown(surface, {
+      clientX: 2,
+      clientY: 2,
+      pointerId: 9,
+      button: 0,
+      bubbles: true,
+    });
+    fireEvent.pointerUp(surface, {
+      clientX: 2,
+      clientY: 2,
+      pointerId: 9,
+      button: 0,
+      bubbles: true,
+    });
+    expect(button).toBeDisabled();
+    expect(summary).toHaveTextContent(/Select one or more visible vector layers/i);
+    expect(screen.queryByTestId('icon-set-report')).not.toBeInTheDocument();
+  });
+
+  it('leaves hidden selected layers out of the set and names them', async () => {
+    const user = userEvent.setup();
+    vi.mocked(downloadBytes).mockClear();
+    const square = pathLayer('Square', 'M20 20 L120 20 L120 120 L20 120 Z');
+    const circle = pathLayer(
+      'Circle',
+      'M60 20 C80 20 100 40 100 60 C100 80 80 100 60 100 C40 100 20 80 20 60 C20 40 40 20 60 20 Z',
+    );
+    await mount(services, [square, circle]);
+
+    await user.click(screen.getByTestId(`layer-name-${String(square.id)}`));
+    await user.keyboard('{Control>}');
+    await user.click(screen.getByTestId(`layer-name-${String(circle.id)}`));
+    await user.keyboard('{/Control}');
+    expect(screen.getByTestId('icon-set-summary')).toHaveTextContent(/^2 selected/);
+
+    // A hidden layer is never part of the drawing, so it is never part of the set.
+    await user.click(screen.getByRole('button', { name: 'Hide “Square”' }));
+    const summary = screen.getByTestId('icon-set-summary');
+    const button = screen.getByTestId('icon-set-export');
+    expect(summary).toHaveTextContent(/^1 selected visible vector layer\(s\)/);
+    expect(summary).toHaveTextContent(/Not written: “Square” — the layer is hidden/);
+    expect(button).toBeEnabled();
+
+    await user.click(button);
+    const bytes = vi.mocked(downloadBytes).mock.calls.at(-1)?.[0];
+    if (!bytes) throw new Error('the icon set never reached the download adapter');
+    expect(readZipEntryNames(bytes)).toEqual(['circle.svg', 'icons.svg', 'icons.json']);
+    expect(screen.getByTestId('icon-set-report')).toHaveTextContent(
+      'Not written: “Square” — the layer is hidden',
+    );
+
+    // Hiding the rest leaves nothing to export, and the button explains why instead of writing an
+    // empty archive.
+    await user.click(screen.getByRole('button', { name: 'Hide “Circle”' }));
+    expect(screen.getByTestId('icon-set-export')).toBeDisabled();
+    expect(screen.getByTestId('icon-set-summary')).toHaveTextContent(
+      /None of the 2 selected layer\(s\) can be written as icons/,
+    );
   });
 
   it('states the interchange limitations and carries a vector shape to the Design Studio', async () => {

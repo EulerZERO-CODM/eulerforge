@@ -2,7 +2,7 @@
  * Icon-set export.
  *
  * An icon set is not "one SVG containing everything": it is several named icons that another system
- * has to look up by name. So this builds, from the layers a user selected:
+ * has to look up by name. So this builds, from exactly the layers a user selected:
  *
  * - one SVG file per icon, named after its layer, ready to drop into a project;
  * - a sprite file using `<symbol>` elements, for `<use href="icons.svg#name">` in markup;
@@ -18,7 +18,6 @@
  */
 
 import type { Layer, PathLayer } from '../documents/layer-types';
-import { isPathLayer } from '../documents/layer-types';
 import type { VectorBox } from '../vector';
 import { err, forgeError, ok, type Result } from '../result';
 import { toPathData } from '../vector/path-data';
@@ -42,9 +41,26 @@ export type IconEntryResult = {
   readonly svg: string;
 };
 
+/** Why a layer the caller offered is not in the set, named so the interface can say so. */
+export type IconSkip = {
+  readonly layerId: string;
+  readonly layerName: string;
+  readonly layerType: Layer['type'];
+  readonly reason: string;
+};
+
+/** The layers a selection resolves to: the ones that will be written, and the ones that cannot be. */
+export type IconEligibility = {
+  /** In scene order, so an export is reproducible. */
+  readonly layers: readonly PathLayer[];
+  readonly skipped: readonly IconSkip[];
+};
+
 export type IconSet = {
   readonly name: string;
   readonly entries: readonly IconEntryResult[];
+  /** Layers that were offered but could not become icons, in scene order. */
+  readonly skipped: readonly IconSkip[];
   readonly sprite: string;
   readonly manifest: string;
   readonly archive: Uint8Array;
@@ -59,6 +75,76 @@ export type IconSetOptions = {
   readonly setName?: string | undefined;
   readonly digits?: number | undefined;
 };
+
+const HIDDEN_REASON = 'the layer is hidden, so it is not part of the drawing';
+const TRANSPARENT_REASON = 'the layer is fully transparent, so it is not part of the drawing';
+const SHAPE_REASON =
+  'a rectangle or ellipse is a shape rather than a path; convert it to paths first';
+const TEXT_REASON = 'text is not converted to outlines in this build';
+const IMAGE_REASON = 'a graphic layer is a bitmap, not vector geometry';
+
+/**
+ * A layer, decided once: either it becomes an icon or it is skipped for a stated reason.
+ *
+ * One predicate for the panel's count, the builder's output and the report, so the number a person is
+ * shown before they click and the number of files they receive cannot disagree.
+ */
+type IconClassification =
+  | { readonly kind: 'icon'; readonly layer: PathLayer }
+  | { readonly kind: 'skipped'; readonly skip: IconSkip };
+
+function classifyLayer(layer: Layer): IconClassification {
+  const common = {
+    layerId: String(layer.id),
+    layerName: layer.name,
+    layerType: layer.type,
+  } as const;
+  if (!layer.visible) {
+    return { kind: 'skipped', skip: { ...common, reason: HIDDEN_REASON } };
+  }
+  // The same rule the SVG export applies: a layer painted at zero opacity is not part of what the
+  // document looks like, so it cannot become a (blank) icon.
+  if (layer.opacity <= 0) {
+    return { kind: 'skipped', skip: { ...common, reason: TRANSPARENT_REASON } };
+  }
+  switch (layer.type) {
+    case 'path':
+      return { kind: 'icon', layer };
+    case 'rect':
+    case 'ellipse':
+      return { kind: 'skipped', skip: { ...common, reason: SHAPE_REASON } };
+    case 'text':
+      return { kind: 'skipped', skip: { ...common, reason: TEXT_REASON } };
+    case 'image':
+      return { kind: 'skipped', skip: { ...common, reason: IMAGE_REASON } };
+  }
+}
+
+function classify(layers: readonly Layer[]): IconEligibility {
+  const exportable: PathLayer[] = [];
+  const skipped: IconSkip[] = [];
+  for (const layer of layers) {
+    const classification = classifyLayer(layer);
+    if (classification.kind === 'icon') exportable.push(classification.layer);
+    else skipped.push(classification.skip);
+  }
+  return { layers: exportable, skipped };
+}
+
+/**
+ * The exact set of layers a selection would export.
+ *
+ * Selection is not an export: a selected layer that is hidden, fully transparent or not a path
+ * contributes no icon, and it is listed in `skipped` rather than silently excluded — so the caller can
+ * show the same set it is about to write.
+ */
+export function iconLayersForSelection(
+  layers: readonly Layer[],
+  selection: readonly string[],
+): IconEligibility {
+  const chosen = new Set(selection.map((id) => String(id)));
+  return classify(layers.filter((layer) => chosen.has(String(layer.id))));
+}
 
 function boxOf(layers: readonly PathLayer[]): VectorBox | null {
   return layers.reduce<VectorBox | null>((accumulated, layer) => {
@@ -87,14 +173,16 @@ function fileNameFor(id: string): string {
 /**
  * Builds the icon set.
  *
- * Fails when nothing was chosen, when a chosen layer is not vector artwork, or when a chosen layer's
+ * Only visible path layers become icons; every other layer that was handed in is listed in `skipped`
+ * with the reason, so a caller cannot accidentally widen the set or lose a layer without saying so.
+ * Fails when nothing was chosen, when no chosen layer can become an icon, or when a chosen layer's
  * geometry cannot be written — with the layer named, so the message is actionable.
  */
 export function buildIconSet(
   layers: readonly Layer[],
   options: IconSetOptions = {},
 ): Result<IconSet> {
-  const vectorLayers = layers.filter(isPathLayer);
+  const { layers: vectorLayers, skipped } = classify(layers);
   if (vectorLayers.length === 0) {
     return err(
       forgeError(
@@ -102,7 +190,11 @@ export function buildIconSet(
         'Choose at least one vector layer to export as an icon set.',
         {
           detail:
-            'Only vector paths can become icons; rectangles and ellipses become paths on export once converted.',
+            skipped.length > 0
+              ? `None of the chosen layers can be written as icons: ${skipped
+                  .map((layer) => `“${layer.layerName}” — ${layer.reason}.`)
+                  .join(' ')}`
+              : 'Only vector paths can become icons; rectangles and ellipses become paths on export once converted.',
           retryable: false,
         },
       ),
@@ -216,6 +308,7 @@ export function buildIconSet(
   return ok({
     name: setName,
     entries,
+    skipped,
     sprite: spriteResult.value,
     manifest,
     archive,

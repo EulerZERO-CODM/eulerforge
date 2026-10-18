@@ -147,13 +147,15 @@ are reported, not dropped silently.
 `/studios/illustration` is a real, `available` studio with a working editor
 (`src/components/illustration/**`): pen drawing, shapes, node/handle editing, marquee and keyboard
 nudge, fill/stroke/opacity/cap/join/dash, boolean combination, shape-to-path conversion, SVG import and
-export, icon-set zip export, and Design ⇄ Illustration interchange with a per-layer report. Every edit
-is one labelled history entry.
+export, selection-scoped icon-set zip export (only the selected visible paths, with anything it cannot
+carry named), and Design ⇄ Illustration interchange with a per-layer report. Every edit is one
+labelled history entry.
 
 Still missing, and therefore still labelled planned in the registry: gradient and pattern fills,
 tracing a raster image, text on a path, multi-artboard documents, and curve-exact booleans. Interchange
-refuses rotated layers rather than baking the rotation into a frame. The browser suite is Chromium
-only.
+refuses rotated layers rather than baking the rotation into a frame. Icon sets contain path layers only:
+a selected rectangle, ellipse, text or graphic layer is named as skipped, and shape layers must be
+converted to paths first. The browser suite is Chromium only.
 
 ### Phase 4 — Raster engine and Photo Studio
 

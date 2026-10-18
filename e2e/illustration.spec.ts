@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { readZipEntry, readZipEntryNames } from '../src/core/svg/zip';
 import { STORAGE_KEY } from './fixtures';
 
 /**
@@ -178,12 +179,31 @@ async function drawPath(
 /** Drags out a shape with the given tool. */
 async function drawShape(
   page: Page,
-  tool: 'rectangle' | 'ellipse',
+  tool: 'rectangle' | 'ellipse' | 'star',
   from: { readonly x: number; readonly y: number },
   to: { readonly x: number; readonly y: number },
 ): Promise<void> {
   await page.getByTestId(`tool-${tool}`).click();
   await dragVector(page, from, to);
+}
+
+/** Adds a layer to the selection the way the layer list does: Ctrl-click toggles it in. */
+async function addToSelection(page: Page, id: string): Promise<void> {
+  await page.getByTestId(`layer-name-${id}`).click({ modifiers: ['Control'] });
+  await expect(page.getByTestId(`layer-name-${id}`)).toHaveAttribute('aria-current', 'true');
+}
+
+/** Clicks an icon-set export and returns the real bytes the browser saved. */
+async function downloadIconSet(
+  page: Page,
+): Promise<{ readonly fileName: string; readonly bytes: Uint8Array }> {
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByTestId('icon-set-export').click(),
+  ]);
+  const path = await download.path();
+  if (!path) throw new Error('the icon-set download produced no file');
+  return { fileName: download.suggestedFilename(), bytes: new Uint8Array(await readFile(path)) };
 }
 
 /**
@@ -434,40 +454,131 @@ test.describe('Illustration Studio', () => {
     expect(reimported.vector.style.fill).toBe('#22cc88');
   });
 
-  test('exports an icon set as a real zip containing one file per object', async ({ page }) => {
+  test('exports an icon set as a real zip containing one file per selected object', async ({
+    page,
+  }) => {
     await createVectorDocument(page, 'Icon set export');
     await drawShape(page, 'rectangle', { x: 24, y: 24 }, { x: 104, y: 104 });
     await drawShape(page, 'ellipse', { x: 128, y: 128 }, { x: 232, y: 232 });
     await drawShape(page, 'rectangle', { x: 40, y: 176 }, { x: 96, y: 232 });
-    expect(await pathLayers(page)).toHaveLength(3);
+    const layers = await pathLayers(page);
+    expect(layers).toHaveLength(3);
+
+    // An icon set is a selection export: with nothing selected there is nothing to package, and the
+    // panel says so rather than quietly exporting the whole artboard.
+    await expect(page.getByTestId('icon-set-export')).toBeDisabled();
+    await expect(page.getByTestId('icon-set-summary')).toContainText(
+      'Select one or more visible vector layers',
+    );
+
+    // Select all three through the layer list; Ctrl-click adds to the selection.
+    await selectLayer(page, layers[0]!.id);
+    await addToSelection(page, layers[1]!.id);
+    await addToSelection(page, layers[2]!.id);
+    await expect(page.getByTestId('icon-set-summary')).toContainText(
+      '3 selected visible vector layer(s)',
+    );
 
     await page.getByTestId('icon-set-name').fill('Glyphs');
     await expect(page.getByTestId('icon-set-export')).toBeEnabled();
-    const [download] = await Promise.all([
-      page.waitForEvent('download'),
-      page.getByTestId('icon-set-export').click(),
-    ]);
-    const path = await download.path();
-    if (!path) throw new Error('the icon-set download produced no file');
-    const archive = await readFile(path);
+    const { fileName, bytes } = await downloadIconSet(page);
+    expect(fileName).toMatch(/\.zip$/);
 
-    expect(download.suggestedFilename()).toMatch(/\.zip$/);
     // A real, uncompressed ZIP: local file header signature.
+    const archive = Buffer.from(bytes);
     expect(archive.subarray(0, 4).toString('binary')).toBe('PK\u0003\u0004');
+    // Exactly the chosen icons plus the sprite and the manifest — no extras.
+    expect(readZipEntryNames(bytes)).toEqual([
+      'rectangle.svg',
+      'ellipse.svg',
+      'rectangle-2.svg',
+      'icons.svg',
+      'icons.json',
+    ]);
     // Each icon takes its layer's name, so the archive is navigable without opening the manifest.
     const text = archive.toString('latin1');
-    expect(text).toContain('rectangle.svg');
-    expect(text).toContain('ellipse.svg');
-    // Two objects with the same name stay distinct instead of overwriting one another.
-    expect(text).toContain('rectangle-2.svg');
-    // The sprite holds one symbol per icon, and the manifest lists all three.
-    expect(text).toContain('icons.svg');
     expect(text).toContain('<symbol id="rectangle-2"');
-    expect(text).toContain('icons.json');
-    const manifest = text.slice(text.indexOf('icons.json'));
-    expect(manifest.match(/"file":/g) ?? []).toHaveLength(3);
+    const manifest = JSON.parse(
+      new TextDecoder().decode(readZipEntry(bytes, 'icons.json') ?? new Uint8Array()),
+    ) as { icons: readonly { file: string; name: string }[] };
+    expect(manifest.icons.map((icon) => icon.file)).toEqual([
+      'rectangle.svg',
+      'ellipse.svg',
+      'rectangle-2.svg',
+    ]);
 
     await expect(page.getByTestId('icon-set-report')).toContainText('3 icon file(s)');
+  });
+
+  test('exports only the selected icons, never the rest of the artboard', async ({ page }) => {
+    await createVectorDocument(page, 'Selected icons');
+    await drawShape(page, 'rectangle', { x: 24, y: 24 }, { x: 104, y: 104 });
+    await drawShape(page, 'ellipse', { x: 128, y: 128 }, { x: 232, y: 232 });
+    await drawShape(page, 'star', { x: 40, y: 176 }, { x: 96, y: 232 });
+    const layers = await pathLayers(page);
+    expect(layers).toHaveLength(3);
+    const [rectangle, ellipse, star] = layers;
+    if (!rectangle || !ellipse || !star) throw new Error('three layers should have been drawn');
+
+    // Two of three selected: the rectangle is deliberately left out.
+    await selectLayer(page, ellipse.id);
+    await addToSelection(page, star.id);
+    await expect(page.getByTestId('icon-set-summary')).toContainText(
+      '2 selected visible vector layer(s)',
+    );
+    await expect(page.getByTestId('icon-set-export')).toBeEnabled();
+
+    const { bytes } = await downloadIconSet(page);
+    expect(readZipEntryNames(bytes)).toEqual([
+      'ellipse.svg',
+      'star.svg',
+      'icons.svg',
+      'icons.json',
+    ]);
+    const manifest = JSON.parse(
+      new TextDecoder().decode(readZipEntry(bytes, 'icons.json') ?? new Uint8Array()),
+    ) as { icons: readonly { file: string; name: string }[] };
+    expect(manifest.icons.map((icon) => icon.name)).toEqual(['Ellipse', 'Star']);
+    // The unselected rectangle is not represented in the archive at all.
+    expect(Buffer.from(bytes).toString('latin1')).not.toContain('rectangle.svg');
+    await expect(page.getByTestId('icon-set-report')).toContainText('2 icon file(s)');
+    await expect(page.getByTestId('icon-set-report')).toContainText('ellipse.svg, star.svg');
+  });
+
+  test('cannot include a hidden layer and cannot export an empty selection', async ({ page }) => {
+    await createVectorDocument(page, 'Hidden icons');
+    await drawShape(page, 'rectangle', { x: 24, y: 24 }, { x: 104, y: 104 });
+    await drawShape(page, 'ellipse', { x: 128, y: 128 }, { x: 232, y: 232 });
+    const layers = await pathLayers(page);
+    const [rectangle, ellipse] = layers;
+    if (!rectangle || !ellipse) throw new Error('two layers should have been drawn');
+
+    await selectLayer(page, rectangle.id);
+    await addToSelection(page, ellipse.id);
+    await expect(page.getByTestId('icon-set-summary')).toContainText(
+      '2 selected visible vector layer(s)',
+    );
+
+    // A hidden layer stays selected but cannot be part of the drawing, so it cannot be part of the
+    // set: the count drops, the reason is named, and the archive really contains only one icon.
+    await page.getByRole('button', { name: `Hide “${rectangle.name}”` }).click();
+    const summary = page.getByTestId('icon-set-summary');
+    await expect(summary).toContainText('1 selected visible vector layer(s)');
+    await expect(summary).toContainText(`Not written: “${rectangle.name}” — the layer is hidden`);
+    const { bytes } = await downloadIconSet(page);
+    expect(readZipEntryNames(bytes)).toEqual(['ellipse.svg', 'icons.svg', 'icons.json']);
+    await expect(page.getByTestId('icon-set-report')).toContainText('1 icon file(s)');
+    await expect(page.getByTestId('icon-set-report')).toContainText(
+      `Not written: “${rectangle.name}” — the layer is hidden`,
+    );
+
+    // Clicking empty artwork with the select tool clears the selection; the export is refused and
+    // the report about the previous download is retired rather than left next to a different set.
+    await page.getByTestId('tool-select').click();
+    await clickVector(page, { x: 4, y: 4 });
+    await expect(page.getByTestId('icon-set-export')).toBeDisabled();
+    await expect(summary).toContainText('Select one or more visible vector layers');
+    await expect(page.getByTestId('icon-set-report')).toHaveCount(0);
   });
 
   test('carries artwork from Illustration to Design and back', async ({ page }) => {

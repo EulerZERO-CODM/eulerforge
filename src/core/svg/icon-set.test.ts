@@ -12,7 +12,7 @@ import { createLayer } from '../documents/layer-operations';
 import type { Layer } from '../documents/layer-types';
 import { parsePathData } from '../vector/path-data';
 import { ellipsePath } from '../vector/shapes';
-import { buildIconSet } from './icon-set';
+import { buildIconSet, iconLayersForSelection } from './icon-set';
 import { parseSvg } from './parse';
 import { crc32, createZip, readZipEntry, readZipEntryNames } from './zip';
 
@@ -177,6 +177,91 @@ describe('icon sets', () => {
     if (!result.ok) return;
     // 4..20 rather than 0..24: without an artboard, the artwork's own bounds are the only honest box.
     expect(JSON.parse(result.value.manifest).viewBox).toEqual([4, 4, 16, 16]);
+  });
+
+  it('exports only the layers it is given, never the scene they came from', () => {
+    const plus = iconLayer('Plus', PLUS);
+    const square = iconLayer('Square', SQUARE);
+    const circle = iconLayer('Circle', CIRCLE);
+    const picked = iconLayersForSelection(
+      [plus, square, circle],
+      [String(square.id), String(plus.id)],
+    );
+    expect(picked.layers.map((layer) => layer.name)).toEqual(['Plus', 'Square']);
+    expect(picked.skipped).toEqual([]);
+
+    const result = buildIconSet(picked.layers, { setName: 'Picked', box: GRID });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(readZipEntryNames(result.value.archive)).toEqual([
+      'plus.svg',
+      'square.svg',
+      'icons.svg',
+      'icons.json',
+    ]);
+    const manifest = JSON.parse(result.value.manifest) as { icons: { name: string }[] };
+    expect(manifest.icons.map((icon) => icon.name)).toEqual(['Plus', 'Square']);
+  });
+
+  it('leaves hidden and fully transparent layers out, and names them as skipped', () => {
+    const shown = iconLayer('Shown', SQUARE);
+    const hidden = { ...iconLayer('Hidden', CIRCLE), visible: false };
+    const faded = { ...iconLayer('Faded', PLUS), opacity: 0 };
+    const picked = iconLayersForSelection(
+      [shown, hidden, faded],
+      [String(shown.id), String(hidden.id), String(faded.id)],
+    );
+    expect(picked.layers.map((layer) => layer.name)).toEqual(['Shown']);
+    expect(picked.skipped).toEqual([
+      {
+        layerId: String(hidden.id),
+        layerName: 'Hidden',
+        layerType: 'path',
+        reason: 'the layer is hidden, so it is not part of the drawing',
+      },
+      {
+        layerId: String(faded.id),
+        layerName: 'Faded',
+        layerType: 'path',
+        reason: 'the layer is fully transparent, so it is not part of the drawing',
+      },
+    ]);
+
+    const result = buildIconSet([shown, hidden], { setName: 'Visible only', box: GRID });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.entries.map((entry) => entry.fileName)).toEqual(['shown.svg']);
+    expect(result.value.skipped.map((layer) => layer.layerName)).toEqual(['Hidden']);
+    expect(readZipEntryNames(result.value.archive)).toEqual([
+      'shown.svg',
+      'icons.svg',
+      'icons.json',
+    ]);
+
+    const nothing = buildIconSet([hidden], { box: GRID });
+    expect(nothing.ok).toBe(false);
+    if (!nothing.ok) {
+      expect(nothing.error.message).toContain('at least one vector layer');
+      expect(nothing.error.detail ?? '').toContain('“Hidden”');
+      expect(nothing.error.detail ?? '').toContain('hidden');
+    }
+  });
+
+  it('reports the selected layers that are not paths, naming each one', () => {
+    const square = iconLayer('Square', SQUARE);
+    const text = createLayer(
+      { type: 'text', frame: { x: 0, y: 0, width: 10, height: 10 }, text: { content: 'x' } },
+      { name: 'Label', generateId: nextId },
+    );
+    if (!text.ok) throw new Error('fixture');
+    const picked = iconLayersForSelection(
+      [square, text.value],
+      [String(square.id), String(text.value.id)],
+    );
+    expect(picked.layers.map((layer) => layer.name)).toEqual(['Square']);
+    expect(picked.skipped.map((layer) => [layer.layerName, layer.layerType])).toEqual([
+      ['Label', 'text'],
+    ]);
   });
 
   it('refuses an empty selection, a non-vector layer and invalid geometry, naming the cause', () => {

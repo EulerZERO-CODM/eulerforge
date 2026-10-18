@@ -96,7 +96,7 @@ export function IllustrationWorkspace({
             )} visible vector layer(s).`}
         </div>
 
-        <SvgIoPanel api={api} />
+        <SvgIoPanel api={api} selection={selection} />
 
         <InterchangePanel api={api} direction="to-design" selectedIds={selection.map(String)} />
       </div>

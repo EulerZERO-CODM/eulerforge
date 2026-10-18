@@ -731,3 +731,12 @@ branch would be exactly the kind of misleading capability claim this project for
 - **Icon sets go through the same path.** The zip writer is pure (a stored-mode ZIP written by hand),
   so the archive is unit-tested, and the browser spec checks the downloaded bytes start with the ZIP
   signature and that the manifest names one file per object.
+- **An icon set is a selection export, not a scene export.** The panel is given the workspace
+  selection, and one classification (`iconLayersForSelection`) decides which selected layers are
+  visible paths. The count shown before the click, the button's enabled state, the layers handed to
+  the builder, the files in the archive and the report afterwards all come from that one set. A
+  selected layer that is hidden, fully transparent or not a path is named as skipped; a layer that is
+  merely present in the document is never included. The builder applies the same visibility rule itself, so
+  a caller cannot widen the set by passing the whole scene, and it returns the skipped layers rather
+  than dropping them. The regression test asserts the archive's entry list, not just its size, both
+  in jsdom (the bytes handed to the adapter) and in Chromium (the downloaded file).

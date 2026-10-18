@@ -3,10 +3,10 @@
 import { useRef, useState } from 'react';
 
 import { svgExportPayload } from '../../core/export/svg-export';
-import { buildIconSet } from '../../core/svg/icon-set';
+import { buildIconSet, iconLayersForSelection } from '../../core/svg/icon-set';
 import { parseSvg } from '../../core/svg/parse';
-import { isPathLayer } from '../../core/documents/layer-types';
 import { importArtworkCommand } from '../../core/editor/vector-commands';
+import type { Selection } from '../../core/editor/selection';
 import { downloadBytes, downloadText } from '../../lib/browser/download';
 import { useForgeServices } from '../../state/forge-provider';
 import { Button } from '../ui/button';
@@ -32,8 +32,19 @@ type ImportReport = {
  * selected shapes as an icon set. Every one of them reports what it did in the terms the user cares
  * about — layers that arrived, layers that could not be carried, bytes written — and none of them
  * claims success when the browser refused the download.
+ *
+ * The icon set is a selection export, and only a selection export: the count in the panel, the button
+ * state, the files in the zip and the report after the download all come from the same classification
+ * of the current selection (`iconLayersForSelection`). A selected layer that is hidden, fully
+ * transparent or not a path is named as skipped instead of being written or silently dropped.
  */
-export function SvgIoPanel({ api }: { readonly api: WorkspaceApi }) {
+export function SvgIoPanel({
+  api,
+  selection,
+}: {
+  readonly api: WorkspaceApi;
+  readonly selection: Selection;
+}) {
   const { toasts } = useForgeServices();
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [pasted, setPasted] = useState('');
@@ -41,9 +52,28 @@ export function SvgIoPanel({ api }: { readonly api: WorkspaceApi }) {
   const [importReport, setImportReport] = useState<ImportReport | null>(null);
   const [iconName, setIconName] = useState('Icon set');
   const [iconBox, setIconBox] = useState(true);
-  const [iconReport, setIconReport] = useState<string | null>(null);
+  // The report is tied to the exact set it describes: if the selection changes, a sentence about
+  // the last download would be describing icons that are no longer chosen, so it is not shown.
+  const [iconReport, setIconReport] = useState<{
+    readonly key: string;
+    readonly text: string;
+  } | null>(null);
 
-  const selectedPaths = api.doc.scene.layers.filter((layer) => isPathLayer(layer) && layer.visible);
+  const iconSelection = iconLayersForSelection(api.doc.scene.layers, selection);
+  const iconLayers = iconSelection.layers;
+  const skippedNote =
+    iconSelection.skipped.length > 0
+      ? ` Not written: ${iconSelection.skipped
+          .map((layer) => `“${layer.layerName}” — ${layer.reason}`)
+          .join('; ')}.`
+      : '';
+  const iconSummary =
+    iconLayers.length === 0
+      ? selection.length === 0
+        ? 'Select one or more visible vector layers. Each selected path becomes one icon file, plus a sprite and a manifest in one download.'
+        : `None of the ${String(selection.length)} selected layer(s) can be written as icons.${skippedNote}`
+      : `${String(iconLayers.length)} selected visible vector layer(s) will be written as icons, each into its own file, plus a sprite and a manifest in one download.${skippedNote}`;
+  const iconSetKey = iconLayers.map((layer) => `${String(layer.id)}:${layer.name}`).join('|');
   const exportPreview = svgExportPayload(api.doc, { allowPartial });
 
   async function importSource(source: string, origin: string): Promise<void> {
@@ -220,18 +250,25 @@ export function SvgIoPanel({ api }: { readonly api: WorkspaceApi }) {
             setIconBox(event.target.checked);
           }}
         />
-        <p className="text-2xs text-fg-subtle">
-          {selectedPaths.length === 0
-            ? 'Draw or import at least one vector shape: each visible path becomes one icon.'
-            : `${String(selectedPaths.length)} visible vector layer(s) will be written as icons, each into its own file, plus a sprite and a manifest in one download.`}
+        <p id="icon-set-summary" data-testid="icon-set-summary" className="text-2xs text-fg-subtle">
+          {iconSummary}
         </p>
         <Button
           variant="outline"
           size="sm"
           fullWidth
-          disabled={selectedPaths.length === 0}
+          disabled={iconLayers.length === 0}
+          aria-describedby="icon-set-summary"
+          title={
+            iconLayers.length === 0
+              ? selection.length === 0
+                ? 'Select a visible vector path to export an icon set.'
+                : 'None of the selected layers can be written as icons.'
+              : undefined
+          }
           data-testid="icon-set-export"
           onClick={() => {
+            if (iconLayers.length === 0) return;
             const box = iconBox
               ? {
                   minX: 0,
@@ -240,7 +277,9 @@ export function SvgIoPanel({ api }: { readonly api: WorkspaceApi }) {
                   maxY: api.doc.canvas.height,
                 }
               : undefined;
-            const built = buildIconSet(api.doc.scene.layers, {
+            // Exactly the layers the panel counted, never the scene: a selection export that quietly
+            // widened to every visible layer would be a different product promise.
+            const built = buildIconSet(iconLayers, {
               setName: iconName,
               ...(box ? { box } : {}),
             });
@@ -254,17 +293,21 @@ export function SvgIoPanel({ api }: { readonly api: WorkspaceApi }) {
               toasts.warning('The download could not start', 'This environment cannot save files.');
               return;
             }
-            setIconReport(
-              `${set.archiveFileName} — ${String(set.entries.length)} icon file(s), ${formatBytes(set.archive.length)} zipped. Inside: ${set.entries.map((entry) => entry.fileName).join(', ')}, icons.svg, icons.json.`,
+            setIconReport({
+              key: iconSetKey,
+              text: `${set.archiveFileName} — ${String(set.entries.length)} icon file(s), ${formatBytes(set.archive.length)} zipped. Inside: ${set.entries.map((entry) => entry.fileName).join(', ')}, icons.svg, icons.json.${skippedNote}`,
+            });
+            toasts.success(
+              'Icon set exported',
+              `${String(set.entries.length)} selected icon(s) in one zip.${skippedNote}`,
             );
-            toasts.success('Icon set exported', `${String(set.entries.length)} icons in one zip.`);
           }}
         >
           Download icon set (.zip)
         </Button>
-        {iconReport ? (
+        {iconReport !== null && iconReport.key === iconSetKey ? (
           <p className="text-fg-muted forge-numeric text-2xs" data-testid="icon-set-report">
-            {iconReport}
+            {iconReport.text}
           </p>
         ) : null}
       </div>

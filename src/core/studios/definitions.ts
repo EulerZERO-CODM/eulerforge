@@ -386,7 +386,7 @@ export const ILLUSTRATION_STUDIO: StudioDefinition = {
       label: 'Icon-set export',
       status: 'available',
       detail:
-        'Every visible vector layer becomes one SVG, plus a sprite and a manifest, packaged into a single zip download.',
+        'Every selected visible vector layer becomes one SVG, plus a sprite and a manifest, packaged into a single zip download. Unselected, hidden and non-path layers are never included; the panel states the exact count before the export and names anything it could not carry.',
     },
     {
       id: 'interchange.design',

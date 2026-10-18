@@ -74,6 +74,8 @@ The parts every studio must share. Each module is small, pure where possible, an
 - **`svg/`** — the SVG boundary: a deterministic serializer, a defended importer, the artwork model
   that sits between a scene and a file, the naive serializer the compact one is measured against, a
   stored-mode zip writer and the icon-set builder. It consumes the path model and never the editor.
+  The icon-set builder exports the layers it is given — the panel passes exactly the selection — and
+  reports the ones it cannot write instead of widening or silently trimming the set.
 - **`editor/`** — the interaction model: `selection.ts` (what is selected, never persisted),
   `commands.ts` (each edit as a label plus the patch that performs it) and `gesture.ts` (move and
   resize previews in document coordinates, resolved once on release, with snapping).
@@ -264,7 +266,8 @@ browser storage refused is driven through the whole creation-and-edit flow
 document through the studio's real entry point, draws with the pen, edits nodes and Bezier handles,
 performs a boolean operation in the browser (the regression that unit tests could not see: the
 dependency resolves differently under the browser bundler), imports hostile SVG, downloads an SVG and
-re-imports its own bytes, downloads an icon-set zip and checks its signature and manifest, and converts
+re-imports its own bytes, downloads an icon-set zip from a subset of the selected layers and checks its exact entry list and
+manifest (with no unselected or hidden layer inside), and converts
 artwork between the Design and Illustration documents in both directions. What even that cannot reach — other browser engines, the
 responsiveness of a 30-layer document, font metrics that would only hold on one machine — is listed as
 a manual check in `docs/ROADMAP.md` rather than quietly assumed.
