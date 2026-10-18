@@ -204,6 +204,11 @@ export type PhotoMaskStroke = {
   readonly hardness: number;
   /** True paints back into the mask, false erases. */
   readonly erase: boolean;
+  /**
+   * True fills the closed outline instead of stroking it — the lasso tool. Brush strokes leave this
+   * false; a filled lasso and a brushed stroke share one model so order and erasing are uniform.
+   */
+  readonly fill: boolean;
 };
 
 export type PhotoMask = {

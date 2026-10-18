@@ -654,7 +654,13 @@ export function CreationFlow() {
             ) : null}
 
             <InlineNote tone="tip" icon={<Sparkles aria-hidden />}>
-              {documentType?.id === ILLUSTRATION_ARTBOARD_ID ? (
+              {documentType?.id === 'photo.image' ? (
+                <p>
+                  After creating, the workspace opens Photo Studio: import a PNG, JPEG or WebP,
+                  build an ordered adjustment stack, paint brush or lasso masks, clone and heal,
+                  undo anything, and export a real PNG, JPEG or WebP at the stored working size.
+                </p>
+              ) : documentType?.id === ILLUSTRATION_ARTBOARD_ID ? (
                 <p>
                   After creating, the workspace opens a vector artboard: draw paths with the pen,
                   place shapes, edit nodes and Bezier handles, set real fills and strokes, combine

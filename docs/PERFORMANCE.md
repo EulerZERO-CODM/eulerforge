@@ -457,3 +457,36 @@ is one undo step), which is a correctness fix first and a cost fix second.
   benchmark loudly instead of being published as a measurement.
 - **One document shape.** A 1600 × 1100 canvas with 30 layers is one point in the space; a document with
   a single huge image layer, or a hundred text layers, is not covered.
+
+## 9. Photo pipeline: the CPU reference renderer
+
+The photo renderer has two backends (ADR-0024), and only one of them runs in CI's software
+environment with a measurable cost per pixel: the CPU path. The GPU path's budget is the roadmap's
+"under 16 ms at 12 MP on reference hardware"; that number is **not** measured here, and nothing in
+the capability ledger claims it is. What is measured is the cost of the reference renderer, which is
+the fallback a WebGL2-less browser actually runs.
+
+- Benchmark: `src/core/photo/pipeline.perf.test.ts` (Vitest, Node)
+- Workload: 1280 × 853 (1,091,840 px — the preview cap across both axes), a nine-entry stack that
+  exercises every maths branch, plus a half-frame mask; one warm-up pass, then three measured passes.
+- Reported: median and worst-case wall time. Asserted: a **ceiling** of 4000 ms median / 6000 ms worst
+  case, and a scaling ratio (nine adjustments must cost more than 1.5× two adjustments).
+- Measured in this sandbox: **≈0.47–0.57 s median, ≈0.51–0.59 s worst** for the nine-adjustment stack
+  with a mask; **≈0.14 s** for a two-adjustment stack. The numbers are printed by the test, so a CI
+  log carries the measurement next to the assertion.
+
+Why a ceiling rather than a target: the number is a function of the machine and of how many suites
+Vitest runs concurrently. A tight budget would flake on a shared runner and teach people to re-run
+until green, which is worse than no budget. The ratio check is the part that is insensitive to load —
+if a refactor makes cost sublinear in the stack, or accidentally skips the mask, it fails.
+
+A 12 MP photograph is not rendered by this pipeline: `preparePhoto` caps the working copy at 2048 px
+on the long edge (ADR-0024), so the largest document Photo Studio can hold is 2048 × 2048. At the
+measured ≈0.49 s per megapixel-adjustment-pass, a 12 MP nine-adjustment pass would be roughly 5 s on
+this sandbox's CPU — which is exactly why previews are capped at 1280 px and render off a preview
+copy while export re-renders once at the stored size.
+
+The GPU comparison is a correctness check, not a timing check: `e2e/photo.spec.ts` renders the same
+twelve-swatch chart through both renderers and requires the pixels to agree within 2/255. CI's
+Chromium runs WebGL2 through SwiftShader (software), so any timing taken there would describe the
+sandbox rather than a GPU.

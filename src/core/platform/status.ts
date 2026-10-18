@@ -331,13 +331,88 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     gap: 'Gradient and pattern fills, tracing a raster image, text on a path, and ungrouped multi-artboard documents are not implemented and are labelled planned in the registry. Node editing works on one path at a time. The browser suite runs on Chromium only, so Firefox and WebKit are unverified.',
   },
   {
-    id: 'studios.photo-video-motion',
+    id: 'studios.photo',
     area: 'studios',
-    label: 'Photo, Video and Motion studios',
+    label: 'Photo Studio',
+    description:
+      'A real raster editor on the shared document/history interfaces: import PNG, JPEG or WebP into a capped working copy embedded in the project, build an ordered non-destructive adjustment stack with bypass and reordering, paint brush/lasso/erase masks and invert them, clone and heal retouch, render through a WebGL2 fragment pipeline with a Canvas 2D reference fallback, then export PNG, JPEG or WebP bytes from the full working copy.',
+    status: 'partial',
+    verification: [
+      'src/components/photo/photo-workspace.test.tsx',
+      'src/core/photo/pipeline.test.ts',
+      'src/core/photo/pipeline.perf.test.ts',
+      'src/core/photo/commands.test.ts',
+      'src/core/photo/export.test.ts',
+      'src/components/photo/photo-workspace.test.tsx',
+      'e2e/photo.spec.ts',
+    ],
+    gap: 'One photograph per document: multiple image layers, blend modes, curves and EXIF-aware orientation are not implemented and are listed as planned on the studio page. Colour management is sRGB-only and the browser’s own encoder decides what the exported file looks like. The working copy is capped at 2048 px on the long edge, so the roadmap’s 12-megapixel target is bounded by that cap rather than met; previews render at most 1280 px and export re-renders once at the stored size. GPU parity is measured under SwiftShader software rendering in CI, not on reference GPU hardware, and the browser suite runs on Chromium only.',
+  },
+  {
+    id: 'photo.raster-engine',
+    area: 'studios',
+    label: 'WebGL2 raster engine with a reference fallback',
+    description:
+      'One code path decides between a WebGL2 renderer that performs one fragment pass per adjustment and a Canvas 2D renderer running the shared CPU pipeline; masks are rasterised to a single strength byte per pixel, and both renderers are checked against each other on the same document.',
+    status: 'implemented',
+    verification: [
+      'src/lib/browser/photo-engine.ts (renderPhoto, detectWebgl2, rasteriseMask)',
+      'e2e/photo.spec.ts (all twelve adjustments and a masked mix compared across renderers within 2/255 per channel; a browser that refuses WebGL2 falls back and says so)',
+      'src/core/photo/pipeline.test.ts',
+      'src/core/photo/pipeline.perf.test.ts',
+    ],
+    gap: 'The measured 12 MP / 16 ms target in the roadmap is a fragment-shader claim measured nowhere in this repository: the sandbox renders through SwiftShader, the working copy is capped at 2048 px, and no reference GPU hardware was available. What is verified is parity between the two renderers and a bounded CPU cost at preview resolution.',
+  },
+  {
+    id: 'photo.adjustments',
+    area: 'studios',
+    label: 'Non-destructive adjustment stack',
+    description:
+      'Twelve tonal and colour adjustments (exposure, contrast, saturation, temperature, tint, highlights, shadows, vibrance, clarity, grayscale, sepia, vignette) applied in stack order, each with a value, bypass, reorder and remove, stored in the document payload and undoable as labelled commands.',
+    status: 'implemented',
+    verification: [
+      'src/core/photo/commands.test.ts',
+      'src/core/photo/pipeline.test.ts',
+      'src/components/photo/photo-workspace.test.tsx',
+      'e2e/photo.spec.ts (ordering changes the result; bypass leaves the source pixels untouched)',
+    ],
+  },
+  {
+    id: 'photo.masks',
+    area: 'studios',
+    label: 'Masking and retouching',
+    description:
+      'Brush, lasso and erase mask strokes with per-stroke radius and hardness, inversion and clearing, plus a clone stamp with a sampled source offset and a heal brush that blends towards a blurred local copy. Strokes are normalised and serialisable, so the mask survives save and reload.',
+    status: 'partial',
+    verification: [
+      'src/core/photo/commands.test.ts',
+      'src/components/photo/photo-workspace.test.tsx',
+      'e2e/photo.spec.ts (a masked stack only changes the painted area, inversion covers the rest, heal leaves the edges untouched)',
+    ],
+    gap: 'Range selections (select by luminance, colour or subject) are not implemented; the mask is painted. Mask strokes are single-channel strength only, so there is no feather-by-region or subject refinement. The clone source offset is a fixed -10% of the frame unless re-sampled with Alt-click.',
+  },
+  {
+    id: 'photo.export',
+    area: 'studios',
+    label: 'Photo export to real files',
+    description:
+      'Exports render the saved document at its full stored size through the same renderer as the preview, ask the browser’s own encoder for PNG, JPEG or WebP, and report the engine, dimensions and byte count that were actually produced.',
+    status: 'implemented',
+    verification: [
+      'src/core/photo/export.test.ts',
+      'src/components/photo/photo-workspace.test.tsx',
+      'e2e/photo.spec.ts (a downloaded PNG is re-imported and its pixels are asserted)',
+    ],
+    gap: 'The browser decides the encoder, so a PNG colour profile is whatever the browser writes; gamma and ICC embedding are not implemented.',
+  },
+  {
+    id: 'studios.motion-video',
+    area: 'studios',
+    label: 'Motion and Video studios',
     description: 'The remaining specialist editors.',
     status: 'planned',
     verification: [],
-    gap: 'Entry points exist and explain what each studio will do; none of them edits media, and no interface in them claims to.',
+    gap: 'Entry points exist and explain what each studio will do; neither edits timeline media yet, and no interface in them claims to.',
   },
   {
     id: 'studios.three-d',

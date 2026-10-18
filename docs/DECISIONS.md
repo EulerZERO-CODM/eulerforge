@@ -740,3 +740,41 @@ branch would be exactly the kind of misleading capability claim this project for
   a caller cannot widen the set by passing the whole scene, and it returns the skipped layers rather
   than dropping them. The regression test asserts the archive's entry list, not just its size, both
   in jsdom (the bytes handed to the adapter) and in Chromium (the downloaded file).
+
+## ADR-0024 — Photo rendering is one pipeline with two backends, not two features
+
+**Status:** accepted (Phase 4).
+
+**Context.** Per-pixel adjustment work is what a GPU is for, and the roadmap commits to a WebGL2
+path. But WebGL2 is not guaranteed (headless browsers, blocked drivers, old hardware), and a photo
+editor that silently does nothing on such a device is worse than a slower one. Two independent
+implementations would also drift: the shader and the CPU code would disagree about exposure by one
+stop and nobody would notice until a user compared a preview with an export.
+
+**Decision.**
+
+- **`src/core/photo/pipeline.ts` is the definition.** It is pure, framework-free and returns pixels.
+  The WebGL renderer's fragment shader mirrors it, and the CPU renderer *is* it. A 12-swatch chart
+  and a masked mix are compared across both renderers in Chromium within **2/255 per channel**; the
+  parity test fails the build if they disagree.
+- **`auto` is the default renderer.** The engine tries WebGL2, and on refusal falls back to Canvas
+  2D *and reports why* (`fallbackReason` is shown in the stage and in the renderer panel). Choosing
+  "GPU" explicitly still falls back rather than failing to render, because a document you cannot
+  see is not a useful error message; the interface says which renderer produced the last preview.
+- **Export always uses the same decision.** The export panel re-renders the saved document at its
+  stored size through `renderPhoto`, encodes with the browser's own encoder, and reports the engine,
+  dimensions and byte count that produced the file. There is no second export renderer to drift.
+- **The working copy is capped at 2048 px on the long edge and previews at 1280 px.**
+  `preparePhoto` re-encodes the imported image to that size and stores it in the document, so a
+  project reopens without the original file and a 40 MP camera file cannot exhaust memory. The cap
+  is a product decision with a cost: the roadmap's 12 MP target is not exercised by the shipped
+  pipeline, and the capability ledger says so instead of quoting the target as if it were met.
+- **Masking is a strength map, not a selection object.** Strokes are normalised points plus radius,
+  hardness and fill, rasterised to one byte per pixel at the render size. That keeps masks this side
+  of the document schema (they are serialisable, migratable and tested) and makes the mask cost
+  proportional to the render, not to the number of points.
+
+**Consequences.** A browser without WebGL2 edits and exports the same documents, more slowly, and
+the UI never pretends otherwise. The cost is that GPU-specific effects (blur, distortion) cannot be
+added to one renderer alone, and every adjustment has to be expressible as a per-pixel function plus
+a separable blur — which is also what makes the parity test possible.

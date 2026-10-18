@@ -90,6 +90,7 @@ const maskStrokeSchema = z.object({
   radius: finite('radius').min(0.001).max(0.5),
   hardness: finite('hardness').min(0).max(1),
   erase: z.boolean(),
+  fill: z.boolean(),
 });
 
 const photoMaskSchema = z.object({

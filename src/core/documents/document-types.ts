@@ -43,8 +43,8 @@ export const DOCUMENT_TYPES: readonly DocumentTypeDefinition[] = [
     description: 'Single raster image with a non-destructive adjustment stack.',
     studioId: 'photo',
     unit: 'px',
-    availability: 'planned',
-    renderer: 'WebGL2 / WebGPU raster compositor',
+    availability: 'available',
+    renderer: 'WebGL2 fragment-pass compositor with a Canvas 2D reference fallback (implemented)',
   },
   {
     id: typeId('video.timeline'),

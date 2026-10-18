@@ -130,38 +130,42 @@ export const PHOTO_STUDIO: StudioDefinition = {
   id: createStudioId('photo'),
   slug: createStudioSlug('photo'),
   name: 'Photo Studio',
-  tagline: 'Adjust, retouch, mask and composite photographs.',
+  tagline: 'Adjust, retouch, mask and export photographs.',
   purpose:
-    'Photo Studio will handle tonal and colour adjustment, non-destructive edit stacks, selections, masks, healing and multi-image compositing. It needs a GPU compositor and a large-image pipeline, so it is scheduled after the shared document, history and asset foundations are proven by Design Studio.',
+    'Photo Studio edits a single photograph with a non-destructive stack: tonal and colour adjustments stay editable and reorderable, brush and lasso masks decide where the stack applies, and clone/heal strokes retouch the rendered pixels. The working copy is embedded in the project so it reopens without the original file. Multiple image layers and EXIF-aware orientation are still to come.',
   icon: 'aperture',
   accent: 'ember',
-  availability: 'planned',
-  maturityNote: 'Not started. The document model and history layer already anticipate it.',
+  availability: 'available',
+  maturityNote:
+    'Working in this browser: PNG/JPEG/WebP import with a capped working copy, a 12-entry adjustment stack with bypass and reordering, brush/lasso/erase masks with inversion, clone and heal retouch, undo/redo, autosave and real PNG/JPEG/WebP export. Not implemented: multiple image layers, blend modes, curves, EXIF orientation and colour-managed output.',
   produces: [
     'Corrected and colour-graded photographs',
     'Retouched portraits and product shots',
-    'Background removals and cut-outs',
-    'Multi-layer composites',
+    'Masked local adjustments',
+    'PNG, JPEG and WebP exports at the stored working size',
   ],
   documentTypes: [documentType('photo.image')],
   capabilities: [
     {
       id: 'adjust.stack',
       label: 'Non-destructive adjustment stack',
-      status: 'planned',
-      detail: 'Exposure, contrast, curves, colour balance and sharpening that stay editable.',
+      status: 'available',
+      detail:
+        'Twelve tonal and colour adjustments applied in order, each bypassable, movable and undoable; the imported pixels are never overwritten.',
     },
     {
       id: 'select.mask',
       label: 'Selections and masks',
-      status: 'planned',
-      detail: 'Brush, lasso and luminance/colour range selection with feathered masks.',
+      status: 'available',
+      detail:
+        'Brush, lasso and erase strokes with a hardness edge and mask inversion, drawn with the pointer or from the keyboard.',
     },
     {
       id: 'retouch.heal',
       label: 'Retouching tools',
-      status: 'planned',
-      detail: 'Clone, heal and patch with sampled-source overlays.',
+      status: 'available',
+      detail:
+        'Clone stamp with a sampled source offset and a heal brush that blends towards a blurred local copy.',
     },
     {
       id: 'composite.layers',
@@ -177,17 +181,18 @@ export const PHOTO_STUDIO: StudioDefinition = {
     },
   ],
   engine: {
-    renderer: 'WebGL2 compositor with a Canvas2D fallback for low-end devices',
+    renderer: 'WebGL2 fragment-pass renderer with a Canvas 2D reference fallback',
     pipeline:
-      'Image decoding (createImageBitmap), GPU shader passes, tiled caching for large files',
-    integrationPoint: 'src/studios/photo with an engine package under src/engines/raster',
+      'createImageBitmap decode → capped working copy → one pass per adjustment (GPU) or the shared CPU pipeline → mask mix → Canvas 2D retouch → the browser’s own PNG/JPEG/WebP encoder',
+    integrationPoint:
+      'src/core/photo (stack, commands, export plan) and src/lib/browser/photo-engine.ts',
     rationale:
-      'Per-pixel editing needs the GPU; DOM cannot express blend maths or kernels at interactive rates. Keeping the engine behind the Forge Core document/history interfaces means photo work never depends on DOM-specific assumptions.',
+      'Per-pixel editing is faster on the GPU, but the fallback is the reference implementation: the shader mirrors `applyPhotoPipeline` and both are exercised, so a device without WebGL2 still edits and exports the same document. The renderer stays behind the shared document/history interfaces, so photo work never depends on DOM-specific assumptions in core.',
   },
-  entry: { route: null, label: 'Photo Studio' },
+  entry: { route: '/studios/photo', label: 'Open Photo Studio' },
   learningSlugs: ['what-adjustments-actually-do'],
   consumesFrom: [DESIGN_STUDIO.id],
-  definitionVersion: 1,
+  definitionVersion: 2,
 };
 
 export const VIDEO_STUDIO: StudioDefinition = {

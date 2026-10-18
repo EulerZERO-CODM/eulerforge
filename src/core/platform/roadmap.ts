@@ -401,57 +401,82 @@ export const ROADMAP: readonly RoadmapPhase[] = [
   {
     id: 'phase-4',
     name: 'Phase 4 — Raster engine and Photo Studio',
-    summary: 'GPU compositing, an adjustment stack, selections, masks and retouching.',
-    status: 'planned',
+    summary:
+      'GPU raster processing with a reference CPU renderer, a non-destructive adjustment stack, painted masks and retouching, and the Photo Studio workspace. Shipped; range selections, tiling and the unmeasured 12 MP target keep the phase open.',
+    status: 'in-progress',
     items: [
       {
         id: 'p4.raster-engine',
         title: 'GPU raster engine',
         description:
-          'WebGL2 pipeline for image decoding, tiling and shader-based adjustments with a Canvas2D fallback.',
-        status: 'planned',
+          'WebGL2 pipeline for image decoding and shader-based adjustments with a Canvas2D fallback.',
+        status: 'partial',
         dependsOn: ['p1.core', 'p1.history'],
         completionCriteria: [
           'Adjustments evaluate in under 16 ms at 12 MP on reference hardware',
           'Fallback path produces equivalent output within tolerance',
         ],
-        capabilityIds: [],
+        evidence: [
+          'src/lib/browser/photo-engine.ts',
+          'e2e/photo.spec.ts',
+          'src/core/photo/pipeline.perf.test.ts',
+        ],
+        gap: 'Both renderers exist and agree within 2/255 per channel, but the 16 ms at 12 MP criterion is unmeasured: there is no reference GPU hardware in this environment (CI renders through SwiftShader), and the working copy is capped at 2048 px so 12 MP documents never reach the renderer. Tiling is not implemented.',
+        capabilityIds: ['photo.raster-engine'],
       },
       {
         id: 'p4.adjustments',
         title: 'Non-destructive adjustment stack',
         description: 'Ordered adjustments with reordering, bypass and per-step masks.',
-        status: 'planned',
+        status: 'done',
         dependsOn: ['p4.raster-engine'],
         completionCriteria: [
           'Reordering changes the result predictably',
           'Stack serialises into the document model',
         ],
-        capabilityIds: [],
+        evidence: [
+          'src/core/photo/pipeline.test.ts',
+          'src/core/photo/commands.test.ts',
+          'src/core/documents/payload.test.ts',
+          'src/components/photo/photo-workspace.test.tsx',
+          'e2e/photo.spec.ts',
+        ],
+        capabilityIds: ['photo.adjustments'],
       },
       {
         id: 'p4.selection-mask',
         title: 'Selections, masks and retouching',
         description: 'Brush, lasso and range selections; feathered masks; clone and heal tools.',
-        status: 'planned',
+        status: 'partial',
         dependsOn: ['p4.adjustments'],
         completionCriteria: [
           'Selections survive document reload',
           'Mask edges show no visible banding at 100% zoom',
         ],
-        capabilityIds: [],
+        evidence: [
+          'src/core/photo/commands.test.ts',
+          'src/components/photo/photo-workspace.test.tsx',
+          'e2e/photo.spec.ts',
+        ],
+        gap: 'Brush, lasso and erase masks with a hardness feather survive reload, and clone/heal retouch works, but range selections (by luminance, colour or subject) are not implemented. Banding at 100% zoom was not inspected on real display hardware; the mask is an 8-bit strength map, so a feathered edge has at most 256 levels.',
+        capabilityIds: ['photo.masks'],
       },
       {
         id: 'p4.photo-studio',
         title: 'Photo Studio workspace',
         description: 'Import, develop and export photographs with the raster engine.',
-        status: 'planned',
+        status: 'done',
         dependsOn: ['p4.selection-mask'],
         completionCriteria: [
           'A RAW-free JPEG workflow is possible end to end',
           'Studio flips to `available` with a working entry point',
         ],
-        capabilityIds: ['studios.photo-video-motion'],
+        evidence: [
+          'src/components/photo/photo-workspace.test.tsx',
+          'e2e/photo.spec.ts',
+          'src/core/studios/definitions.test.ts (the entry point is `available` and routes to /studios/photo)',
+        ],
+        capabilityIds: ['studios.photo'],
       },
     ],
     exitCriteria: [
@@ -498,7 +523,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'A title animation can be produced and exported',
           'Studio flips to `available` with a working entry point',
         ],
-        capabilityIds: ['studios.photo-video-motion'],
+        capabilityIds: ['studios.motion-video'],
       },
     ],
     exitCriteria: [
@@ -548,7 +573,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'A short edit exports and plays back correctly',
           'Export failure states are explained, not silent',
         ],
-        capabilityIds: ['studios.photo-video-motion'],
+        capabilityIds: ['studios.motion-video'],
       },
     ],
     exitCriteria: [

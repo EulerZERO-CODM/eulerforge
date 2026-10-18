@@ -92,13 +92,36 @@ describe('creation flow', () => {
     expect(push).toHaveBeenCalledWith(`/workspace/${String(created?.id)}`);
   });
 
+  it('creates a photo document when the Photo Studio is chosen', async () => {
+    window.history.replaceState({}, '', '/create?studio=photo');
+    const user = userEvent.setup();
+    renderFlow(services);
+
+    expect(screen.getByRole('button', { name: /Photo Studio/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByText('Photo image.')).toBeInTheDocument();
+
+    await createProject(user, 'Portrait');
+
+    await waitFor(() => {
+      expect(services.documents.getState().documents).toHaveLength(1);
+    });
+    const created = services.documents.getState().documents[0];
+    expect(created?.studioId).toBe('photo');
+    expect(created?.documentTypeId).toBe('photo.image');
+    // The document is born with a photo payload, which is what the workspace switches on.
+    expect(created?.studioPayload?.kind).toBe('photo');
+  });
+
   it('will not offer to create a document for a studio that is still planned', async () => {
     const user = userEvent.setup();
     renderFlow(services);
 
-    const photo = screen.getByRole('button', { name: /Photo Studio/ });
-    expect(photo).toBeDisabled();
-    expect(photo).toHaveAttribute('aria-pressed', 'false');
+    const video = screen.getByRole('button', { name: /Video Studio/ });
+    expect(video).toBeDisabled();
+    expect(video).toHaveAttribute('aria-pressed', 'false');
 
     await createProject(user, 'Poster');
     await waitFor(() => {

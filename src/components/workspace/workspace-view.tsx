@@ -21,6 +21,7 @@ import type { Result } from '../../core/result';
 import type { CommitOptions, DocumentPatch } from '../../state/document-session';
 import type { SceneCommand } from '../../core/editor/commands';
 import { IllustrationWorkspace, isVectorDocument } from '../illustration/illustration-workspace';
+import { PhotoWorkspace, isPhotoDocument } from '../photo/photo-workspace';
 import { ContextHelp } from './context-help';
 import { DocumentAside } from './document-aside';
 import { DocumentStage } from './document-stage';
@@ -176,10 +177,12 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
   const doc = state.document;
   const studio = getStudio(doc.studioId);
   const api: WorkspaceApi = { doc, commit, run, undo, redo };
-  // The document type decides the editing surface: a vector artboard gets the Illustration Studio's
-  // stage and inspector, everything else keeps the design workspace. The shell, the session, undo and
-  // persistence are shared, so neither surface has its own private editing path.
+  // The document type decides the editing surface: a vector artboard gets the Illustration Studio,
+  // an image gets Photo Studio, everything else keeps the design workspace. The shell, the session,
+  // undo and persistence are shared, so no surface has its own private editing path.
   const vectorDocument = isVectorDocument(String(doc.documentTypeId));
+  const photoDocument = isPhotoDocument(String(doc.documentTypeId));
+  const photoPayload = doc.studioPayload?.kind === 'photo' ? doc.studioPayload : null;
 
   return (
     <div className="mx-auto max-w-[100rem] space-y-5 p-4 sm:p-6">
@@ -266,7 +269,30 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
         </InlineNote>
       ) : null}
 
-      {vectorDocument ? (
+      {photoDocument ? (
+        photoPayload ? (
+          <PhotoWorkspace
+            api={api}
+            payload={photoPayload}
+            history={state.history}
+            canUndo={state.canUndo}
+            canRedo={state.canRedo}
+            onUndo={undo}
+            onRedo={redo}
+          />
+        ) : (
+          <InlineNote
+            tone="danger"
+            icon={<CircleAlert aria-hidden />}
+            title="This photo project is missing its image data"
+          >
+            <p>
+              The document has no photo payload, so there is nothing to edit. Export the project
+              file and reopen it, or create a new photo project.
+            </p>
+          </InlineNote>
+        )
+      ) : vectorDocument ? (
         <IllustrationWorkspace
           api={api}
           scene={doc.scene}

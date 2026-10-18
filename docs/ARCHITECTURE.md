@@ -193,6 +193,29 @@ editor, the painter and the exporter are three consumers of one geometry. And a 
 derived from its nodes rather than stored independently, so a moved node and a transformed box cannot
 disagree; `setLayerFramesCommand` converts a box transform into a path transform.
 
+### The raster editing pipeline
+
+Photo Studio keeps the same command/history/document path and swaps the renderer:
+
+```
+file input or drop (components/photo/photo-import-panel.tsx)
+        ↓ lib/browser/photo-engine.ts preparePhoto: decode, refusal for SVG, 2048 px capped copy
+        ↓ setPhotoSourceCommand — one history entry, the source bytes go into studioPayload
+components/photo/*  →  core/photo/commands.ts  →  WorkspaceApi.run → the same DocumentSession
+        ↓
+core/photo/pipeline.ts (applyPhotoPipeline) is the definition of every adjustment
+        ↓ GPU: one fragment pass per adjustment      CPU: the same function, per pixel
+lib/browser/photo-engine.ts renderPhoto → canvas   → export re-renders at the stored size
+```
+
+Three boundaries hold here too. The payload is document state and is validated by the same Zod
+schema as the rest of the document, so a photo project is saved, migrated, reopened and exported
+through the shared path rather than a side channel. The pipeline in `src/core/photo` is pure — it
+takes and returns pixels and never touches a canvas — which is why the shader and the CPU reference
+can be compared byte for byte in a test. And the tool, brush radius, hardness, clone source and
+"show original" toggle are transient (ADR-0017): they configure the next stroke, so they never
+reach the document, the history or storage.
+
 ## Data flow of a real edit
 
 ```

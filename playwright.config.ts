@@ -43,11 +43,31 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     ...devices['Desktop Chrome'],
+    // The full Chromium build rather than the headless shell: Photo Studio's GPU path needs WebGL2,
+    // and the shell is not guaranteed to ship the SwiftShader libraries ANGLE needs.
+    channel: 'chromium',
+    launchOptions: {
+      // Software WebGL (SwiftShader). Without it a headless browser exposes no WebGL2 at all, so the
+      // GPU renderer could only ever be tested on a developer machine with a GPU — and an untested
+      // shader is a claim, not a feature. These flags make the GPU path run in CI on the CPU.
+      args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+    },
     // A wide window keeps the whole stage and the inspector rail on screen, so the pointer maths in
     // the specs never has to scroll the artboard into view.
     viewport: { width: 1440, height: 960 },
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        channel: 'chromium',
+        launchOptions: {
+          args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+        },
+      },
+    },
+  ],
   webServer: {
     // `next start` serves the production build (`npm run build` runs first in CI).
     command: `npm run start -- --hostname 127.0.0.1 --port ${PORT}`,

@@ -159,8 +159,23 @@ converted to paths first. The browser suite is Chromium only.
 
 ### Phase 4 — Raster engine and Photo Studio
 
-GPU raster engine, non-destructive adjustment stack, selections/masks/retouching, then the Photo
-Studio workspace.
+Shipped, and still open. The raster engine is a WebGL2 fragment pipeline (one pass per adjustment)
+with a Canvas 2D renderer that runs the shared CPU pipeline as the reference and the fallback. Both
+renderers are exercised on the same document in Chromium: all twelve adjustments and a masked mix
+agree within 2/255 per channel, and a browser that refuses WebGL2 falls back and says so (ADR-0024).
+
+Photo Studio imports PNG, JPEG and WebP into a working copy capped at 2048 px and embedded in the
+project, keeps the source pixels untouched behind an ordered twelve-entry adjustment stack (bypass,
+reorder, remove, all undoable), paints brush/lasso/erase masks with a hardness feather and inversion,
+retouches with clone and heal, autosaves, reopens, and exports real PNG, JPEG or WebP bytes from the
+full stored copy. The browser spec downloads the PNG, re-imports it and asserts its pixels.
+
+Still missing, and therefore still labelled partial or planned: range selections (by luminance,
+colour or subject), multiple image layers, blend modes, curves, EXIF orientation, ICC/gamma-aware
+output, tiling, and the roadmap's 12 MP / 16 ms measurement — the working copy cap means a 12 MP
+document never reaches the renderer, and CI renders through SwiftShader rather than reference GPU
+hardware. Preview renders are capped at 1280 px so interaction stays responsive; export re-renders
+once at the stored size.
 
 ### Phase 5 — Motion Studio
 
