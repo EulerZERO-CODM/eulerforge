@@ -1064,6 +1064,46 @@ describe('the assistant panel', () => {
     expect(call?.[0]).toContain('fill="#ef4444"');
   });
 
+  it('resumes an interrupted run at the first unfinished step without repeating the finished one', async () => {
+    const user = userEvent.setup();
+    const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
+    const { session } = await mount(services, [layer]);
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+    vi.mocked(downloadText).mockClear();
+    // The first export is refused by the browser, so the run stops after the fill.
+    vi.mocked(downloadText).mockReturnValueOnce(false);
+
+    await ask('fill the selected paths with #ef4444 and export the artboard as svg');
+    await user.click(screen.getByTestId('assistant-run'));
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-checkpoint')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('assistant-checkpoint')).toHaveTextContent(/1 of 2 steps/i);
+    expect(fillOf(session)).toBe('#ef4444');
+    const fills = (): number =>
+      session.getState().history.filter((entry) => /fill/i.test(entry.label)).length;
+    expect(fills()).toBe(1);
+    const stored = JSON.parse(
+      window.localStorage.getItem('eulerforge.v1.assistant-runs') ?? '{}',
+    ) as Record<string, { completed: string[] }>;
+    expect(Object.values(stored)[0]?.completed).toHaveLength(1);
+
+    await user.click(screen.getByTestId('assistant-resume'));
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-summary')).toHaveTextContent(/1 step\(s\) completed/i);
+    });
+
+    // Only the export ran, so the fill was not applied twice and the checkpoint is gone.
+    expect(fills()).toBe(1);
+    expect(vi.mocked(downloadText).mock.calls).toHaveLength(2);
+    expect(screen.queryByTestId('assistant-checkpoint')).toBeNull();
+    expect(
+      Object.keys(
+        JSON.parse(window.localStorage.getItem('eulerforge.v1.assistant-runs') ?? '{}') as object,
+      ),
+    ).toHaveLength(0);
+  });
+
   it('cancels a running export before it writes a file', async () => {
     const user = userEvent.setup();
     const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
@@ -1087,6 +1127,7 @@ describe('the assistant panel with a model configured', () => {
 
   beforeEach(() => {
     services = createTestServices();
+    window.localStorage.clear();
   });
   afterEach(() => {
     vi.unstubAllGlobals();

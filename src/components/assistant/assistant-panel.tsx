@@ -12,6 +12,18 @@ import {
   type ProviderStatus,
 } from '../../core/assistant/provider';
 import {
+  createCheckpoint,
+  markStepCompleted,
+  remainingSteps,
+  resumePlan,
+  type AssistantCheckpoint,
+} from '../../core/assistant/checkpoint';
+import {
+  forgetAssistantRun,
+  readAssistantRun,
+  writeAssistantRun,
+} from '../../lib/browser/assistant-runs';
+import {
   executePlan,
   type AssistantEnvironment,
   type RunReport,
@@ -121,9 +133,34 @@ export function AssistantPanel({
     readonly plan: AssistantPlan;
     readonly label: string;
   } | null>(null);
+  // A resumed run is its own plan: its unfinished steps, not the native planner's reading of the
+  // sentence, and not a repeat of the steps that already committed.
+  const [resumedPlan, setResumedPlan] = useState<AssistantPlan | null>(null);
+  const [resumable, setResumable] = useState<AssistantCheckpoint | null>(null);
   const nativePlan = planNatively(studio, request);
-  const compiled: Result<AssistantPlan> = modelPlan ? ok(modelPlan.plan) : nativePlan;
+  const compiled: Result<AssistantPlan> = resumedPlan
+    ? ok(resumedPlan)
+    : modelPlan
+      ? ok(modelPlan.plan)
+      : nativePlan;
   const tools = toolsForStudio(studio);
+
+  useEffect(() => {
+    // A checkpoint belongs to a document and lives in localStorage, which does not exist during the
+    // server render. Read it after the first paint, and drop a record from another document rather
+    // than offering to resume a run against the wrong picture.
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      setResumable(readAssistantRun(api.doc.id));
+      setResumedPlan(null);
+      setModelPlan(null);
+      setPhase('idle');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [api.doc.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -152,6 +189,7 @@ export function AssistantPanel({
     setError(null);
     setProviderError(null);
     setModelPlan(null);
+    setResumedPlan(null);
     if (!compiled.ok) {
       setError(compiled.error.message);
       return;
@@ -208,6 +246,7 @@ export function AssistantPanel({
         setPhase('idle');
         return;
       }
+      setResumedPlan(null);
       setModelPlan({
         plan: parsed.value.plan,
         label: [parsed.value.provider.label, parsed.value.provider.model]
@@ -226,13 +265,33 @@ export function AssistantPanel({
     }
   };
 
-  const run = async (): Promise<void> => {
-    if (!compiled.ok || compiled.value.steps.length === 0) return;
+  /**
+   * Runs a plan and checkpoints it after every finished step.
+   *
+   * The checkpoint is what makes an interrupted request resumable: the edits already committed are
+   * in the document, so a later session continues from the first unfinished step instead of
+   * applying the beginning twice.
+   */
+  const execute = async (
+    planToRun: AssistantPlan,
+    checkpoint: AssistantCheckpoint | null,
+    goal: string,
+  ): Promise<void> => {
     cancel.current = false;
     pause.current = false;
     setPhase('running');
     setError(null);
     setSummary(null);
+
+    let current =
+      checkpoint ??
+      createCheckpoint({
+        studio,
+        goal,
+        plan: planToRun,
+        now: new Date().toISOString(),
+      });
+    writeAssistantRun(api.doc.id, current);
 
     const environment: AssistantEnvironment = {
       studio,
@@ -254,7 +313,7 @@ export function AssistantPanel({
       },
     };
 
-    const report: RunReport = await executePlan(compiled.value, environment, {
+    const report: RunReport = await executePlan(planToRun, environment, {
       shouldCancel: () => cancel.current,
       shouldPause: () => pause.current,
       onStep: (step, index) => {
@@ -270,6 +329,40 @@ export function AssistantPanel({
         : null,
     );
     setPhase('finished');
+
+    // Trust the final report over the stream: it is the executor's own account of what committed.
+    for (const stepReport of report.steps) {
+      if (stepReport.status === 'succeeded') {
+        current = markStepCompleted(current, stepReport.step.id, new Date().toISOString());
+      }
+    }
+    if (report.status === 'completed' || remainingSteps(current).length === 0) {
+      forgetAssistantRun(api.doc.id);
+      setResumable(null);
+      return;
+    }
+    writeAssistantRun(api.doc.id, current);
+    setResumable(current);
+  };
+
+  const run = async (): Promise<void> => {
+    if (!compiled.ok || compiled.value.steps.length === 0) return;
+    await execute(compiled.value, null, request.trim());
+  };
+
+  const resumeRun = async (): Promise<void> => {
+    if (!resumable) return;
+    const resumed = resumePlan(resumable);
+    if (!resumed.ok) {
+      forgetAssistantRun(api.doc.id);
+      setResumable(null);
+      setError(resumed.error.message);
+      return;
+    }
+    setModelPlan(null);
+    setResumedPlan(resumed.value);
+    setPhase('planned');
+    await execute(resumed.value, resumable, resumable.goal);
   };
 
   const pending = phase === 'running';
@@ -313,6 +406,46 @@ export function AssistantPanel({
         ) : null}
       </div>
 
+      {resumable && phase !== 'running' ? (
+        <InlineNote
+          tone="warning"
+          title="An unfinished run"
+          actions={
+            <div className="flex flex-wrap gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="assistant-resume"
+                onClick={() => {
+                  void resumeRun();
+                }}
+              >
+                Resume run
+              </Button>
+              <Button
+                variant="quiet"
+                size="sm"
+                data-testid="assistant-discard"
+                onClick={() => {
+                  forgetAssistantRun(api.doc.id);
+                  setResumable(null);
+                  setResumedPlan(null);
+                  setPhase('idle');
+                }}
+              >
+                Discard
+              </Button>
+            </div>
+          }
+        >
+          <p data-testid="assistant-checkpoint">
+            “{resumable.goal}” stopped after {resumable.completed.length} of{' '}
+            {resumable.plan.steps.length} steps. The finished edits are already in the document;
+            resuming runs only what is left.
+          </p>
+        </InlineNote>
+      ) : null}
+
       <label className="block space-y-1.5">
         <span className="text-2xs text-fg-muted font-medium tracking-wide uppercase">
           What should change?
@@ -331,6 +464,7 @@ export function AssistantPanel({
           onChange={(event) => {
             setRequest(event.target.value);
             setModelPlan(null);
+            setResumedPlan(null);
             setProviderError(null);
             setPhase('idle');
           }}
