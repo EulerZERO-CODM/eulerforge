@@ -28,6 +28,7 @@ import type { SceneImages } from '../workspace/use-scene-images';
 import type { WorkspaceApi } from '../workspace/workspace-api';
 import { InterchangePanel } from './interchange-panel';
 import { SvgIoPanel } from './svg-io-panel';
+import { TracePanel } from './trace-panel';
 import { VectorInspector } from './vector-inspector';
 import { VectorStage } from './vector-stage';
 import { VECTOR_TOOL_INFO, toolForKey, type VectorTool } from './vector-tools';
@@ -101,6 +102,8 @@ export function IllustrationWorkspace({
         </div>
 
         <SvgIoPanel api={api} selection={selection} />
+
+        <TracePanel api={api} />
 
         <InterchangePanel api={api} direction="to-design" selectedIds={selection.map(String)} />
       </div>

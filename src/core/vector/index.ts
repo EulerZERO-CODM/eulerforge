@@ -130,6 +130,8 @@ export {
   PEN_CLOSE_DISTANCE,
 } from './pen';
 export type { PenDraft } from './pen';
+export { traceImage, TRACE_LIMITS } from './trace';
+export type { TraceOptions, TraceRegion, TraceReport } from './trace';
 export {
   PICK_RADIUS,
   pickPathTarget,
