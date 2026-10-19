@@ -1070,8 +1070,9 @@ describe('the assistant panel', () => {
     const { session } = await mount(services, [layer]);
     await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
     vi.mocked(downloadText).mockClear();
-    // The first export is refused by the browser, so the run stops after the fill.
-    vi.mocked(downloadText).mockReturnValueOnce(false);
+    // The export is refused by the browser twice — the executor retries a recoverable download
+    // once — so the run stops after the fill with a checkpoint to resume from.
+    vi.mocked(downloadText).mockReturnValueOnce(false).mockReturnValueOnce(false);
 
     await ask('fill the selected paths with #ef4444 and export the artboard as svg');
     await user.click(screen.getByTestId('assistant-run'));
@@ -1083,6 +1084,8 @@ describe('the assistant panel', () => {
     const fills = (): number =>
       session.getState().history.filter((entry) => /fill/i.test(entry.label)).length;
     expect(fills()).toBe(1);
+    // One attempt, one retry, and no third: the retry policy permits exactly one extra attempt.
+    expect(vi.mocked(downloadText).mock.calls).toHaveLength(2);
     const stored = JSON.parse(
       window.localStorage.getItem('eulerforge.v1.assistant-runs') ?? '{}',
     ) as Record<string, { completed: string[] }>;
@@ -1095,7 +1098,8 @@ describe('the assistant panel', () => {
 
     // Only the export ran, so the fill was not applied twice and the checkpoint is gone.
     expect(fills()).toBe(1);
-    expect(vi.mocked(downloadText).mock.calls).toHaveLength(2);
+    // Only the resumed export ran; the two failed attempts belong to the first run.
+    expect(vi.mocked(downloadText).mock.calls).toHaveLength(3);
     expect(screen.queryByTestId('assistant-checkpoint')).toBeNull();
     expect(
       Object.keys(
