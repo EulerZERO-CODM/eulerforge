@@ -61,9 +61,14 @@ afterEach(async () => {
 
 function request(
   path: string,
-  init: { readonly method?: string; readonly body?: unknown; readonly cookie?: string } = {},
+  init: {
+    readonly method?: string;
+    readonly body?: unknown;
+    readonly cookie?: string;
+    readonly headers?: Readonly<Record<string, string>>;
+  } = {},
 ): Request {
-  const headers: Record<string, string> = { origin: ORIGIN };
+  const headers: Record<string, string> = { origin: ORIGIN, ...init.headers };
   if (init.body !== undefined) headers['content-type'] = 'application/json';
   if (init.cookie) headers.cookie = init.cookie;
   return new Request(`${ORIGIN}${path}`, {
@@ -226,6 +231,40 @@ describe('registration, sessions and sign-out', () => {
       await sessionGET(request('/api/auth/session', { cookie })),
     );
     expect(after.account).toBeNull();
+  });
+
+  it('marks the session cookie HttpOnly and SameSite, and Secure only behind TLS', async () => {
+    const plain = await registerPOST(
+      request('/api/auth/register', {
+        method: 'POST',
+        body: {
+          email: 'plain@example.com',
+          displayName: 'Plain',
+          password: 'correct horse battery',
+        },
+      }),
+    );
+    const plainCookie = plain.headers.get('set-cookie') ?? '';
+    expect(plainCookie).toMatch(/HttpOnly/);
+    expect(plainCookie).toMatch(/SameSite=Lax/);
+    expect(plainCookie).toMatch(/Path=\//);
+    // Served over http (local development, `npm run start` without a proxy): no Secure attribute,
+    // or the browser would refuse the cookie and sign-in would silently fail.
+    expect(plainCookie).not.toMatch(/; Secure/);
+
+    const proxied = await registerPOST(
+      request('/api/auth/register', {
+        method: 'POST',
+        body: {
+          email: 'tls@example.com',
+          displayName: 'TLS',
+          password: 'correct horse battery',
+        },
+        headers: { 'x-forwarded-proto': 'https', origin: 'https://localhost:3000' },
+      }),
+    );
+    const proxiedCookie = proxied.headers.get('set-cookie') ?? '';
+    expect(proxiedCookie, `status ${String(proxied.status)}`).toMatch(/; Secure/);
   });
 
   it('throttles repeated failed sign-ins instead of allowing a guessing loop', async () => {
@@ -462,7 +501,8 @@ describe('the document repository over HTTP', () => {
 
 describe('share links', () => {
   it('creates a link whose token is returned once and works without a session', async () => {
-    const { cookie } = await register();
+    const ada = await register();
+    const cookie = ada.cookie;
     const document = sampleDocument('doc-share', 'Shared poster');
     await documentPUT(
       request('/api/documents/doc-share', {
@@ -505,6 +545,11 @@ describe('share links', () => {
     const payload = await body<{ document: { title: string }; readOnly: boolean }>(shared);
     expect(payload.document.title).toBe('Shared poster');
     expect(payload.readOnly).toBe(true);
+    // A share link carries the document, not the owner: no account id, email or token hash.
+    const serialised = JSON.stringify(payload);
+    expect(serialised).not.toContain(ada.account.id);
+    expect(serialised).not.toContain('ownerId');
+    expect(serialised).not.toContain('tokenHash');
   });
 
   it('stops working the moment it is revoked, with the same answer as an unknown link', async () => {
