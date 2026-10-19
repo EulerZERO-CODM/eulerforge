@@ -670,8 +670,8 @@ with `polygon-clipping` being the maintained one that ships a modern entry point
 **Consequences.** Boolean operations behave predictably on the cases that break naive implementations,
 and the failure mode for the polygonal approximation is *visible* rather than silent. The cost is one
 runtime dependency in the core, a flattening step that loses curve handles inside the affected shapes,
-and output that is denser than its input. Those costs are the reason `gradients.fills` and curve-exact
-booleans stay `planned` in the studio registry.
+and output that is denser than its input. Those costs are the reason curve-exact booleans stay
+`planned` in the studio registry.
 
 ## ADR-0022 — Vector artwork crosses the Design/Illustration boundary as a translation with a report
 
@@ -947,6 +947,7 @@ path document loads unchanged apart from its version stamp.
 - A pattern is drawn as clipped primitives by the canvas painter, so a very small tile scale on a very
   large shape costs more draw calls than a real `CanvasPattern` would. The UI caps scale at 0.02 of the
   shorter side, and the painter's tile count is bounded by the shape's diagonal.
-- Flat fills and strokes remain the default and the fallback everywhere: icon-set manifests and any
-  consumer that needs one colour use `representativeColour`, which is documented as a stand-in, not a
-  render.
+- Flat fills and strokes remain the default and the fallback everywhere. `representativeColour` can
+  name a single colour for any consumer that genuinely needs one, and it is documented and tested as
+  a stand-in — the renderers never use it, because drawing a gradient as its midpoint would be a lie
+  about the file.

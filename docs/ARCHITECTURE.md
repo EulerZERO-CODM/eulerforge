@@ -65,17 +65,24 @@ The parts every studio must share. Each module is small, pure where possible, an
   that satisfies `PainterContext`. `text-layout.ts` and `measure.ts` do wrapping and alignment
   through an injected measure function. Nothing here imports React or touches a DOM: the browser
   canvas adapter lives in `src/lib/browser/canvas.ts` and is passed in as a factory (ADR-0016,
-  ADR-0019).
+  ADR-0019). Path fills and strokes may be a solid colour, a gradient or a motif pattern; the painter
+  builds a real `CanvasGradient` from the same resolved geometry the SVG writer receives (ADR-0028).
 - **`vector/`** — the framework-free path kernel: an immutable path model (contours of nodes with
   Bezier handles), bounds, transforms, flattening, arc-length sampling, fill/stroke hit-testing,
   node/handle operations, pen construction, shape generation, path-data serialisation, validation,
-  and the boolean operations that go through `polygon-clipping` (ADR-0020, ADR-0021). One module,
-  `tolerance.ts`, owns every numeric epsilon, and every fallible operation returns a `Result`.
+  and the boolean operations that go through `polygon-clipping` (ADR-0020, ADR-0021). `paint.ts`
+  describes solid, gradient and pattern paint as fractions of a shape's bounds and resolves it into
+  absolute coordinates for the painter and the writer, so neither renderer owns a second definition
+  (ADR-0028). One module, `tolerance.ts`, owns every numeric epsilon, and every fallible operation
+  returns a `Result`.
 - **`svg/`** — the SVG boundary: a deterministic serializer, a defended importer, the artwork model
   that sits between a scene and a file, the naive serializer the compact one is measured against, a
   stored-mode zip writer and the icon-set builder. It consumes the path model and never the editor.
-  The icon-set builder exports the layers it is given — the panel passes exactly the selection — and
-  reports the ones it cannot write instead of widening or silently trimming the set.
+  Gradients and patterns are written once into `<defs>` and referenced by positional id from the
+  shapes; the importer resolves only same-document references and converts absolute coordinates back
+  to bounds-relative fractions. The icon-set builder exports the layers it is given — the panel passes
+  exactly the selection — reports the ones it cannot write, and collects paint definitions once for the
+  whole sprite so every `url(#…)` in it resolves.
 - **`editor/`** — the interaction model: `selection.ts` (what is selected, never persisted),
   `commands.ts` (each edit as a label plus the patch that performs it) and `gesture.ts` (move and
   resize previews in document coordinates, resolved once on release, with snapping).
@@ -187,6 +194,10 @@ core/render/plan.ts paints path layers through the same painter the Design Studi
 core/svg/from-scene.ts turns the same geometry into an SVG file
 core/documents/interchange.ts converts the same layers for the other studio
 ```
+
+Paint is part of that one geometry: a layer's style carries an optional gradient or pattern, the
+painter resolves it against the shape's bounds, and the SVG writer resolves the same fractions against
+the same bounds, so a change of fill shows up identically on the artboard and in the file.
 
 Two boundaries are deliberate. The kernel never learns about SVG syntax or React (ADR-0020), so the
 editor, the painter and the exporter are three consumers of one geometry. And a path layer's frame is
