@@ -231,6 +231,36 @@ async function waitForPicture(page: Page): Promise<void> {
     .toBeGreaterThan(1);
 }
 
+/**
+ * Waits for the preview to *settle* on a new frame after a seek.
+ *
+ * "More than one colour" only proves that some frame has been painted, and the stage paints
+ * immediately with whatever is decoded and then repaints once the element holds the requested time.
+ * Sampling a seeked preview therefore used to race the decoder, which produced a rare comparison
+ * against the previous second. This waits for a picture that differs from the frame before the seek
+ * and is unchanged across two consecutive samples, so the comparison below is against the frame at
+ * the requested timestamp rather than an intermediate one.
+ */
+async function waitForSettledPicture(page: Page, before: readonly number[][]): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const first = await samplePreview(page, SAMPLE_POINTS);
+        await page.waitForTimeout(120);
+        const second = await samplePreview(page, SAMPLE_POINTS);
+        const changed = second.some(
+          (pixel, index) => pixel.slice(0, 3).join(',') !== before[index]?.slice(0, 3).join(','),
+        );
+        const stable = second.every(
+          (pixel, index) => pixel.slice(0, 3).join(',') === first[index]?.slice(0, 3).join(','),
+        );
+        return changed && stable;
+      },
+      { timeout: 20_000, intervals: [300] },
+    )
+    .toBe(true);
+}
+
 test.describe('Video Studio in a real browser', () => {
   test('imports a genuine WebM, places it, scrubs it and reopens it after a reload', async ({
     page,
@@ -299,8 +329,9 @@ test.describe('Video Studio in a real browser', () => {
     const height = Number(size?.[2]);
     expect(width).toBeGreaterThan(0);
 
+    const beforeSeek = await samplePreview(page, SAMPLE_POINTS);
     await seekTo(page, 0.4);
-    await waitForPicture(page);
+    await waitForSettledPicture(page, beforeSeek);
     const previewSamples = await samplePreview(page, SAMPLE_POINTS);
 
     const download = page.waitForEvent('download');
