@@ -284,6 +284,36 @@ describe('registration, sessions and sign-out', () => {
     expect(limited.headers.get('retry-after')).toMatch(/\d+/);
   });
 
+  it('limits registrations per client instead of allowing an account-creation loop', async () => {
+    for (let index = 0; index < 5; index += 1) {
+      const created = await registerPOST(
+        request('/api/auth/register', {
+          method: 'POST',
+          body: {
+            email: `person-${String(index)}@example.com`,
+            displayName: 'Ada Lovelace',
+            password: 'correct horse battery',
+          },
+        }),
+      );
+      expect(created.status).toBe(201);
+    }
+    const blocked = await registerPOST(
+      request('/api/auth/register', {
+        method: 'POST',
+        body: {
+          email: 'person-6@example.com',
+          displayName: 'Ada Lovelace',
+          password: 'correct horse battery',
+        },
+      }),
+    );
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get('retry-after')).toMatch(/\d+/);
+    const payload = (await blocked.json()) as { error: { kind: string } };
+    expect(payload.error.kind).toBe('rate-limited');
+  });
+
   it('refuses a cross-origin state-changing request even with a valid cookie', async () => {
     const { cookie } = await register();
     const response = await logoutPOST(

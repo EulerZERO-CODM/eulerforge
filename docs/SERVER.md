@@ -103,7 +103,7 @@ The server is tested by calling the **real route handlers** with real `Request` 
 temporary data directory — not by mocking fetch:
 
 ```bash
-npx vitest run src/server        # 52 tests
+npx vitest run src/server        # 53 tests
 ```
 
 They cover: cookie attributes, password hashing never storing the plaintext, duplicate-email and
