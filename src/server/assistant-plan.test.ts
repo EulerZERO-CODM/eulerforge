@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { GET, POST } from '../app/api/assistant/plan/route';
+import { assistantLimiter, GET, POST } from '../app/api/assistant/plan/route';
 import { PROVIDER_ENV } from '../core/assistant/provider';
 
 /**
@@ -60,6 +60,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  assistantLimiter.reset();
 });
 
 describe('GET /api/assistant/plan', () => {
@@ -228,5 +229,23 @@ describe('POST /api/assistant/plan', () => {
     const payload = (await response.json()) as { error: { kind: string; message: string } };
     expect(payload.error.kind).toBe('provider-unavailable');
     expect(payload.error.message).toMatch(/could not be reached/i);
+  });
+});
+
+describe('the provider endpoint’s abuse boundary', () => {
+  it('throttles a loop before it can spend provider quota', async () => {
+    // The limit is 20 per window; the 21st request is refused with an instruction, not a provider
+    // call. Requests are unconfigured, so they cost nothing here — but the limiter runs first, which
+    // is exactly the property under test.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const allowed = await post();
+      expect(allowed.status).toBe(503);
+    }
+    const limited = await post();
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get('retry-after')).toMatch(/^\d+$/);
+    const payload = (await limited.json()) as { error: { kind: string; message: string } };
+    expect(payload.error.kind).toBe('rate-limited');
+    expect(payload.error.message).toMatch(/too many attempts/i);
   });
 });

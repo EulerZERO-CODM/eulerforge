@@ -25,9 +25,12 @@ import {
 import { ASSISTANT_STUDIOS, type AssistantStudio } from '../../../../core/assistant/registry';
 import { readString } from '../../../../server/fields';
 import {
+  clientKey,
   crossOriginRequest,
   jsonResponse,
   MAX_BODY_BYTES,
+  RateLimiter,
+  rateLimitedResponse,
   readJsonBody,
 } from '../../../../server/http';
 
@@ -35,6 +38,15 @@ export const runtime = 'nodejs';
 
 /** A slow provider must not hold a request open indefinitely. */
 const PROVIDER_TIMEOUT_MS = 25_000;
+
+/**
+ * Twenty plans per ten minutes per client.
+ *
+ * This endpoint spends the operator's provider quota, so it is the one place where a loop costs real
+ * money. The limiter is in-process like the auth limiters and is documented as such (`docs/SERVER.md`);
+ * it stops a runaway tab or a naive script without pretending to be a distributed defence.
+ */
+export const assistantLimiter = new RateLimiter(20, 10 * 60_000);
 
 type AssistantFailureKind =
   | 'validation'
@@ -121,6 +133,9 @@ export async function POST(request: Request): Promise<Response> {
   if (declared !== null && Number(declared) > MAX_BODY_BYTES) {
     return failure(413, 'bad-request', 'That request is larger than this API accepts.');
   }
+  const limit = assistantLimiter.check(clientKey(request));
+  if (!limit.allowed) return rateLimitedResponse(limit.retryAfterMs);
+
   const body = await readJsonBody(request);
   if (!body.ok) return body.response;
   if (typeof body.value !== 'object' || body.value === null) {
