@@ -42,6 +42,12 @@ type StoredVectorLayer = {
         readonly nodes: readonly StoredVectorNode[];
       }[];
     };
+    readonly text?: {
+      readonly content: string;
+      readonly fontSize: number;
+      readonly startOffset: number;
+      readonly baseline: string;
+    } | null;
     readonly style: {
       readonly fill: string | null;
       readonly stroke: string | null;
@@ -362,6 +368,76 @@ test.describe('Illustration Studio', () => {
     // operation returned one of its inputs.
     expect(contour?.nodes.length).toBeGreaterThanOrEqual(8);
     await expect(page.getByTestId('boolean-report')).toContainText(/flattening curves/i);
+  });
+
+  test('lays text along the drawn path, paints it, and exports it as a real textPath', async ({
+    page,
+  }) => {
+    await createVectorDocument(page, 'Text on a path');
+    await drawPath(page, [
+      { x: 24, y: 176 },
+      { x: 128, y: 56 },
+      { x: 232, y: 176 },
+    ]);
+    const drawn = (await pathLayers(page))[0];
+    if (!drawn) throw new Error('the pen should have produced a path');
+    await selectLayer(page, drawn.id);
+
+    /** A cheap fingerprint of the artboard's pixels, used to prove the glyphs really reached it. */
+    const canvasFingerprint = async (): Promise<number> =>
+      page.getByTestId('vector-canvas').evaluate((canvas) => {
+        const element = canvas as HTMLCanvasElement;
+        const context = element.getContext('2d');
+        if (!context) return -1;
+        const { data } = context.getImageData(0, 0, element.width, element.height);
+        let total = 0;
+        for (let index = 0; index < data.length; index += 97)
+          total = (total + data[index]!) % 1_000_000_007;
+        return total;
+      });
+    const beforeTyping = await canvasFingerprint();
+
+    await page.getByTestId('text-content').fill('Along the curve');
+    await expect
+      .poll(async () => (await pathLayers(page))[0]?.vector?.text?.content)
+      .toBe('Along the curve');
+    // The run is painted on the artboard, not merely stored: the canvas must change.
+    await expect.poll(canvasFingerprint).not.toBe(beforeTyping);
+
+    await page.getByTestId('text-font-size').fill('34');
+    await page.getByTestId('text-font-size').press('Enter');
+    await page.getByTestId('text-start-offset').fill('20');
+    await page.getByTestId('text-start-offset').press('Enter');
+    await page.getByTestId('text-baseline').selectOption('below');
+    await expect.poll(async () => (await pathLayers(page))[0]?.vector?.text?.fontSize).toBe(34);
+    await expect
+      .poll(async () => (await pathLayers(page))[0]?.vector?.text?.startOffset)
+      .toBeCloseTo(0.2, 4);
+    await expect
+      .poll(async () => (await pathLayers(page))[0]?.vector?.text?.baseline)
+      .toBe('below');
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByTestId('svg-export').click(),
+    ]);
+    const downloaded = await download.path();
+    if (!downloaded) throw new Error('the SVG download produced no file');
+    const bytes = await readFile(downloaded, 'utf8');
+    expect(bytes).toMatch(/<textPath href="#text-path-\d+"/);
+    expect(bytes).toContain('>Along the curve</textPath>');
+    expect(bytes).toContain('startOffset="20%"');
+    expect(bytes).toContain('font-size="34"');
+    expect(bytes).toContain('data-forge-baseline="below"');
+
+    // Reading the file's own bytes back restores the run as editable text, not as outlines.
+    await page.getByTestId('svg-paste').fill(bytes);
+    await page.getByTestId('svg-import-paste').click();
+    await expect
+      .poll(async () =>
+        (await pathLayers(page)).some((layer) => layer.vector?.text?.content === 'Along the curve'),
+      )
+      .toBe(true);
   });
 
   test('imports a hostile SVG without executing it, and imports real artwork as editable paths', async ({
