@@ -333,7 +333,7 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     area: 'studios',
     label: 'Illustration Studio vector editor',
     description:
-      'A real vector workspace on the shared kernel: draw with the pen, place rectangles/ellipses/polygons, drag out shapes, edit nodes and Bezier handles, marquee-select, nudge and transform, set real fill/stroke/opacity/cap/join/dash, paint either slot with a linear gradient, a radial gradient or a repeating motif pattern (editable stops, direction, tile scale and rotation), lay an editable run of text along a path’s own contour (content, size, spacing, start offset, baseline side, colour and font stack, following the geometry and exported as a real <textPath>), run boolean operations, convert shapes to editable paths, import and export SVG, export an icon set from the selection (unselected, hidden and non-path layers are never packaged; anything it cannot carry is named), and hand artwork to the Design Studio and back. Every edit is one labelled undoable action, and the studio links its limitations instead of hiding them.',
+      'A real vector workspace on the shared kernel: draw with the pen, place rectangles/ellipses/polygons, drag out shapes, edit nodes and Bezier handles, marquee-select, nudge and transform, set real fill/stroke/opacity/cap/join/dash, paint either slot with a linear gradient, a radial gradient or a repeating motif pattern (editable stops, direction, tile scale and rotation), lay an editable run of text along a path’s own contour (content, size, spacing, start offset, baseline side, colour and font stack, following the geometry and exported as a real <textPath>), trace a PNG/JPEG/WebP into one editable filled path per palette colour (adjustable palette, detail and speck threshold, holes kept as inner contours, the whole trace one undoable step), run boolean operations, convert shapes to editable paths, import and export SVG, export an icon set from the selection (unselected, hidden and non-path layers are never packaged; anything it cannot carry is named), and hand artwork to the Design Studio and back. Every edit is one labelled undoable action, and the studio links its limitations instead of hiding them.',
     status: 'partial',
     verification: [
       'src/components/illustration/illustration-workspace.test.tsx',
@@ -342,11 +342,15 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
       'src/core/documents/interchange.test.ts',
       'src/core/documents/paint-schema.test.ts',
       'src/core/vector/path-text.test.ts',
+      'src/core/vector/trace.test.ts',
+      'src/core/editor/trace-commands.test.ts',
+      'src/lib/browser/image-trace.test.ts',
+      'src/components/illustration/trace-panel.test.tsx',
       'src/core/render/paint.test.ts',
       'src/core/svg/svg.test.ts',
       'src/components/create/creation-flow.test.tsx',
     ],
-    gap: 'Tracing a raster image and ungrouped multi-artboard documents are not implemented and are labelled planned in the registry. Text on a path is one run per path: there is no second run, no per-glyph editing and no font embedding, so a file opened where the chosen system stack is missing falls back to that system’s own font. Interchange uses axis-aligned frames in both studios: a rotated path is carried as rotated geometry and crosses unchanged, while a rectangle or ellipse cannot be rotated in the first place. Node editing works on one path at a time. The browser suite runs on Chromium only, so Firefox and WebKit are unverified.',
+    gap: 'Tracing is colour-region geometry, not curve fitting: boundaries are simplified staircase polygons (detail controls the tolerance), a trace is capped at 16 colours and a 512 px working copy, transparent pixels are not traced, and there is no stroke reconstruction. Ungrouped multi-artboard documents are not implemented and are labelled planned in the registry. Text on a path is one run per path: there is no second run, no per-glyph editing and no font embedding, so a file opened where the chosen system stack is missing falls back to that system’s own font. Interchange uses axis-aligned frames in both studios: a rotated path is carried as rotated geometry and crosses unchanged, while a rectangle or ellipse cannot be rotated in the first place. Node editing works on one path at a time. The browser suite runs on Chromium only, so Firefox and WebKit are unverified.',
   },
   {
     id: 'studios.photo',

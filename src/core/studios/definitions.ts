@@ -346,7 +346,7 @@ export const ILLUSTRATION_STUDIO: StudioDefinition = {
   accent: 'violet',
   availability: 'available',
   maturityNote:
-    'A working vector workspace: pen and shape tools, node and handle editing with keyboard access, fill/stroke/dash/cap/join controls, gradient and pattern paint for either slot, union/subtract/intersect/exclude, SVG import and export, icon-set export, and interchange with the Design Studio. Not implemented: blur and image filters, per-node pressure or variable-width strokes, text outlining, auto-trace, and rotation of a whole shape (the document model has no rotation).',
+    'A working vector workspace: pen and shape tools, node and handle editing with keyboard access, fill/stroke/dash/cap/join controls, gradient and pattern paint for either slot, union/subtract/intersect/exclude, SVG import and export, icon-set export, interchange with the Design Studio, and image tracing that turns a PNG, JPEG or WebP into editable filled paths. Not implemented: blur and image filters, per-node pressure or variable-width strokes, text outlining, multi-artboard documents, and rotation of a whole shape (the document model has no rotation). Tracing is colour-region geometry, not curve fitting: expect staircase edges at low detail.',
   produces: [
     'Icons and pictograms',
     'Logos and marks',
@@ -426,10 +426,11 @@ export const ILLUSTRATION_STUDIO: StudioDefinition = {
         'Rectangles and ellipses become equivalent paths in both directions, and layers that cannot make the trip are listed by name instead of being dropped.',
     },
     {
-      id: 'trace.exploratory',
-      label: 'Auto-trace',
-      status: 'exploratory',
-      detail: 'Converting bitmap art to paths; quality and tooling are unresolved.',
+      id: 'trace.image',
+      label: 'Image tracing',
+      status: 'available',
+      detail:
+        'Choose a PNG, JPEG or WebP and get one filled, editable path layer per palette colour, with holes kept as inner contours and specks below a chosen area dropped. Palette size (1–16), detail and the minimum area are adjustable, the trace lands fitted and centred on the canvas, and the whole trace is one undoable step. Boundaries are simplified staircase polygons, not fitted Bézier curves, and transparent pixels are not traced.',
     },
   ],
   engine: {

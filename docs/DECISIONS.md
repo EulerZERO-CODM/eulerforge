@@ -1099,3 +1099,39 @@ multi-turn revision; a plan is a single request. There is no image or video gene
 product has no such capability, and no tool can publish or share content, so there is nothing for the
 assistant to confirm before an external action. Motion and Video are refusal surfaces until they have
 native tools.
+
+## ADR-0032 — Tracing produces editable geometry, and says what it approximated
+
+**Decision.** Image tracing is a *vector* feature with a vector result: one filled path layer per
+palette colour, whose contours are the boundaries between that colour and everything else. It is not
+an import that embeds the bitmap, and not an autotrace that returns a single opaque blob: the output
+is ordinary path layers, so every node can be edited, the fill can be changed, the layer can be
+reordered and the export path is the one the studio already had.
+
+**Where the code lives.** The algorithm is `src/core/vector/trace.ts` — pure, framework-free, no DOM,
+tested in Node against synthetic RGBA buffers with known geometry. The browser work (file, decode,
+scratch canvas, pixel readback) is `src/lib/browser/image-trace.ts`, and the command that turns a
+report into layers is `src/core/editor/trace-commands.ts`. The split is the same one the rest of the
+application uses (ADR-0006, ADR-0020): the interesting arithmetic is testable without a browser, and
+the browser adapter is the only part that needs one.
+
+**The algorithm, and why these choices.** Box-average down to a 512 px working edge, median-cut the
+palette, assign each pixel to its nearest colour, walk the pixel lattice collecting every inside/outside
+edge, chain the edges into closed loops, simplify each loop, scale back to source coordinates. Holes
+are inner contours filled with the **even-odd** rule — the one thing that makes a ring a ring rather
+than a disc. Determinism is a requirement, not a nicety: the same pixels must trace to the same paths,
+so tie-breaks at diagonal pinches are fixed rather than incidental.
+
+Simplification is Douglas–Peucker **between detected corners**, not plain Douglas–Peucker over the
+loop. Plain recursion started on an arbitrary mid-edge point can shave a rectangle's corner into a
+skewed quadrilateral, which the tests caught: a traced square came back with an area 10 px² short.
+Corners are found with a wide window so the 90° steps of a pixel staircase average out, and the corner
+point itself is the index furthest from its window's chord.
+
+**What it refuses to pretend.** Boundaries are staircase polygons, not fitted Bézier curves, so a
+circle traced at high detail is a many-sided polygon; the panel says so and the detail slider is the
+honest control. The tracer works on a 512 px copy (a 12 MP photograph would otherwise cost 48 MB of
+pixel buffer for detail that is then discarded), so fine texture becomes colour regions, not detail.
+There is no stroke reconstruction: a line drawing becomes filled shapes. Transparent pixels are never
+traced, so a cut-out subject arrives without its background. The palette is capped at 16 colours and a
+single region at 4,000 nodes, and both are refusals with a reason rather than a silent truncation.

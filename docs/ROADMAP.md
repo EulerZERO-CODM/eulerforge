@@ -154,22 +154,34 @@ motifs; arbitrary pattern content, gradient `href` inheritance, `spreadMethod` a
 gradients are reported as approximated. Text, filters, masks, clip paths and CSS style sheets are not
 importable; they are reported, not dropped silently.
 
-### Illustration Studio workspace — partial
+### Illustration Studio workspace — partial (tracing done)
 
 `/studios/illustration` is a real, `available` studio with a working editor
 (`src/components/illustration/**`): pen drawing, shapes, node/handle editing, marquee and keyboard
 nudge, fill/stroke/opacity/cap/join/dash, gradient and pattern paint for either slot (editable stops,
 direction, motif, tile scale, background and rotation), boolean combination, shape-to-path conversion,
 SVG import and export, selection-scoped icon-set zip export (only the selected visible paths, with
-anything it cannot carry named), Design ⇄ Illustration interchange with a per-layer report, and text
+anything it cannot carry named), Design ⇄ Illustration interchange with a per-layer report, text
 laid along a path — one editable run per path, with content, size, letter spacing, start offset,
 baseline side, colour and font stack stored as parameters and drawn along the contour
-(`src/core/vector/path-text.ts`, ADR-0030). Every edit is one labelled history entry; paint changes and
+(`src/core/vector/path-text.ts`, ADR-0030) — and image tracing.
+
+Tracing (`src/core/vector/trace.ts`, `src/components/illustration/trace-panel.tsx`, ADR-0032) reads a
+PNG, JPEG or WebP, builds a median-cut palette, assigns every pixel to a palette colour, chains the
+pixel-lattice boundaries into closed loops, simplifies them and emits one filled path layer per
+colour. Holes stay inner contours and are filled with the even-odd rule; regions below a chosen area
+are dropped and counted in the panel; the trace is fitted and centred on the canvas and applied as a
+single undoable step. Palette (1–16), detail (0–100) and the speck threshold are the user's controls.
+The honest limits: boundaries are staircase polygons rather than fitted Bézier curves, the tracer
+walks a 512 px working copy of a capped 1024 px scratch decode, and transparent pixels are not traced
+at all, so a cut-out subject arrives without its background.
+
+Every edit is one labelled history entry; paint changes and
 text settings are clamped to the schema's documented ranges before they reach the document, and the
 SVG boundary writes the run as a real `<text>`/`<textPath>` pair and reads that same form back.
 
-Still missing, and therefore still labelled planned in the registry: tracing a raster image,
-multi-artboard documents, and curve-exact booleans. Text on a path is one run per path, drawn with a
+Still missing, and therefore still labelled planned in the registry: multi-artboard documents and
+curve-exact booleans. Text on a path is one run per path, drawn with a
 system font stack — no per-glyph editing, second run or font embedding, so a document opened where a
 stack is unavailable falls back to the system's own font. Interchange carries rotated geometry unchanged, because rotation lives in a path's nodes rather than
 in a frame property; a rectangle or ellipse cannot be rotated in either studio. Icon sets contain path layers only: a selected rectangle,
