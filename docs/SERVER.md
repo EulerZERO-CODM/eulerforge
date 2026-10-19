@@ -85,6 +85,9 @@ credential is read from the environment anywhere in `src/server/**`.
 ```
 
 Ids from the client are validated against `^[A-Za-z0-9._-]{1,120}$` before they become file names.
+The directory is created `0700` and every JSON file is written `0600`, because `accounts.json` holds
+password hashes and `sessions.json` holds token digests; the files are replaced atomically, so a
+reader never sees a half-written account list.
 
 ### Migrations
 
@@ -100,7 +103,7 @@ The server is tested by calling the **real route handlers** with real `Request` 
 temporary data directory — not by mocking fetch:
 
 ```bash
-npx vitest run src/server        # 50 tests
+npx vitest run src/server        # 51 tests
 ```
 
 They cover: cookie attributes, password hashing never storing the plaintext, duplicate-email and

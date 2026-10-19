@@ -8,7 +8,7 @@
  * "what happens when two writers meet" is a property that has to be tested rather than assumed.
  */
 
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -88,6 +88,22 @@ async function share(ownerId: string, documentId: string, ttlMs: number | null):
   if (!created.ok) throw new Error(created.error.message);
   return created.value.id;
 }
+
+describe('the data directory', () => {
+  it('keeps account and session files readable only by their owner', async () => {
+    await accountOf('ada@example.com');
+    const accounts = await stat(join(directory, 'accounts.json'));
+    const sessions = await stat(join(directory, 'sessions.json'));
+    // POSIX modes; Windows does not model them, and the store is not documented for it.
+    if (process.platform !== 'win32') {
+      expect(accounts.mode & 0o777).toBe(0o600);
+      expect(sessions.mode & 0o777).toBe(0o600);
+    }
+    // The files exist where the docs say, and no credential is stored in plaintext.
+    const raw = await readFile(join(directory, 'accounts.json'), 'utf8');
+    expect(raw).not.toContain('correct-horse');
+  });
+});
 
 describe('documents in the store', () => {
   it('refuses to overwrite another account’s document, and does not reveal it exists', async () => {

@@ -237,7 +237,7 @@ export class ForgeStore {
   /** Creates the directory, writes or upgrades metadata and reconciles the document index. */
   public async init(): Promise<StoreResult<void>> {
     try {
-      await mkdir(join(this.dataDir, 'documents'), { recursive: true });
+      await mkdir(join(this.dataDir, 'documents'), { recursive: true, mode: 0o700 });
       const metaPath = join(this.dataDir, 'meta.json');
       const meta = await this.readJson<Meta>(metaPath);
       if (!meta) {
@@ -727,7 +727,12 @@ export class ForgeStore {
 
   private async writeJson(path: string, value: unknown): Promise<void> {
     const temporary = `${path}.${String(randomBytes(6).toString('hex'))}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    // 0600: accounts.json holds password hashes and sessions.json token digests. The store is meant
+    // for one host, but it should not hand them to every other local account either.
+    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
     await rename(temporary, path);
   }
 
