@@ -234,11 +234,18 @@ mask, measured from the unadjusted source and unioned with painted strokes befor
 which downloads the PNG, re-imports it and asserts its pixels.
 
 Still missing, and therefore still labelled partial or planned: subject selection and subtractive
-ranges, multiple image layers, blend modes, curves, EXIF orientation, ICC/gamma-aware output, tiling,
-and the roadmap's 12 MP / 16 ms measurement — the working copy cap means a 12 MP
-document never reaches the renderer, and CI renders through SwiftShader rather than reference GPU
-hardware. Preview renders are capped at 1280 px so interaction stays responsive; export re-renders
-once at the stored size.
+ranges, multiple image layers, blend modes, curves, EXIF orientation, ICC/gamma-aware output and
+tiling.
+
+The 12 MP / 16 ms target has now been measured and **is not met on the CPU reference path**: at
+4000 × 3000, one adjustment takes 1.09 s, four take 1.83 s and twelve take 5.30 s (median of three
+passes; Node v22.22.3, 2 vCPU Xeon, 2026-10-19 — `FORGE_BENCH=1 npx vitest run
+src/core/photo/pipeline.bench.test.ts`, table in `docs/PERFORMANCE.md` §8). The design answers that
+honestly instead of hiding it: thumbnails/previews render at 1280 px, the stored working copy is
+capped at 2048 px, and export renders once at that size. The GPU path that a real user gets with
+WebGL2 has no 12 MP timing here because this environment cannot start a browser; CI renders through
+SwiftShader rather than reference GPU hardware. Tiling would bound memory but not the per-pixel cost,
+so it stays planned rather than being added to flatter the number.
 
 ### Phase 5 — Motion Studio
 
@@ -306,6 +313,10 @@ directory, the schema version, the tests and the deployment steps.
   repository-authored sample records — a real API, not a stock library.
 - **Isolation.** Another account's document, share or session is `not-found`, and the authorization
   boundaries have their own tests, including cross-account reads, writes and deletions.
+- **Deployment honesty.** A serverless host has no durable filesystem, so the account routes answer
+  `503` with an explanation instead of writing to a directory that disappears; local-first editing is
+  unaffected. `docs/SERVER.md` records the escape hatch (`FORGE_DATA_DIR` on a volume) and why it is
+  not a database.
 
 Still planned, and labelled so in the ledger and the studio pages: real-time collaboration and
 presence; a database adapter for more than one process; email verification, password reset, OAuth and

@@ -21,6 +21,28 @@ export function serverDataDir(): string {
   return overrideDirectory ?? process.env.FORGE_DATA_DIR ?? join(process.cwd(), '.data');
 }
 
+/**
+ * Explains why the file store cannot be used on a serverless platform, or `null` when it can.
+ *
+ * A serverless deployment (Vercel and friends) gives each invocation a fresh, mostly read-only
+ * filesystem. Writing accounts and documents there would look like it worked until the instance was
+ * recycled — the worst kind of data loss, because the interface would have promised a save. The
+ * account server is therefore *explicitly unavailable* on such a host unless the operator points
+ * `FORGE_DATA_DIR` at a real persistent volume; the app itself stays fully local-first either way.
+ */
+export function serverlessStorageProblem(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string | null {
+  const serverless = env.VERCEL !== undefined || env.AWS_LAMBDA_FUNCTION_NAME !== undefined;
+  if (!serverless) return null;
+  if (env.FORGE_DATA_DIR !== undefined && env.FORGE_DATA_DIR.trim().length > 0) return null;
+  return (
+    'Accounts and cloud documents are unavailable on this deployment: its filesystem is not ' +
+    'persistent. Everything else works and stays in this browser. To enable accounts, run the ' +
+    'server on a host with a persistent volume and set FORGE_DATA_DIR to it (docs/SERVER.md).'
+  );
+}
+
 /** Test-only seam: point the API at a temporary directory and forget any cached store. */
 export function setServerDataDirForTests(directory: string | null): void {
   overrideDirectory = directory;
@@ -32,6 +54,10 @@ export function getStore(): Promise<StoreResult<ForgeStore>> {
   const cached = stores.get(directory);
   if (cached) return cached;
   const created = (async (): Promise<StoreResult<ForgeStore>> => {
+    const problem = overrideDirectory === null ? serverlessStorageProblem() : null;
+    if (problem !== null) {
+      return { ok: false, error: { kind: 'unavailable', message: problem } };
+    }
     const store = new ForgeStore({ dataDir: directory });
     const initialised = await store.init();
     if (!initialised.ok) return initialised;

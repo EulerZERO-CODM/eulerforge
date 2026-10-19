@@ -614,15 +614,17 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     area: 'platform',
     label: 'Accounts, sessions and share links',
     description:
-      'Registration and sign-in with scrypt-hashed passwords and opaque session tokens in HttpOnly cookies, profile rename, password change that revokes other sessions, account deletion that cascades to documents and share links, and revocable read-only share links. There is no billing, by explicit product decision.',
+      'Registration and sign-in with scrypt-hashed passwords and opaque session tokens in HttpOnly cookies, profile rename, password change that revokes other sessions, account deletion that cascades to documents and share links, and revocable read-only share links. The store is a single-process JSON directory; a serverless host answers 503 with an explanation instead of pretending its filesystem is durable. There is no billing, by explicit product decision.',
     status: 'partial',
     verification: [
       'src/server/passwords.ts',
       'src/server/sessions.ts',
       'src/server/routes.test.ts',
+      'src/server/store.test.ts',
+      'src/server/runtime.test.ts',
       'src/components/account/account-panel.test.tsx',
     ],
-    gap: 'No email verification, password reset, OAuth, multi-factor authentication or team roles; rate limiting is in-process, so it does not survive a restart or span instances. Billing is not implemented and is not planned.',
+    gap: 'No email verification, password reset, OAuth, multi-factor authentication or team roles; rate limiting is in-process, so it does not survive a restart or span instances. Storage is a one-process JSON directory with no database adapter, so a serverless deployment leaves accounts unavailable by design. Billing is not implemented and is not planned.',
   },
 ] as const;
 

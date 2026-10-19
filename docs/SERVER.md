@@ -100,7 +100,7 @@ The server is tested by calling the **real route handlers** with real `Request` 
 temporary data directory — not by mocking fetch:
 
 ```bash
-npx vitest run src/server        # 25 tests
+npx vitest run src/server        # 49 tests
 ```
 
 They cover: cookie attributes, password hashing never storing the plaintext, duplicate-email and
@@ -131,6 +131,20 @@ To run it:
 5. Back up by copying the data directory while the server is idle. Restore by putting it back; the
    schema version decides whether the build accepts it.
 
+### Serverless platforms (Vercel, Lambda)
+
+The file store needs a filesystem that outlives the request, and a serverless platform does not have
+one. On a deployment that identifies itself as serverless (`VERCEL` or `AWS_LAMBDA_FUNCTION_NAME`),
+the routes answer **503** with a sentence explaining that accounts and cloud documents are
+unavailable, rather than writing to an ephemeral directory and letting a later request discover the
+data vanished. Nothing else changes: the studios, local saving, reopening and exporting stay
+browser-local and work without the server, which is the product's default state.
+
+An operator who mounts real persistent storage can override the refusal by setting `FORGE_DATA_DIR`
+to it. A single-process JSON store still needs exactly one writer, so this is a deliberate escape
+hatch for a self-hosted container with a volume — not a recommendation for a horizontally scaled
+deployment. A database adapter remains unimplemented and unclaimed.
+
 Not implemented, and not claimed: multiple instances, a real database, email delivery (verification,
 password reset), OAuth, multi-factor authentication, team roles, real-time collaboration, presence,
 billing or payments. The learn/Learning hub, studios and exports do not need any of it.
@@ -138,8 +152,9 @@ billing or payments. The learn/Learning hub, studios and exports do not need any
 ## Threat model and limits
 
 - **Rate limiting is in-process.** Ten failed sign-ins per client+email per ten minutes, five
-  registrations per client per hour. It stops a scripted loop against one instance; it does not
-  survive a restart and does not coordinate across instances.
+  registrations per client per hour, and twenty assistant plans per client per ten minutes — the
+  planner is the one route that spends the operator's model quota. It stops a scripted loop against
+  one instance; it does not survive a restart and does not coordinate across instances.
 - **No email verification.** Anyone who can reach the endpoint can register an address they do not
   own. That is acceptable for a self-hosted tool and is written down rather than implied.
 - **Share links are bearer capabilities.** Anyone with the link can read the saved snapshot until it
