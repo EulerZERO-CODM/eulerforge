@@ -383,9 +383,10 @@ export function AssistantPanel({
           {provider?.configured ? (
             <>
               Model-assisted planning is available through {provider.provider}
-              {provider.model ? ` (${provider.model})` : ''}. The credential stays on the server,
-              and every proposed step still runs as a typed tool call through this studio’s
-              registry.
+              {provider.model ? ` (${provider.model})` : ''}. “Plan with a model” sends your
+              sentence and the document’s title, type, size, layer count and selection count to that
+              service. The credential stays on the server, and every proposed step still runs as a
+              typed tool call through this studio’s registry.
             </>
           ) : (
             <>

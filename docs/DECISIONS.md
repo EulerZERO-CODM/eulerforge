@@ -1058,3 +1058,44 @@ nothing: a path without `text` loads with the field absent or `null`, both of wh
 (the three stacks are the platform's own); no per-glyph editing, justification, or text on both sides
 of a line at once; content is capped at 240 characters, size at 4–512 units and spacing at
 −20–200 units. Drawing text *as* outline geometry is a different feature and remains planned.
+
+## ADR-0031 — A model may plan, but only the registry may execute
+
+**Decision.** The assistant has one execution path. A plan is a list of typed `ToolCall`s; a plan is
+produced either by the deterministic native planner or by a model behind `/api/assistant/plan`, and
+the executor validates and applies it identically. Nothing a model writes can reach a document except
+through a tool in `src/core/assistant/registry.ts`, and no tool can run code the model supplied.
+
+**The credential lives on the server.** A deployment enables model-assisted planning with
+`ASSISTANT_PROVIDER_URL`, `ASSISTANT_PROVIDER_KEY` and `ASSISTANT_PROVIDER_MODEL`. The route reads
+them, calls an OpenAI-compatible chat-completions endpoint, and returns a validated plan. `GET`
+publishes a label, a model name and a reason — never the key and never the endpoint. Provider error
+bodies are not forwarded, because a provider can echo the prompt; the user gets a sentence and the
+operator gets the HTTP status. A response with an unknown tool, a tool from another studio, a tool this
+build marks unavailable, an unknown or out-of-range argument, more than 32 steps, or an empty plan is
+rejected at the boundary with the offending step named. The browser checks the route's answer again
+(`readProviderPlanResponse`) and the executor validates once more, because a plan is data that has
+crossed a network.
+
+**Absence is the default, not a failure.** With no variables set, the native planner is the only
+planner: it understands a documented vocabulary, refuses everything else with alternatives, and the
+panel says that no model is configured. Editing never depends on a provider, and no test in this
+repository has been run against a real model or key.
+
+**A run is checkpointed, not replayed.** After each step the browser stores the goal, the plan and the
+ids that finished, under `eulerforge.v1.assistant-runs` and one record per document. It stores no
+document, no result and no credential. Resuming rebuilds a plan from the unfinished steps and rechecks
+it against the registry, so an interrupted run continues from the first unfinished step rather than
+applying the beginning twice; a record from another version, another studio or a corrupt entry is
+dropped. The checkpoint is removed when the run completes.
+
+**Retries are limited to failures that declare themselves recoverable.** A step that fails with
+`retryable: true` (currently only an export the browser refused transiently) gets exactly one more
+attempt and the step says it was retried. Validation failures, refusals and deterministic tool errors
+are never retried: repeating them would only delay the message the user needs.
+
+**Deliberately absent.** One wire format is implemented, with no streaming, no tool-calling API and no
+multi-turn revision; a plan is a single request. There is no image or video generation tool because the
+product has no such capability, and no tool can publish or share content, so there is nothing for the
+assistant to confirm before an external action. Motion and Video are refusal surfaces until they have
+native tools.

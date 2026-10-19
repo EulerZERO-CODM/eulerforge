@@ -14,7 +14,7 @@ import type { Layer } from '../documents/layer-types';
 import type { ForgeDocument } from '../documents/types';
 import type { SceneCommand } from '../editor/commands';
 import { brand } from '../types/brand';
-import { ok } from '../result';
+import { err, forgeError, ok } from '../result';
 import {
   ASSISTANT_TOOLS,
   capabilitySummary,
@@ -505,6 +505,47 @@ describe('the executor', () => {
     );
     expect(result.status).toBe('failed');
     expect(result.steps[0]?.error).toMatch(/empty file/i);
+  });
+
+  it('retries a recoverable export failure once, and says that it did', async () => {
+    let calls = 0;
+    const environment = host(photoDocument(), {
+      download: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return err(
+            forgeError('unknown', 'The browser refused the download.', { retryable: true }),
+          );
+        }
+        return ok({ fileName: 'retried.png', bytes: 2048 });
+      },
+    });
+    const result = await executePlan(
+      plan([{ id: 's1', tool: 'photo.export', args: { format: 'png' } }]),
+      environment,
+    );
+    expect(result.status).toBe('completed');
+    expect(calls).toBe(2);
+    expect(result.steps[0]?.detail).toMatch(/retried once/i);
+    expect(result.files[0]?.fileName).toBe('retried.png');
+  });
+
+  it('does not retry a failure that is not recoverable', async () => {
+    let calls = 0;
+    const environment = host(photoDocument(), {
+      download: async () => {
+        calls += 1;
+        return err(
+          forgeError('unsupported', 'This browser cannot encode PNG.', { retryable: false }),
+        );
+      },
+    });
+    const result = await executePlan(
+      plan([{ id: 's1', tool: 'photo.export', args: { format: 'png' } }]),
+      environment,
+    );
+    expect(result.status).toBe('failed');
+    expect(calls).toBe(1);
   });
 
   it('refuses a plan that belongs to another studio, and one that does not validate', async () => {

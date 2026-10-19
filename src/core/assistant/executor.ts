@@ -80,6 +80,9 @@ export type RunOptions = {
   readonly onStep?: (report: StepReport, index: number) => void;
 };
 
+/** One retry for a failure the error itself calls retryable; nothing more. */
+const MAX_DOWNLOAD_ATTEMPTS = 2;
+
 export function planIssues(plan: AssistantPlan): readonly string[] {
   const checked = checkPlan(plan);
   if (!checked.ok) return [checked.error.message];
@@ -214,8 +217,16 @@ export async function executePlan(
     }
     if (applied) changed += 1;
 
+    let attempts = 1;
     if (outcome.value.download) {
-      const produced = await environment.download(outcome.value.download, environment.current());
+      let produced = await environment.download(outcome.value.download, environment.current());
+      // A failure the exporter itself marks retryable (a transient refusal, not a refusal of the
+      // format) gets exactly one more attempt. Deterministic failures are not retried, because
+      // repeating them would only waste the user's time and hide the real message.
+      while (!produced.ok && produced.error.retryable && attempts < MAX_DOWNLOAD_ATTEMPTS) {
+        attempts += 1;
+        produced = await environment.download(outcome.value.download, environment.current());
+      }
       if (!produced.ok) return fail(produced.error.message);
       if (produced.value.bytes <= 0) return fail('The exporter produced an empty file.');
       files.push({
@@ -235,7 +246,10 @@ export async function executePlan(
     reports[index] = {
       step,
       status: 'succeeded',
-      detail: outcome.value.detail,
+      detail:
+        attempts > 1
+          ? `${outcome.value.detail} Retried once after a recoverable failure.`
+          : outcome.value.detail,
       inspection,
     };
     options.onStep?.(reports[index]!, index);

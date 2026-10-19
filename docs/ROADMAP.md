@@ -182,14 +182,29 @@ The browser suite is Chromium only.
 design, plus motion and video entries that are explicitly `unavailable`), a deterministic native
 planner, and an executor that applies the same document commands, history and exporters the interface
 uses. A step is only successful when its tool reads the result back from the document; a failure stops
-the line and marks the rest skipped; pause and cancel are checked between steps. The panel in the
-Illustration Studio shows the plan before it runs, the status and inspection of every step, the
-refusals with reasons and alternatives, and an undo that goes through the studio's own history.
+the line and marks the rest skipped; pause and cancel are checked between steps. The panel shows the
+plan before it runs, the status and inspection of every step, the refusals with reasons and
+alternatives, and an undo that goes through the studio's own history.
 
-This build configures no model. The panel says so, the planner refuses requests outside its documented
-vocabulary, and nothing in the registry claims to be AI-powered. The provider-facing tool catalogue is
-generated from the registry, but no adapter or credential route exists yet, the panel is mounted only
-in Illustration, and runs are not resumable across reloads.
+A run is a first-class object. Every finished step is checkpointed in this browser under its own key,
+an interrupted request offers “Resume run” and continues from the first unfinished step instead of
+applying the beginning twice, and a recoverable export failure is retried once and says that it was.
+The panel is mounted in Photo, Illustration and Design. Motion and Video show a refusal surface that
+names the missing tool (`motion.add_keyframe`, `video.trim`) and the controls that do work, rather than
+a request field whose plans could only fail.
+
+A deployment may configure an OpenAI-compatible chat endpoint with `ASSISTANT_PROVIDER_URL`,
+`ASSISTANT_PROVIDER_KEY` and `ASSISTANT_PROVIDER_MODEL`. The browser posts a goal and a six-field
+document summary to `/api/assistant/plan`; the server holds the credential, asks the model for a JSON
+plan and validates every step against the registry before returning it. Without those variables the
+native planner is the only planner, and the panel says so. The repository's own tests stub the
+provider: **nothing in this build invokes a real model**, no generation tool exists in the registry,
+and no plan can publish or share anything.
+
+Still missing: only one wire format (OpenAI-compatible chat completions) has an adapter; there is no
+image or video generation capability to integrate; the before/after comparison is the studio's own
+canvas and history rather than an assistant-specific view; and motion and video remain uneditable by
+the assistant.
 
 ### Phase 4 — Raster engine and Photo Studio
 
