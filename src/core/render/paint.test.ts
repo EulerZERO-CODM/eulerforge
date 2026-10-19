@@ -6,7 +6,14 @@ import { createRecordingContext, STUB_IMAGE } from '../../testing/render';
 import { createRect } from '../documents/geometry';
 import { defaultShapeSettings, defaultTextSettings } from '../documents/layer-defaults';
 import { rectanglePath } from '../vector/shapes';
-import { normaliseVectorStyle, type VectorStyle } from '../vector';
+import {
+  createContour,
+  createNode,
+  createPath,
+  normaliseVectorStyle,
+  type VectorStyle,
+} from '../vector';
+import { normalisePathText, type PathText } from '../documents/layer-types';
 
 function imageOp(overrides: Partial<ImageOp> = {}): ImageOp {
   return {
@@ -301,6 +308,69 @@ describe('image placement', () => {
   });
 });
 
+describe('paintPath text on a path', () => {
+  function textPathOp(text: Partial<PathText>): PathOp {
+    return {
+      kind: 'path',
+      layerId: 'lyr-text-path',
+      layerName: 'Arc',
+      frame: createRect(20, 40, 200, 1),
+      path: createPath([
+        createContour([createNode({ x: 20, y: 40 }), createNode({ x: 220, y: 40 })], false),
+      ]),
+      style: normaliseVectorStyle({ fill: null, stroke: null }),
+      text: normalisePathText({
+        content: 'ABC',
+        fontSize: 20,
+        letterSpacing: 0,
+        startOffset: 0,
+        baseline: 'above',
+        colour: '#ff8800',
+        fontStackId: 'sans',
+        ...text,
+      }),
+      opacity: 1,
+    };
+  }
+
+  it('draws one glyph per character, centred on its own advance', () => {
+    const { context, calls } = createRecordingContext();
+    paintPlan(context, planOf([textPathOp({})]));
+    const drawn = calls.filter((call) => call.op === 'fillText');
+    expect(drawn.map((call) => call.args[0])).toEqual(['A', 'B', 'C']);
+    const translates = calls
+      .filter((call) => call.op === 'translate')
+      .map((call) => call.args as [number, number]);
+    // Each glyph translates to its anchor and then by the baseline shift (zero for "above"):
+    // ten units per glyph, so the anchors are 25, 35 and 45 on a line that starts at x = 20.
+    expect(translates[0]).toEqual([25, 40]);
+    expect(translates[2]).toEqual([35, 40]);
+    expect(translates[4]).toEqual([45, 40]);
+    expect(calls.some((call) => call.op === 'rotate' && call.args[0] === 0)).toBe(true);
+  });
+
+  it('paints the text even when the path itself has no fill or stroke', () => {
+    const { context, calls } = createRecordingContext();
+    paintPlan(context, planOf([textPathOp({})]));
+    expect(calls.filter((call) => call.op === 'fillText')).toHaveLength(3);
+    expect(calls.some((call) => call.op === 'fill')).toBe(false);
+  });
+
+  it('moves the baseline below the line for the below mode', () => {
+    const { context, calls } = createRecordingContext();
+    paintPlan(context, planOf([textPathOp({ baseline: 'below' })]));
+    const secondTranslate = calls.filter((call) => call.op === 'translate')[1];
+    expect(secondTranslate?.args[1]).toBeCloseTo(20 * 0.7, 6);
+  });
+
+  it('draws only the glyphs that fit, without reporting success for the rest', () => {
+    const { context, calls } = createRecordingContext();
+    paintPlan(context, planOf([textPathOp({ content: 'A'.repeat(30) })]));
+    // The line is 200 units long and each glyph is ten, so exactly twenty are painted.
+    expect(calls.filter((call) => call.op === 'fillText')).toHaveLength(20);
+  });
+});
+
 describe('textLineOrigin', () => {
   it('mirrors the painter positioning for the selection overlay', () => {
     const op: TextOp = {
@@ -329,6 +399,7 @@ describe('paintPath with gradients and patterns', () => {
       frame: createRect(20, 40, 100, 50),
       path: rectanglePath(box),
       style: normaliseVectorStyle({ fill: null, ...style }),
+      text: null,
       opacity: 1,
     };
   }

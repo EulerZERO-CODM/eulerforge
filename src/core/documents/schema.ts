@@ -27,6 +27,7 @@ import type {
   ImageLayer,
   Layer,
   PathLayer,
+  PathText,
   RectLayer,
   Scene,
   TextLayer,
@@ -42,6 +43,8 @@ import {
   MAX_LAYER_SIZE,
   MAX_TEXT_LENGTH,
   MIN_LAYER_SIZE,
+  PATH_TEXT_BASELINES,
+  PATH_TEXT_LIMITS,
   TEXT_ALIGNMENTS,
 } from './layer-types';
 import type {
@@ -341,6 +344,29 @@ export const vectorStyleSchema = z.object({
     .readonly(),
 }) satisfies z.ZodType<VectorStyle>;
 
+/**
+ * Text laid along a path's contour.
+ *
+ * Validated as strictly as any other document field: a stored font size of 10^9 or a colour that is
+ * not a hex value is a corrupt document, not a creative choice, and the renderer must never have to
+ * guess what to draw.
+ */
+export const pathTextSchema = z
+  .object({
+    content: z.string().max(PATH_TEXT_LIMITS.maxContentLength),
+    fontSize: finiteNumber('fontSize')
+      .min(PATH_TEXT_LIMITS.minFontSize)
+      .max(PATH_TEXT_LIMITS.maxFontSize),
+    letterSpacing: finiteNumber('letterSpacing')
+      .min(PATH_TEXT_LIMITS.minLetterSpacing)
+      .max(PATH_TEXT_LIMITS.maxLetterSpacing),
+    startOffset: finiteNumber('startOffset').min(0).max(1),
+    baseline: z.enum(PATH_TEXT_BASELINES),
+    colour: hexColorSchema,
+    fontStackId: z.enum(FONT_STACKS),
+  })
+  .readonly() satisfies z.ZodType<PathText>;
+
 /** A path layer's frame may legitimately be degenerate: a straight line is one pixel tall? No — zero. */
 export const pathLayerFrameSchema = z.object({
   x: finiteNumber('x').min(-MAX_FRAME_COORDINATE).max(MAX_FRAME_COORDINATE),
@@ -367,7 +393,11 @@ export const pathLayerSchema = z
       .max(1, 'opacity cannot exceed 1'),
     frame: pathLayerFrameSchema,
     type: z.literal('path'),
-    vector: z.object({ path: vectorPathSchema, style: vectorStyleSchema }),
+    vector: z.object({
+      path: vectorPathSchema,
+      style: vectorStyleSchema,
+      text: pathTextSchema.nullable().optional(),
+    }),
   })
   .superRefine((layer, ctx) => {
     const bounds = boundsOfPath(layer.vector.path);

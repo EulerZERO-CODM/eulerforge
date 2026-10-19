@@ -23,7 +23,7 @@ import {
   type VectorStyle,
 } from '../vector';
 import { createRect, type Rect } from './geometry';
-import { asLayerId } from './layer-types';
+import { asLayerId, normalisePathText } from './layer-types';
 import type {
   AttributionRecord,
   EllipseLayer,
@@ -35,6 +35,7 @@ import type {
   PathLayer,
   RectLayer,
   Scene,
+  PathText,
   ShapeSettings,
   TextLayer,
   TextSettings,
@@ -114,6 +115,9 @@ export function freezeVectorContent(content: VectorContent): VectorContent {
       ...content.style,
       dashArray: Object.freeze([...content.style.dashArray]),
     }),
+    // Text is part of the content, so it is frozen with it: a caller that mutated a committed
+    // layer's run would change the document behind the history's back.
+    text: content.text ? Object.freeze({ ...content.text }) : null,
   });
 }
 
@@ -199,6 +203,8 @@ export type NewLayerInput =
       readonly vector: {
         readonly path: VectorPath;
         readonly style?: Partial<VectorStyle> | undefined;
+        /** Text laid along the path, for a conversion that carries a run rather than drawing one. */
+        readonly text?: PathText | null | undefined;
       };
     };
 
@@ -269,6 +275,7 @@ export function createLayer(input: NewLayerInput, options: CreateLayerOptions = 
       const vector: VectorContent = {
         path: input.vector.path,
         style: normaliseVectorStyle(input.vector.style ?? defaults.vectorStyle),
+        text: input.vector.text ? normalisePathText(input.vector.text) : null,
       };
       const layer: PathLayer = {
         ...base,
@@ -479,10 +486,42 @@ export function updateLayerSettings(
             vector: {
               path: existing.vector.path,
               style: normaliseVectorStyle({ ...existing.vector.style, ...patch.style }),
+              text: existing.vector.text ?? null,
             },
           })
         : ok(scene);
   }
+}
+
+/**
+ * Replaces the text laid along a path layer's contour.
+ *
+ * The text is part of the path, not a layer of its own: it moves with the geometry, it is saved with
+ * the document and it undoes with the same command as the colour it uses. Passing `null` removes it.
+ */
+export function updatePathText(
+  scene: Scene,
+  id: LayerId | string,
+  text: PathText | null,
+): Result<Scene> {
+  const existing = scene.layers.find((layer) => layer.id === id);
+  if (!existing) return err(forgeError('not-found', 'That layer is no longer in the document.'));
+  if (existing.type !== 'path') {
+    return err(
+      forgeError(
+        'validation-failed',
+        `Layer "${existing.name}" is a ${existing.type} layer, not a vector path.`,
+        { retryable: false },
+      ),
+    );
+  }
+  return updateLayer(scene, id, {
+    vector: {
+      path: existing.vector.path,
+      style: existing.vector.style,
+      text: text === null ? null : normalisePathText(text),
+    },
+  });
 }
 
 /**
@@ -509,7 +548,11 @@ export function updatePathGeometry(
       ),
     );
   }
-  return updateLayer(scene, id, { vector: { path, style: existing.vector.style } });
+  // Text is laid parametrically on the outline, so it follows a geometry edit rather than being
+  // detached from it; dropping it here would silently delete the user's words on every node drag.
+  return updateLayer(scene, id, {
+    vector: { path, style: existing.vector.style, text: existing.vector.text ?? null },
+  });
 }
 
 export function deleteLayer(scene: Scene, id: LayerId | string): Result<Scene> {

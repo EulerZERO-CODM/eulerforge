@@ -20,6 +20,7 @@ import { checkTopology } from '../vector/validity';
 import { parseSvg } from '../svg/parse';
 import {
   booleanLayersCommand,
+  clearVectorTextCommand,
   createPathLayerCommand,
   deletePathNodesCommand,
   importArtworkCommand,
@@ -29,6 +30,7 @@ import {
   outlineShapeCommand,
   setPathNodesKindCommand,
   setVectorStyleCommand,
+  setVectorTextCommand,
   transformPathLayerCommand,
   translatePathLayerCommand,
   updatePathGeometryCommand,
@@ -696,5 +698,117 @@ describe('history labels read like work, not like internals', () => {
       return result.value.label;
     });
     expect(labels).toEqual(['Move “Star”', 'Set fill of “Star”', 'Add node to “Star”']);
+  });
+});
+
+describe('text on a path', () => {
+  function textOf(layer: Layer) {
+    if (layer.type !== 'path') throw new Error('expected a path layer');
+    return layer.vector.text ?? null;
+  }
+
+  it('sets a run with readable history and leaves the geometry and frame alone', () => {
+    const layer = pathLayer('Arc', 'M0 50 C 25 0 75 0 100 50');
+    const document = documentWith([layer]);
+    const result = setVectorTextCommand(document, layer.id, { content: 'Hello curve' });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.label).toBe('Set text on “Arc”');
+    const updated = layerIn(sceneOf(result.value), 0);
+    expect(textOf(updated)?.content).toBe('Hello curve');
+    expect(textOf(updated)?.fontSize).toBe(28);
+    expect(updated.frame).toEqual(layer.frame);
+    if (updated.type !== 'path' || layer.type !== 'path') throw new Error('path expected');
+    expect(updated.vector.path).toEqual(layer.vector.path);
+  });
+
+  it('clamps settings into the documented ranges instead of trusting the caller', () => {
+    const layer = pathLayer('Arc', 'M0 50 C 25 0 75 0 100 50');
+    const document = documentWith([layer]);
+    const result = setVectorTextCommand(document, layer.id, {
+      content: 'Clamped',
+      fontSize: 5000,
+      letterSpacing: -500,
+      startOffset: 3,
+      colour: 'not-a-colour',
+    });
+    if (!result.ok) throw new Error(result.error.message);
+    const text = textOf(layerIn(sceneOf(result.value), 0));
+    expect(text?.fontSize).toBe(512);
+    expect(text?.letterSpacing).toBe(-20);
+    expect(text?.startOffset).toBe(1);
+    expect(text?.colour).toBe('#f4f4f5');
+  });
+
+  it('creates an empty run when a setting is changed before any words are typed', () => {
+    const layer = pathLayer('Arc', 'M0 50 C 25 0 75 0 100 50');
+    const document = documentWith([layer]);
+    const result = setVectorTextCommand(document, layer.id, { fontSize: 40 });
+    if (!result.ok) throw new Error(result.error.message);
+    const text = textOf(layerIn(sceneOf(result.value), 0));
+    expect(text?.content).toBe('');
+    expect(text?.fontSize).toBe(40);
+  });
+
+  it('follows a geometry edit instead of being dropped by it', () => {
+    const layer = pathLayer('Arc', 'M0 50 C 25 0 75 0 100 50');
+    const document = documentWith([layer]);
+    const written = setVectorTextCommand(document, layer.id, { content: 'Follows' });
+    if (!written.ok) throw new Error(written.error.message);
+    const afterText = { ...document, scene: sceneOf(written.value) };
+
+    const moved = translatePathLayerCommand(afterText, layer.id, 25, 10);
+    if (!moved.ok) throw new Error(moved.error.message);
+    const text = textOf(layerIn(sceneOf(moved.value), 0));
+    expect(text?.content).toBe('Follows');
+  });
+
+  it('survives a paint change, which touches the same vector content', () => {
+    const layer = pathLayer('Arc', 'M0 50 C 25 0 75 0 100 50');
+    const document = documentWith([layer]);
+    const written = setVectorTextCommand(document, layer.id, { content: 'Kept' });
+    if (!written.ok) throw new Error(written.error.message);
+    const afterText = { ...document, scene: sceneOf(written.value) };
+
+    const painted = setVectorStyleCommand(afterText, [layer.id], { fill: '#123456' });
+    if (!painted.ok) throw new Error(painted.error.message);
+    const updated = layerIn(sceneOf(painted.value), 0);
+    expect(textOf(updated)?.content).toBe('Kept');
+    if (updated.type !== 'path') throw new Error('path expected');
+    expect(updated.vector.style.fill).toBe('#123456');
+  });
+
+  it('refuses a shape layer and a locked path, and says why', () => {
+    const rect = shapeLayer('rect', 'Rect');
+    const locked = pathLayer('Locked', 'M0 0 L10 0 L10 10 Z');
+    const lockedLayer: Layer = { ...locked, locked: true };
+    const document = documentWith([rect, lockedLayer]);
+
+    const onRect = setVectorTextCommand(document, rect.id, { content: 'No' });
+    expect(onRect.ok).toBe(false);
+    if (!onRect.ok) expect(onRect.error.detail).toContain('vector paths');
+
+    const onLocked = setVectorTextCommand(document, lockedLayer.id, { content: 'No' });
+    expect(onLocked.ok).toBe(false);
+    if (!onLocked.ok) expect(onLocked.error.message).toContain('locked');
+  });
+
+  it('removes a run and refuses to remove one that is not there', () => {
+    const layer = pathLayer('Arc', 'M0 50 C 25 0 75 0 100 50');
+    const document = documentWith([layer]);
+    const written = setVectorTextCommand(document, layer.id, { content: 'Bye' });
+    if (!written.ok) throw new Error(written.error.message);
+    const afterText = { ...document, scene: sceneOf(written.value) };
+
+    const cleared = clearVectorTextCommand(afterText, layer.id);
+    expect(cleared.ok).toBe(true);
+    if (!cleared.ok) return;
+    expect(cleared.value.label).toBe('Remove text from “Arc”');
+    expect(textOf(layerIn(sceneOf(cleared.value), 0))).toBeNull();
+
+    const clearedScene = { ...afterText, scene: sceneOf(cleared.value) };
+    const again = clearVectorTextCommand(clearedScene, layer.id);
+    expect(again.ok).toBe(false);
+    if (!again.ok) expect(again.error.message).toContain('no text');
   });
 });

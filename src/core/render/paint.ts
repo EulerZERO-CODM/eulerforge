@@ -22,6 +22,8 @@ import {
   type VectorBox,
 } from '../vector';
 import type { DrawOp, EllipseOp, ImageOp, PathOp, RectOp, RenderPlan, TextOp } from './plan';
+import { pathTextFontString, pathTextHasContent, type PathText } from '../documents/layer-types';
+import { layoutPathText } from '../vector/path-text';
 
 /** A gradient handle: the two calls the painter makes on what `create*Gradient` returns. */
 export type CanvasGradientLike = {
@@ -199,7 +201,9 @@ export function paintOp(context: PainterContext, op: DrawOp): void {
  */
 export function paintPath(context: PainterContext, op: PathOp): void {
   const { style } = op;
-  if (!stylePaintsSomething(style)) return;
+  // A path can be a pure guide for its own text: no fill, no stroke, and still something to draw.
+  const hasText = op.text !== null && pathTextHasContent(op.text);
+  if (!stylePaintsSomething(style) && !hasText) return;
 
   context.save();
   context.globalAlpha = op.opacity;
@@ -273,6 +277,63 @@ export function paintPath(context: PainterContext, op: PathOp): void {
     context.setLineDash([]);
   }
 
+  context.restore();
+
+  if (op.text && pathTextHasContent(op.text)) paintPathText(context, op.path, op.text, op.opacity);
+}
+
+/**
+ * Paints text along the path's own contour.
+ *
+ * Each glyph is drawn at the midpoint of its advance, rotated to the tangent there, which is exactly
+ * the layout `layoutPathText` computes for the SVG writer's own parameters. The measurer is the
+ * context's own `measureText`, so the preview and the export agree by construction: the export calls
+ * this same function with the same font, only at a different scale.
+ */
+function paintPathText(
+  context: PainterContext,
+  path: PathOp['path'],
+  text: PathText,
+  opacity: number,
+): void {
+  const font = pathTextFontString(text);
+  context.save();
+  context.font = font;
+  const layout = layoutPathText(
+    path,
+    {
+      content: text.content,
+      fontSize: text.fontSize,
+      letterSpacing: text.letterSpacing,
+      startOffset: text.startOffset,
+    },
+    (glyph) => context.measureText(glyph).width,
+  );
+  if (layout.glyphs.length === 0) {
+    context.restore();
+    return;
+  }
+
+  // Positive y after the rotation points to the far side of the line, so "above" is zero and the
+  // other two modes move the baseline past it by a fraction of the em.
+  const shift =
+    text.baseline === 'above'
+      ? 0
+      : text.baseline === 'centre'
+        ? text.fontSize * 0.35
+        : text.fontSize * 0.7;
+  context.globalAlpha = opacity;
+  context.fillStyle = text.colour;
+  context.textAlign = 'center';
+  context.textBaseline = 'alphabetic';
+  for (const glyph of layout.glyphs) {
+    context.save();
+    context.translate(glyph.x, glyph.y);
+    context.rotate(glyph.angle);
+    context.translate(0, shift);
+    context.fillText(glyph.char, 0, 0);
+    context.restore();
+  }
   context.restore();
 }
 

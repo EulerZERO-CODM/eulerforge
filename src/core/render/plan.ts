@@ -15,6 +15,7 @@ import type {
   ImageFit,
   ImageLayer,
   Layer,
+  PathText,
   Scene,
   ShapeSettings,
   TextSettings,
@@ -104,6 +105,8 @@ export type PathOp = {
   /** Geometry in the layer's own coordinates; the painter maps it through `frame`. */
   readonly path: VectorPath;
   readonly style: VectorStyle;
+  /** Text laid along the contour, or `null`. Painted after the shape's own fill and stroke. */
+  readonly text: PathText | null;
   readonly opacity: number;
 };
 
@@ -200,6 +203,7 @@ function opFor(layer: Layer, options: BuildPlanOptions, issues: RenderIssue[]): 
         frame: layer.frame,
         path: layer.vector.path,
         style: layer.vector.style,
+        text: layer.vector.text ?? null,
         opacity: layer.opacity,
       };
     }

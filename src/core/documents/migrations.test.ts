@@ -271,6 +271,92 @@ describe('older documents reach the current schema without rewriting their conte
   });
 });
 
+describe('v6 → v7: a path that carried no text keeps meaning the same', () => {
+  /**
+   * A record exactly as the previous version wrote it: the same path and paint, with no `text` key
+   * at all. v7 only *adds* an optional field, so the migration must not invent one or rewrite the
+   * geometry — the old file has to load looking identical.
+   */
+  function v6PathDocument(): Record<string, unknown> {
+    const created = createDocument(
+      {
+        title: 'Saved before text on a path',
+        studioId: 'illustration',
+        documentTypeId: brand<'DocumentTypeId'>('illustration.artboard'),
+        canvas: DEFAULT_CANVAS,
+        scene: {
+          layers: [
+            {
+              id: brand<'LayerId'>('lyr-plain'),
+              name: 'Plain arc',
+              visible: true,
+              locked: false,
+              opacity: 1,
+              frame: { x: 0, y: 0, width: 10, height: 5 },
+              type: 'path',
+              vector: {
+                path: {
+                  contours: [
+                    {
+                      closed: false,
+                      nodes: [
+                        { point: { x: 0, y: 5 }, handleIn: null, handleOut: null },
+                        { point: { x: 5, y: 0 }, handleIn: null, handleOut: null },
+                        { point: { x: 10, y: 5 }, handleIn: null, handleOut: null },
+                      ],
+                    },
+                  ],
+                },
+                style: {
+                  fill: null,
+                  fillRule: 'nonzero',
+                  fillOpacity: 1,
+                  stroke: '#112233',
+                  strokeWidth: 2,
+                  strokeOpacity: 1,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                  dashArray: [],
+                },
+              },
+            },
+          ],
+        },
+      },
+      { generateId: () => 'doc-v6-text', now: () => new Date('2026-07-01T00:00:00.000Z') },
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    const record = JSON.parse(JSON.stringify(created.value)) as {
+      schemaVersion: number;
+      scene: { layers: { vector: { text?: unknown } }[] };
+    };
+    record.schemaVersion = 6;
+    for (const layer of record.scene.layers) delete layer.vector.text;
+    return record as unknown as Record<string, unknown>;
+  }
+
+  it('stamps v7 without adding a run or moving the geometry', () => {
+    const migrated = migrateDocument(v6PathDocument());
+    expect(migrated.ok).toBe(true);
+    if (!migrated.ok) return;
+    expect(migrated.value.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    const layer = migrated.value.scene.layers[0];
+    if (layer?.type !== 'path') throw new Error('expected a path layer');
+    // Absent and `null` both mean "this path carries no text"; the loader materialises the optional
+    // field, which is the only change v7 makes to an older record.
+    expect(layer.vector.text ?? null).toBeNull();
+    expect(layer.vector.style.stroke).toBe('#112233');
+    expect(layer.vector.path.contours[0]?.nodes).toHaveLength(3);
+  });
+
+  it('migrates a v0 record through the new step too', () => {
+    const result = migrateDocument(legacyRecord);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.schemaVersion).toBe(7);
+  });
+});
+
 describe('pendingMigrations', () => {
   it('lists the steps a version still has to pass through', () => {
     // One step per published version, so a version-0 record walks the whole documented chain.
@@ -287,10 +373,12 @@ describe('pendingMigrations', () => {
       '3->4',
       '4->5',
       '5->6',
+      '6->7',
     ]);
     expect(steps[0]?.description).toMatch(/vector path layers/i);
     expect(steps[1]?.description).toMatch(/studio payload/i);
     expect(steps[2]?.description).toMatch(/gradient or pattern paint/i);
     expect(steps[3]?.description).toMatch(/range selections/i);
+    expect(steps[4]?.description).toMatch(/text on their contour/i);
   });
 });

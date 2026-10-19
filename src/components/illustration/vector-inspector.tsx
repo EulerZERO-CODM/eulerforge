@@ -2,7 +2,17 @@
 
 import { useState } from 'react';
 
-import type { LayerId, PathLayer } from '../../core/documents/layer-types';
+import {
+  DEFAULT_PATH_TEXT,
+  FONT_STACKS,
+  FONT_STACKS_INFO,
+  PATH_TEXT_BASELINES,
+  PATH_TEXT_BASELINE_LABELS,
+  PATH_TEXT_LIMITS,
+  type LayerId,
+  type PathLayer,
+  type PathText,
+} from '../../core/documents/layer-types';
 import { FILL_RULE_LABELS, FILL_RULES } from '../../core/vector/types';
 import {
   BOOLEAN_OPERATION_HINTS,
@@ -15,10 +25,12 @@ import { segmentTotal } from '../../core/vector/pick';
 import { DEFAULT_VECTOR_STYLE } from '../../core/vector/style';
 import {
   booleanLayersCommand,
+  clearVectorTextCommand,
   deletePathNodesCommand,
   outlineShapeCommand,
   setPathNodesKindCommand,
   setVectorStyleCommand,
+  setVectorTextCommand,
   transformPathLayerCommand,
 } from '../../core/editor/vector-commands';
 import type { NodeReference } from '../../core/vector/pick';
@@ -139,6 +151,7 @@ export function VectorInspector({
             onNodeSelectionChange={onNodeSelectionChange}
           />
           <PaintSection api={api} layer={editable} />
+          <TextSection api={api} layer={editable} />
         </>
       ) : null}
 
@@ -366,6 +379,169 @@ function NodeSection({
           Why is nothing selected?
         </Button>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Text laid along the selected path's own contour.
+ *
+ * The run belongs to the path, so it is edited here next to fill and stroke rather than as a separate
+ * layer: dragging a node moves the letters too, and one undo restores both. A path with no text shows
+ * an empty field with a prompt; the typography controls stay disabled until there is something to lay
+ * out, because changing a size that nothing is drawn at would be a control that does nothing.
+ */
+function TextSection({ api, layer }: { readonly api: WorkspaceApi; readonly layer: PathLayer }) {
+  const text = layer.vector.text ?? DEFAULT_PATH_TEXT;
+  const content = layer.vector.text?.content ?? '';
+  const hasText = content.trim().length > 0;
+
+  const set = (patch: Partial<PathText>, coalesceKey: string): void => {
+    void api.run(setVectorTextCommand(api.doc, layer.id, patch), { coalesceKey });
+  };
+
+  return (
+    <div className="space-y-3" data-testid="text-on-path">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-2xs text-fg-subtle font-medium tracking-wide uppercase">Text on path</p>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={layer.vector.text == null}
+          data-testid="text-remove"
+          onClick={() => {
+            void api.run(clearVectorTextCommand(api.doc, layer.id));
+          }}
+        >
+          Remove
+        </Button>
+      </div>
+
+      <Field label="Text" hint="Laid along the path’s first contour, from the start offset.">
+        <Input
+          type="text"
+          value={content}
+          placeholder="Type to place text on this path"
+          maxLength={PATH_TEXT_LIMITS.maxContentLength}
+          data-testid="text-content"
+          onChange={(event) => {
+            set({ content: event.target.value }, 'vector:text-content');
+          }}
+        />
+      </Field>
+
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Size" hint={hasText ? undefined : 'Add text first'}>
+          <Input
+            type="number"
+            min={PATH_TEXT_LIMITS.minFontSize}
+            max={PATH_TEXT_LIMITS.maxFontSize}
+            step={1}
+            disabled={!hasText}
+            value={String(text.fontSize)}
+            data-testid="text-font-size"
+            onChange={(event) => {
+              const value = Number(event.target.value);
+              if (!Number.isFinite(value)) return;
+              set({ fontSize: value }, 'vector:text-font-size');
+            }}
+          />
+        </Field>
+        <Field label="Spacing" hint="May be negative">
+          <Input
+            type="number"
+            min={PATH_TEXT_LIMITS.minLetterSpacing}
+            max={PATH_TEXT_LIMITS.maxLetterSpacing}
+            step={0.5}
+            disabled={!hasText}
+            value={String(text.letterSpacing)}
+            data-testid="text-letter-spacing"
+            onChange={(event) => {
+              const value = Number(event.target.value);
+              if (!Number.isFinite(value)) return;
+              set({ letterSpacing: value }, 'vector:text-letter-spacing');
+            }}
+          />
+        </Field>
+        <Field label="Start offset" hint="% of the contour">
+          <Input
+            type="number"
+            min={0}
+            max={100}
+            step={1}
+            disabled={!hasText}
+            value={String(Math.round(text.startOffset * 100))}
+            data-testid="text-start-offset"
+            onChange={(event) => {
+              const value = Number(event.target.value);
+              if (!Number.isFinite(value)) return;
+              set({ startOffset: value / 100 }, 'vector:text-start-offset');
+            }}
+          />
+        </Field>
+        <Field label="Baseline">
+          <Select
+            value={text.baseline}
+            disabled={!hasText}
+            data-testid="text-baseline"
+            options={PATH_TEXT_BASELINES.map((baseline) => ({
+              value: baseline,
+              label: PATH_TEXT_BASELINE_LABELS[baseline],
+            }))}
+            onChange={(event) => {
+              const baseline = PATH_TEXT_BASELINES.find((entry) => entry === event.target.value);
+              if (!baseline) return;
+              set({ baseline }, 'vector:text-baseline');
+            }}
+          />
+        </Field>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Font">
+          <Select
+            value={text.fontStackId}
+            disabled={!hasText}
+            data-testid="text-font-stack"
+            options={FONT_STACKS.map((stack) => ({
+              value: stack,
+              label: FONT_STACKS_INFO[stack].label,
+            }))}
+            onChange={(event) => {
+              const stack = FONT_STACKS.find((entry) => entry === event.target.value);
+              if (!stack) return;
+              set({ fontStackId: stack }, 'vector:text-font-stack');
+            }}
+          />
+        </Field>
+        <Field label="Colour">
+          <div className="flex items-center gap-1.5">
+            <input
+              type="color"
+              aria-label="Text colour"
+              disabled={!hasText}
+              data-testid="text-colour"
+              value={text.colour}
+              onChange={(event) => {
+                set({ colour: event.target.value }, 'vector:text-colour');
+              }}
+              className="border-line h-7 w-9 cursor-pointer rounded-sm border bg-transparent"
+            />
+            <span className="forge-numeric text-2xs text-fg-subtle">{text.colour}</span>
+          </div>
+        </Field>
+      </div>
+
+      <p data-testid="text-summary" className="text-2xs text-fg-muted forge-numeric">
+        {hasText
+          ? `${String(content.length)} characters at ${String(text.fontSize)} units, ${PATH_TEXT_BASELINE_LABELS[text.baseline].toLowerCase()}, starting ${String(Math.round(text.startOffset * 100))}% along the contour.`
+          : 'No text on this path yet. Type above to lay a run along its contour.'}
+      </p>
+      <p className="text-2xs text-fg-subtle">
+        Glyphs that run past the end of the contour are dropped rather than wrapped, and the run is
+        drawn over the shape’s own fill. Both are exported as a real SVG{' '}
+        <code>&lt;textPath&gt;</code>.
+      </p>
     </div>
   );
 }

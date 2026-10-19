@@ -199,7 +199,11 @@ export function VectorStage({
       locked: true,
       opacity: 1,
       frame: frameOfPath(previewPath),
-      vector: { path: previewPath, style: previewStyleFor(activeLayer, drag) },
+      vector: {
+        path: previewPath,
+        style: previewStyleFor(activeLayer, drag),
+        text: activeLayer?.vector.text ?? null,
+      },
     } as unknown as Layer;
     return { ...doc, scene: { layers: [...doc.scene.layers, previewLayer] } };
   }, [doc, previewPath, activeLayer, drag]);

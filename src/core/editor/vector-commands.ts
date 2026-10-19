@@ -25,9 +25,18 @@ import {
   updateLayer,
   updateLayerSettings,
   updatePathGeometry,
+  updatePathText,
   type NewLayerInput,
 } from '../documents/layer-operations';
-import { isPathLayer, LAYER_TYPE_LABELS, type Layer, type LayerId } from '../documents/layer-types';
+import {
+  DEFAULT_PATH_TEXT,
+  isPathLayer,
+  LAYER_TYPE_LABELS,
+  normalisePathText,
+  type Layer,
+  type LayerId,
+  type PathText,
+} from '../documents/layer-types';
 import {
   geometryBoundsOf,
   layersToVector,
@@ -552,6 +561,105 @@ function describeStyleChange(
   if (patch.fillOpacity !== undefined || patch.strokeOpacity !== undefined)
     return `Set paint opacity of “${name}”`;
   return `Restyle “${name}”`;
+}
+
+/* -------------------------------------------------------------------------------------------- */
+/* Text on a path                                                                                */
+/* -------------------------------------------------------------------------------------------- */
+
+/**
+ * Changes the text laid along a path's own contour.
+ *
+ * The run is a *property of the path*, so a geometry edit carries it along and one undo puts both the
+ * letters and the curve back. Settings are normalised against the published limits rather than
+ * trusted from the caller: a slider is a hint, and nothing outside the schema may reach the document.
+ */
+export function setVectorTextCommand(
+  document: ForgeDocument,
+  id: LayerId | string,
+  patch: Partial<PathText>,
+): Result<SceneCommand> {
+  const found = layerOf(document, id);
+  if (!found.ok) return err(found.error);
+  if (found.value.type !== 'path') {
+    return err(
+      forgeError(
+        'validation-failed',
+        `“${found.value.name}” is a ${LAYER_TYPE_LABELS[found.value.type].toLowerCase()} layer.`,
+        { detail: 'Text on a path attaches to vector paths.', retryable: false },
+      ),
+    );
+  }
+  if (found.value.locked) {
+    return err(forgeError('validation-failed', `“${found.value.name}” is locked.`));
+  }
+  if (Object.keys(patch).length === 0) {
+    return err(
+      forgeError('validation-failed', 'No text setting was changed.', { retryable: false }),
+    );
+  }
+
+  // Changing a setting on a path that has no text yet creates the run but leaves it empty: seeding
+  // the default sentence would put words on the artboard that nobody typed.
+  const current = found.value.vector.text ?? null;
+  const merged: Partial<PathText> = current
+    ? { ...current, ...patch }
+    : { ...DEFAULT_PATH_TEXT, content: '', ...patch };
+  const updated = updatePathText(document.scene, id, normalisePathText(merged));
+  if (!updated.ok) return err(updated.error);
+
+  return ok({
+    label: describeTextChange(found.value.name, patch),
+    patch: freezePatch({ scene: updated.value }),
+  });
+}
+
+/** Removes the text from a path, leaving its geometry and paint exactly as they were. */
+export function clearVectorTextCommand(
+  document: ForgeDocument,
+  id: LayerId | string,
+): Result<SceneCommand> {
+  const found = layerOf(document, id);
+  if (!found.ok) return err(found.error);
+  if (found.value.type !== 'path') {
+    return err(
+      forgeError(
+        'validation-failed',
+        `“${found.value.name}” is a ${LAYER_TYPE_LABELS[found.value.type].toLowerCase()} layer.`,
+        { detail: 'Text on a path attaches to vector paths.', retryable: false },
+      ),
+    );
+  }
+  if (found.value.locked) {
+    return err(forgeError('validation-failed', `“${found.value.name}” is locked.`));
+  }
+  if (found.value.vector.text == null) {
+    return err(
+      forgeError('validation-failed', `“${found.value.name}” has no text on its path.`, {
+        retryable: false,
+      }),
+    );
+  }
+  const updated = updatePathText(document.scene, id, null);
+  if (!updated.ok) return err(updated.error);
+  return ok({
+    label: `Remove text from “${found.value.name}”`,
+    patch: freezePatch({ scene: updated.value }),
+  });
+}
+
+/** Names the field that actually changed, so history reads like a description of the work. */
+function describeTextChange(name: string, patch: Partial<PathText>): string {
+  if (patch.content !== undefined) {
+    return patch.content.trim().length === 0 ? `Clear text on “${name}”` : `Set text on “${name}”`;
+  }
+  if (patch.fontSize !== undefined) return `Set text size on “${name}”`;
+  if (patch.letterSpacing !== undefined) return `Set text spacing on “${name}”`;
+  if (patch.startOffset !== undefined) return `Set text start offset on “${name}”`;
+  if (patch.baseline !== undefined) return `Set text baseline on “${name}”`;
+  if (patch.colour !== undefined) return `Set text colour on “${name}”`;
+  if (patch.fontStackId !== undefined) return `Set text font on “${name}”`;
+  return `Restyle text on “${name}”`;
 }
 
 /* -------------------------------------------------------------------------------------------- */
