@@ -3,9 +3,14 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { ok } from '../../core/result';
-import type { AssistantStudio } from '../../core/assistant/registry';
+import type { AssistantPlan, AssistantStudio } from '../../core/assistant/registry';
 import { toolsForStudio, STUDIO_LABELS } from '../../core/assistant/registry';
 import { planNatively } from '../../core/assistant/planner';
+import {
+  readProviderPlanResponse,
+  readProviderStatus,
+  type ProviderStatus,
+} from '../../core/assistant/provider';
 import {
   executePlan,
   type AssistantEnvironment,
@@ -29,6 +34,30 @@ export type AssistantPanelProps = {
   /** Produces a real file for an export step; without it, export steps refuse rather than pretend. */
   readonly download?: (kind: DownloadKind) => Promise<Result<{ fileName: string; bytes: number }>>;
 };
+
+/**
+ * Pulls a sentence out of the planning route's failure envelope.
+ *
+ * The route returns `{ error: { message, detail? } }`; anything else is a malformed answer from a
+ * proxy or a deployment between the browser and this application, and it gets a plain sentence.
+ */
+function failureText(payload: unknown): string {
+  if (typeof payload !== 'object' || payload === null) {
+    return 'The planning service could not plan this.';
+  }
+  const error = (payload as { error?: unknown }).error;
+  if (typeof error !== 'object' || error === null) {
+    return 'The planning service could not plan this.';
+  }
+  const message = (error as { message?: unknown }).message;
+  const detail = (error as { detail?: unknown }).detail;
+  const parts = [
+    typeof message === 'string' ? message : '',
+    typeof detail === 'string' ? detail : '',
+  ];
+  const text = parts.filter((part) => part.length > 0).join(' ');
+  return text.length > 0 ? text : 'The planning service could not plan this.';
+}
 
 const STATUS_LABELS: Readonly<Record<StepReport['status'], string>> = {
   pending: 'Waiting',
@@ -76,8 +105,37 @@ export function AssistantPanel({
     latest.current = { document: api.doc, selection };
   }, [api.doc, selection]);
 
-  const compiled = planNatively(studio, request);
+  const [provider, setProvider] = useState<ProviderStatus | null>(null);
+  const [providerError, setProviderError] = useState<string | null>(null);
+  const [providerBusy, setProviderBusy] = useState(false);
+  // A model plan is kept as data. The native plan stays live as the request is edited; typing
+  // discards the model's plan so a stale one can never be run against a different sentence.
+  const [modelPlan, setModelPlan] = useState<{
+    readonly plan: AssistantPlan;
+    readonly label: string;
+  } | null>(null);
+  const nativePlan = planNatively(studio, request);
+  const compiled: Result<AssistantPlan> = modelPlan ? ok(modelPlan.plan) : nativePlan;
   const tools = toolsForStudio(studio);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async (): Promise<void> => {
+      try {
+        const response = await fetch('/api/assistant/plan');
+        if (!response.ok) return;
+        const status = readProviderStatus(await response.json());
+        if (!cancelled && status) setProvider(status);
+      } catch {
+        // Provider status is an enhancement. Without it the native planner is still the default and
+        // the model button explains the failure if it is pressed.
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const plan = (): void => {
     cancel.current = false;
@@ -85,6 +143,8 @@ export function AssistantPanel({
     setReports([]);
     setSummary(null);
     setError(null);
+    setProviderError(null);
+    setModelPlan(null);
     if (!compiled.ok) {
       setError(compiled.error.message);
       return;
@@ -92,6 +152,70 @@ export function AssistantPanel({
     setPhase(compiled.value.steps.length > 0 ? 'planned' : 'finished');
     if (compiled.value.steps.length === 0) {
       setSummary('Nothing can run: the request is explained below.');
+    }
+  };
+
+  /**
+   * Asks the server-side model to plan instead of the native planner.
+   *
+   * The browser sends the sentence and a six-field document summary; the server keeps the credential
+   * and returns a plan. The answer is validated here too, and the executor revalidates every step,
+   * so a proxy that mangles the response cannot put an unchecked call into the document.
+   */
+  const planWithModel = async (): Promise<void> => {
+    if (providerBusy || request.trim().length === 0) return;
+    cancel.current = false;
+    pause.current = false;
+    setReports([]);
+    setSummary(null);
+    setError(null);
+    setProviderError(null);
+    setModelPlan(null);
+    setProviderBusy(true);
+    try {
+      const response = await fetch('/api/assistant/plan', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          studio,
+          request,
+          document: {
+            title: api.doc.title,
+            documentType: String(api.doc.documentTypeId),
+            width: api.doc.canvas.width,
+            height: api.doc.canvas.height,
+            layers: api.doc.scene.layers.length,
+            selected: selection.length,
+          },
+        }),
+      });
+      const payload: unknown = await response.json();
+      if (!response.ok) {
+        setProviderError(failureText(payload));
+        setPhase('idle');
+        return;
+      }
+      const parsed = readProviderPlanResponse(payload);
+      if (!parsed.ok) {
+        setProviderError(parsed.error.message);
+        setPhase('idle');
+        return;
+      }
+      setModelPlan({
+        plan: parsed.value.plan,
+        label: [parsed.value.provider.label, parsed.value.provider.model]
+          .filter((part) => part.length > 0)
+          .join(' · '),
+      });
+      setPhase(parsed.value.plan.steps.length > 0 ? 'planned' : 'finished');
+      if (parsed.value.plan.steps.length === 0) {
+        setSummary('Nothing can run: the request is explained below.');
+      }
+    } catch {
+      setProviderError('The planning service could not be reached. Native planning still works.');
+      setPhase('idle');
+    } finally {
+      setProviderBusy(false);
     }
   };
 
@@ -143,6 +267,8 @@ export function AssistantPanel({
 
   const pending = phase === 'running';
   const hasSteps = compiled.ok && compiled.value.steps.length > 0;
+  const modelDisabled =
+    pending || providerBusy || request.trim().length === 0 || provider?.configured === false;
 
   return (
     <section aria-labelledby="assistant-heading" className="space-y-3" data-testid="assistant">
@@ -154,9 +280,30 @@ export function AssistantPanel({
           Assistant
         </h3>
         <p className="text-fg-subtle mt-0.5 text-xs" data-testid="assistant-provider-note">
-          Native planner — no external model is configured. It understands a documented vocabulary
-          for {STUDIO_LABELS[studio]} and refuses the rest instead of guessing.
+          {provider?.configured ? (
+            <>
+              Model-assisted planning is available through {provider.provider}
+              {provider.model ? ` (${provider.model})` : ''}. The credential stays on the server,
+              and every proposed step still runs as a typed tool call through this studio’s
+              registry.
+            </>
+          ) : (
+            <>
+              Native planner — no external model is configured. It understands a documented
+              vocabulary for {STUDIO_LABELS[studio]} and refuses the rest instead of guessing.
+              {provider?.reason ? ` ${provider.reason}` : ''}
+            </>
+          )}
         </p>
+        {providerError ? (
+          <p
+            className="text-2xs mt-1 text-rose-300"
+            role="alert"
+            data-testid="assistant-provider-error"
+          >
+            {providerError}
+          </p>
+        ) : null}
       </div>
 
       <label className="block space-y-1.5">
@@ -176,6 +323,8 @@ export function AssistantPanel({
           }
           onChange={(event) => {
             setRequest(event.target.value);
+            setModelPlan(null);
+            setProviderError(null);
             setPhase('idle');
           }}
           className="border-line bg-surface-1 text-fg placeholder:text-fg-subtle focus-visible:ring-accent w-full rounded-md border px-2 py-1.5 text-xs focus-visible:ring-2 focus-visible:outline-none"
@@ -193,10 +342,26 @@ export function AssistantPanel({
           Plan
         </Button>
         <Button
+          variant="outline"
+          size="sm"
+          data-testid="assistant-model-plan"
+          disabled={modelDisabled}
+          title={
+            provider?.configured === false
+              ? (provider.reason ?? 'No external model is configured.')
+              : 'Ask the server-side model to plan this instead of the native planner.'
+          }
+          onClick={() => {
+            void planWithModel();
+          }}
+        >
+          {providerBusy ? 'Asking the model…' : 'Plan with a model'}
+        </Button>
+        <Button
           variant="primary"
           size="sm"
           data-testid="assistant-run"
-          disabled={pending || !hasSteps || phase === 'idle'}
+          disabled={pending || providerBusy || !hasSteps || phase === 'idle'}
           onClick={() => {
             void run();
           }}
@@ -240,6 +405,9 @@ export function AssistantPanel({
         <div className="space-y-2" data-testid="assistant-plan-view">
           <p className="text-fg-muted text-xs" data-testid="assistant-intent">
             {compiled.value.intent}
+          </p>
+          <p className="text-2xs text-fg-subtle" data-testid="assistant-plan-source">
+            {modelPlan ? `Model plan · ${modelPlan.label || 'provider'}` : 'Native plan'}
           </p>
           <ol className="space-y-1.5">
             {compiled.value.steps.map((step, index) => {

@@ -9,7 +9,7 @@
 
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { IllustrationWorkspace, isVectorDocument } from './illustration-workspace';
 import { ForgeProvider } from '../../state/forge-provider';
@@ -1061,5 +1061,226 @@ describe('the assistant panel', () => {
     const call = vi.mocked(downloadText).mock.calls.at(-1);
     expect(call?.[0]).toContain('<svg');
     expect(screen.getByTestId('assistant-step-0')).toHaveTextContent(/byte/i);
+  });
+});
+
+describe('the assistant panel with a model configured', () => {
+  let services: TestForgeServices;
+
+  beforeEach(() => {
+    services = createTestServices();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  type Call = { readonly url: string; readonly method: string; readonly body: unknown };
+
+  function stubProvider(
+    handler: (call: Call) => { readonly status: number; readonly body: unknown },
+  ): Call[] {
+    const calls: Call[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const call: Call = {
+          url: String(input),
+          method: init?.method ?? 'GET',
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+        };
+        calls.push(call);
+        const answer = handler(call);
+        return new Response(JSON.stringify(answer.body), {
+          status: answer.status,
+          headers: { 'content-type': 'application/json' },
+        });
+      }),
+    );
+    return calls;
+  }
+
+  const STATUS = {
+    provider: {
+      configured: true,
+      provider: 'OpenAI-compatible',
+      model: 'studio-planner-1',
+      reason: null,
+    },
+  };
+
+  function fillOf(session: Awaited<ReturnType<typeof mount>>['session']) {
+    const layer = session.getState().document.scene.layers[0];
+    if (layer?.type !== 'path') throw new Error('expected a path layer');
+    return layer.vector.style.fill;
+  }
+
+  it('runs a model plan through the same executor, and undoes it like any other edit', async () => {
+    const user = userEvent.setup();
+    const calls = stubProvider((call) =>
+      call.method === 'GET'
+        ? { status: 200, body: STATUS }
+        : {
+            status: 200,
+            body: {
+              plan: {
+                intent: 'Paint the selected card blue.',
+                steps: [
+                  {
+                    id: 'provider-1',
+                    tool: 'illustration.set_fill',
+                    args: { colour: '#3b82f6' },
+                  },
+                ],
+                unsupported: [],
+                source: 'provider',
+              },
+              provider: { label: 'OpenAI-compatible', model: 'studio-planner-1' },
+            },
+          },
+    );
+    const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
+    const { session } = await mount(services, [layer]);
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-provider-note')).toHaveTextContent(
+        /model-assisted planning is available/i,
+      );
+    });
+    // This sentence is outside the native planner's vocabulary: only the model can plan it.
+    await user.type(screen.getByTestId('assistant-request'), 'paint the card blue please');
+    await user.click(screen.getByTestId('assistant-model-plan'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-plan-source')).toHaveTextContent(
+        /model plan · OpenAI-compatible · studio-planner-1/i,
+      );
+    });
+    expect(screen.getByTestId('assistant-step-0')).toHaveTextContent('illustration.set_fill');
+
+    const posted = calls.find((call) => call.method === 'POST');
+    expect(posted?.url).toContain('/api/assistant/plan');
+    const sent = posted?.body as {
+      request: string;
+      studio: string;
+      document: { title: string; layers: number; selected: number };
+    };
+    expect(sent.request).toBe('paint the card blue please');
+    expect(sent.studio).toBe('illustration');
+    expect(sent.document.selected).toBe(1);
+
+    await user.click(screen.getByTestId('assistant-run'));
+    await waitFor(() => {
+      expect(fillOf(session)).toBe('#3b82f6');
+    });
+    await user.click(screen.getByTestId('assistant-undo'));
+    await waitFor(() => {
+      expect(fillOf(session)).toBe('#22cc88');
+    });
+  });
+
+  it('keeps native planning available and explains when no model is configured', async () => {
+    stubProvider(() => ({
+      status: 200,
+      body: {
+        provider: {
+          configured: false,
+          provider: null,
+          model: null,
+          reason: 'No external model is configured.',
+        },
+      },
+    }));
+    const user = userEvent.setup();
+    const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
+    const { session } = await mount(services, [layer]);
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-provider-note')).toHaveTextContent(
+        /no external model is configured/i,
+      );
+    });
+    expect(screen.getByTestId('assistant-model-plan')).toBeDisabled();
+
+    await user.type(
+      screen.getByTestId('assistant-request'),
+      'fill the selected paths with #ef4444',
+    );
+    await user.click(screen.getByTestId('assistant-plan'));
+    expect(screen.getByTestId('assistant-plan-source')).toHaveTextContent('Native plan');
+    await user.click(screen.getByTestId('assistant-run'));
+    await waitFor(() => {
+      expect(fillOf(session)).toBe('#ef4444');
+    });
+  });
+
+  it('reports a provider failure without running a step or touching the document', async () => {
+    stubProvider((call) =>
+      call.method === 'GET'
+        ? { status: 200, body: STATUS }
+        : {
+            status: 503,
+            body: {
+              error: {
+                kind: 'provider-not-configured',
+                message: 'The assistant provider is only partly configured.',
+                detail: 'Missing: ASSISTANT_PROVIDER_KEY.',
+              },
+            },
+          },
+    );
+    const user = userEvent.setup();
+    const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
+    const { session } = await mount(services, [layer]);
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-provider-note')).toHaveTextContent(/model-assisted/i);
+    });
+    await user.type(screen.getByTestId('assistant-request'), 'paint the card blue please');
+    await user.click(screen.getByTestId('assistant-model-plan'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-provider-error')).toHaveTextContent(
+        /only partly configured/i,
+      );
+    });
+    expect(screen.getByTestId('assistant-provider-error')).toHaveTextContent(
+      /ASSISTANT_PROVIDER_KEY/,
+    );
+    expect(screen.getByTestId('assistant-run')).toBeDisabled();
+    expect(screen.queryByTestId('assistant-step-0')).toBeNull();
+    expect(fillOf(session)).toBe('#22cc88');
+  });
+
+  it('refuses a malformed plan from the service instead of executing part of it', async () => {
+    stubProvider((call) =>
+      call.method === 'GET'
+        ? { status: 200, body: STATUS }
+        : {
+            status: 200,
+            body: {
+              plan: { intent: 'Paint it.', steps: [], source: 'native', unsupported: [] },
+              provider: { label: 'OpenAI-compatible', model: 'studio-planner-1' },
+            },
+          },
+    );
+    const user = userEvent.setup();
+    const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
+    const { session } = await mount(services, [layer]);
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-provider-note')).toHaveTextContent(/model-assisted/i);
+    });
+    await user.type(screen.getByTestId('assistant-request'), 'paint the card blue please');
+    await user.click(screen.getByTestId('assistant-model-plan'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-provider-error')).toHaveTextContent(/unreadable plan/i);
+    });
+    expect(screen.getByTestId('assistant-run')).toBeDisabled();
+    expect(fillOf(session)).toBe('#22cc88');
   });
 });
