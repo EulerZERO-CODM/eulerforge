@@ -1004,3 +1004,57 @@ because a v5 build reading a v6 document would strip `ranges` while reporting a 
 v5 → v6 migration rewrites nothing: a mask with no `ranges` keeps meaning exactly what it did, and
 `src/core/documents/migrations.test.ts` and `payload.test.ts` both prove that a v5 mask loads and is
 read as painted-only.
+
+## ADR-0030 — Text on a path is a property of the path, stored as parameters
+
+**Decision.** A path layer may carry one run of text laid along its own contour. The run is stored
+inside the layer's vector content (`vector.text` in the document schema) as parameters — content,
+font size, letter spacing, start offset as a fraction of the contour, which side of the line it sits
+on, colour and font stack — never as glyph positions or outlined geometry.
+
+**Why it belongs to the path.** The alternative, a separate text object that happens to follow a
+curve, would have to be kept in sync with the geometry on every node edit, transform and boolean
+operation, and would produce two history entries where the user made one change. Keeping the run on
+the path means a node drag moves the letters, a paint change leaves them alone, and one undo restores
+both the curve and the words. It also means a document has no orphaned text to explain when a path is
+deleted.
+
+**Layout is a pure function.** `src/core/vector/path-text.ts` flattens the path's first contour at
+`PATH_TEXT_FLATTENING` (0.25 units), measures each glyph with a measurer the caller supplies, and
+places it at the midpoint of its own advance with the tangent's angle. There is no DOM and no canvas
+in that module: `src/core/render/paint.ts` supplies `context.measureText` in the browser, and the
+tests supply a stub whose advance is exactly ten units per glyph. That is what makes the arithmetic
+pinnable (`path-text.test.ts`: straight lines, arcs, closed contours, spacing, dropped glyphs) instead
+of a screenshot assertion.
+
+**Painting is honest about what it cannot do.** The run is drawn after the shape's own fill and stroke,
+in the run's own colour, with `globalAlpha` taken from the layer opacity. Glyphs that would run past
+the end of the contour are dropped rather than wrapped or squeezed, and the layout reports how many;
+there is no second line and no ellipse-around-a-polygon baseline guessing. A path with no content
+paints exactly as it did before text existed, which is why `paintPath` skips the usual
+"does the style paint anything?" shortcut when a run is present — otherwise a shape whose only ink is
+text would be invisible.
+
+**The SVG boundary keeps the parameters.** A text-bearing shape is written as `<path id="text-path-N">`
+plus `<text font-size … letter-spacing … fill …><textPath href="#text-path-N" startOffset="25%">`.
+`dy` carries the baseline side for other viewers, and `data-forge-baseline` records it exactly so this
+project's importer never has to guess from a resolved length. Reading is deliberately narrow:
+
+- only a same-document `#id` reference is resolved, and only after the whole file has been walked, so
+  document order does not matter; the safety scan has already refused anything with a scheme or path;
+- an absolute `startOffset` is converted to a fraction of the contour's flattened length and reported
+  as an approximation, because SVG allows a length there and this model stores a fraction;
+- an unknown `font-family` is approximated to the system sans stack with a warning, since nothing is
+  downloaded;
+- free-standing `<text x y>` is still reported as unsupported rather than placed by guesswork, and a
+  reference to a shape that is not in the file is reported rather than silently dropped.
+
+**Schema v7.** The field is additive and nullable; ADR-0005 requires the bump because a v6 build
+reading a v7 document would strip the run while reporting a clean load. The v6 → v7 migration rewrites
+nothing: a path without `text` loads with the field absent or `null`, both of which mean "no text", and
+`src/core/documents/migrations.test.ts` proves that with a record written exactly as v6 wrote it.
+
+**Limits, stated rather than implied.** One run per path; the first contour only; no font embedding
+(the three stacks are the platform's own); no per-glyph editing, justification, or text on both sides
+of a line at once; content is capped at 240 characters, size at 4–512 units and spacing at
+−20–200 units. Drawing text *as* outline geometry is a different feature and remains planned.

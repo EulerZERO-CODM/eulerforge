@@ -161,15 +161,20 @@ importable; they are reported, not dropped silently.
 nudge, fill/stroke/opacity/cap/join/dash, gradient and pattern paint for either slot (editable stops,
 direction, motif, tile scale, background and rotation), boolean combination, shape-to-path conversion,
 SVG import and export, selection-scoped icon-set zip export (only the selected visible paths, with
-anything it cannot carry named), and Design ⇄ Illustration interchange with a per-layer report. Every
-edit is one labelled history entry; paint changes are clamped to the schema's documented ranges before
-they reach the document.
+anything it cannot carry named), Design ⇄ Illustration interchange with a per-layer report, and text
+laid along a path — one editable run per path, with content, size, letter spacing, start offset,
+baseline side, colour and font stack stored as parameters and drawn along the contour
+(`src/core/vector/path-text.ts`, ADR-0030). Every edit is one labelled history entry; paint changes and
+text settings are clamped to the schema's documented ranges before they reach the document, and the
+SVG boundary writes the run as a real `<text>`/`<textPath>` pair and reads that same form back.
 
-Still missing, and therefore still labelled planned in the registry: tracing a raster image, text on a
-path, multi-artboard documents, and curve-exact booleans. Interchange refuses rotated layers rather than
-baking the rotation into a frame. Icon sets contain path layers only: a selected rectangle, ellipse,
-text or graphic layer is named as skipped, and shape layers must be converted to paths first. The
-browser suite is Chromium only.
+Still missing, and therefore still labelled planned in the registry: tracing a raster image,
+multi-artboard documents, and curve-exact booleans. Text on a path is one run per path, drawn with a
+system font stack — no per-glyph editing, second run or font embedding, so a document opened where a
+stack is unavailable falls back to the system's own font. Interchange refuses rotated layers rather
+than baking the rotation into a frame. Icon sets contain path layers only: a selected rectangle,
+ellipse, text or graphic layer is named as skipped, and shape layers must be converted to paths first.
+The browser suite is Chromium only.
 
 ### Phase 4 — Raster engine and Photo Studio
 

@@ -391,6 +391,13 @@ export const ILLUSTRATION_STUDIO: StudioDefinition = {
         'Fill or stroke either slot with a linear gradient, a radial gradient or a repeating motif pattern (stripes, dots, grid or checks). Stops, direction, centre, radius, tile scale, background and rotation are editable and undoable; the canvas preview and the SVG export resolve the same geometry from the shape bounds, and a re-import restores the paint exactly.',
     },
     {
+      id: 'text.on-path',
+      label: 'Text on a path',
+      status: 'available',
+      detail:
+        'Lay one editable run along a path’s own contour: content, size, letter spacing, start offset, baseline side, colour and font stack. The letters follow the curve when its nodes move, the run is saved with the layer, and the SVG boundary writes it as a real <text> with a <textPath> reference — and reads that same form back, without resolving anything outside the file.',
+    },
+    {
       id: 'filters.fills',
       label: 'Blur and image filters',
       status: 'planned',
@@ -402,7 +409,7 @@ export const ILLUSTRATION_STUDIO: StudioDefinition = {
       label: 'SVG import and export',
       status: 'available',
       detail:
-        'A deterministic serialiser writes the artboard as SVG, and an importer brings paths, rectangles, ellipses, polygons and lines back as editable geometry. Scripts, event handlers, foreignObject and external references are refused rather than ignored.',
+        'A deterministic serialiser writes the artboard as SVG — including gradients, patterns and text laid on a path as a real <textPath> — and an importer brings paths, rectangles, ellipses, polygons, lines and that same text form back as editable geometry. Scripts, event handlers, foreignObject and external references are refused rather than ignored.',
     },
     {
       id: 'export.icon-set',

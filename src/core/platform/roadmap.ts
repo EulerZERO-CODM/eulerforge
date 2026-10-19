@@ -383,7 +383,8 @@ export const ROADMAP: readonly RoadmapPhase[] = [
       {
         id: 'p3.illustration',
         title: 'Illustration Studio workspace',
-        description: 'Pen, node editing, shape building and stroke controls on the shared kernel.',
+        description:
+          'Pen, node editing, shape building, stroke controls, gradient and pattern paint, and text laid along a path, all on the shared kernel.',
         status: 'partial',
         dependsOn: ['p3.svg-view'],
         completionCriteria: [
@@ -391,7 +392,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Studio flips to `available` in the registry with a working entry point',
         ],
         capabilityIds: ['studios.illustration'],
-        gap: 'Tracing a raster image, text on a path and multi-artboard documents are not implemented and stay labelled planned. Interchange refuses rotated layers rather than baking the rotation, so it is lossless within a smaller subset than the editor itself. Icon sets contain path layers only: a selected rectangle, ellipse, text or graphic layer is named as skipped rather than converted.',
+        gap: 'Tracing a raster image and multi-artboard documents are not implemented and stay labelled planned. Text on a path is a single run per path with a system font stack, not an embedded font. Interchange refuses rotated layers rather than baking the rotation, so it is lossless within a smaller subset than the editor itself. Icon sets contain path layers only: a selected rectangle, ellipse, text or graphic layer is named as skipped rather than converted.',
       },
     ],
     exitCriteria: [
