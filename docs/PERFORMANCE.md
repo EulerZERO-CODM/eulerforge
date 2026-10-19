@@ -185,11 +185,12 @@ and the commit it measured (`GITHUB_HEAD_SHA` in CI, `local` in the sandbox).
 
 ### The acceptance run: CI, both phases, all twelve scenarios
 
-Every complete CI run of this benchmark that has a durable report, newest first. `43c4008` is the commit
-that fixed the harness's preparation; **every commit after it changes documentation only**, so `9eb530e`,
-`5a81f69`, `a585815`, `ec28a27`, `bd9e4bc`, `712356f`, `30226cd` and anything that follows them measure
-byte-identical application code with a byte-identical benchmark — each row below is the same measurement,
-repeated, on a different runner instance.
+Every complete CI run of this benchmark that has a durable report, newest first. This is the **Phase 2
+acceptance series**: `43c4008` is the commit that fixed the harness's preparation, and the commits after
+it in that series — `9eb530e`, `5a81f69`, `a585815`, `ec28a27`, `bd9e4bc`, `712356f`, `30226cd` — changed
+documentation only, so each row below is the same measurement of byte-identical application code,
+repeated on a different runner instance. Phases 3–7 changed code; their CI results are in §7 rather than
+mixed into this series.
 
 | Run | Workflows — pull request · push | Browser (Chromium) jobs | Verdict | Report |
 | --- | --- | --- | --- | --- |
@@ -437,9 +438,23 @@ The local run of the production build afterwards, same throttle and sample count
 | `resize-handle` | 5 | 16.7 ms | 16.8 ms | 33.3 ms | 0 % of 353 |
 
 Both the pre-change and post-change builds pass locally, so these numbers do not prove the CI
-failure is gone; they show the change did not cost anything, and the next CI run on the new head is
-what answers whether one update per frame is enough headroom for a loaded shared runner. The budget
-itself is unchanged.
+failure is gone; they show the change did not cost anything. The next complete CI run answered the
+question: **`8e30e27` (Phase 6) failed the same three drag scenarios** on GitHub's runner, on the build
+that contains the coalescing change. (The run that prompted it, `c4cdda3`, is the one described
+above.) The report CI published for `8e30e27` is archived verbatim in
+[`perf-reports/8e30e27.md`](perf-reports/8e30e27.md): `drag-layer` p95 116.6 ms / worst 150.1 ms with
+55 % of its 253 gaps over 50 ms; `drag-group` p95 83.4 ms / worst 116.7 ms with 35 % over 50 ms;
+`resize-handle` p95 100.1 ms / worst 133.3 ms with 52 % over 50 ms. The sandbox, on the same commit
+and the same throttle, reports p50 16.7 ms with 0 % of gaps over 50 ms on all three, and the full
+browser suite passes there (72 specs).
+
+The budget was **not** widened. The measurements point to a loaded shared runner rather than a per-frame
+cost in the application — on that one run `drag-group` still had a 16.7 ms median while `drag-layer` had
+66.6 ms for the same painting path, and the same commit is at display rate in the sandbox — but that is
+an inference, not a measurement of the runner, and this document does not treat it as a pass. What the CI report can be asked for is a gross
+regression; what it reports is that a CPU-throttled drag on that machine does not stay at 60 Hz. The CI
+Browser job's log and Playwright archive are not reachable from the development environment this
+document was written in, so the performance report is the only part of that job's evidence quoted here.
 
 ## 8. Limitations
 
