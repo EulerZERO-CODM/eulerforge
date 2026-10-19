@@ -24,8 +24,17 @@ studios**:
   timeline and graph editor, playback, and a PNG frame sequence that a browser test compares with the
   preview pixel for pixel.
 - **Illustration Studio** — a framework-free vector kernel: pen paths, Bézier node editing, boolean
-  operations with validated results, deterministic SVG import/export with an explicit report, and a
-  selection-scoped icon-set ZIP.
+  operations with validated results, deterministic SVG import/export with an explicit report,
+  text on a path, a selection-scoped icon-set ZIP, and image tracing that turns a PNG/JPEG/WebP into
+  editable filled paths (palette, detail and speck threshold adjustable; one undoable step).
+
+An **AI Creative Assistant** panel is mounted in Design, Photo and Illustration. It is a typed tool
+registry with a deterministic native planner, an executor that applies the studios' own commands and
+exporters, per-step verification and a checkpoint that can resume an interrupted run. It works with
+no model and no key; a deployment may optionally point it at an OpenAI-compatible endpoint through
+server-only environment variables, and every plan — native or model-written — is validated against
+the registry before anything touches a document. It is not a chatbot and it does not claim tools it
+does not have: Motion and Video show a refusal that names the missing tool.
 
 **3D Studio** is the one remaining planned studio; its definition records the renderer decision
 instead of a choice. Nothing here claims cloud sync, accounts, collaboration, 3D or AI features, and
@@ -116,11 +125,19 @@ verifies it. A summary:
 
 **Not implemented — stated as such in the UI**
 
-- Any editing tool (no brushes, shapes, layers, selections, filters, timeline or 3D viewport).
-- Rasterisation/rendering, so PNG, JPEG, WebP, SVG, PDF, MP4, WebM and glTF export are **blocked**
-  in the export panel with the reason shown, not silently broken.
-- Accounts, cloud sync, sharing, teams, billing and telemetry (all rejected at the schema level).
-- A remote asset catalogue adapter, and an AI tutor.
+- Multiple artboards per document, per-run text styling, custom font upload, reusable styles,
+  templates and brand kits, PDF output, curve-exact booleans, and shape rotation in the design
+  model.
+- MP4 encoding and offline (faster-than-real-time) video export; video proxies, transitions, fades
+  and ducking. The three-minute export criterion is not met.
+- Motion masks, imported illustration artboards inside motion documents, transitions and expressions.
+- Photo blend modes beyond the documented adjustment stack, and a 12 MP/16 ms guarantee (the
+  working copy and the measured budgets are stated in `docs/PERFORMANCE.md`, not assumed).
+- Real-time collaboration, presence, teams and roles; email verification, password reset, OAuth and
+  multi-factor authentication. The account server is optional, single-process and off by default.
+- Billing, payments and telemetry (rejected at the schema level).
+- A remote asset catalogue adapter, an AI tutor, and any assistant tool that does not exist in the
+  registry.
 
 ## Project layout
 
@@ -166,7 +183,7 @@ Rules that keep this maintainable:
   refuses to become.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — layers, data flow, extension conventions.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — implemented / planned / exploratory, with exit criteria.
-- [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision records (ADR-0001 … ADR-0027).
+- [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision records (ADR-0001 … ADR-0032).
 - [`docs/SERVER.md`](docs/SERVER.md) — the optional account/sync server: endpoints, data layout,
   migrations, local setup, tests and deployment limits.
 - [`AGENTS.md`](AGENTS.md) — conventions for humans and coding agents working in this repository.

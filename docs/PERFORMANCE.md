@@ -177,6 +177,13 @@ anything else.
   from the `@sparticuz/chromium` npm package — a different build from CI's. It is the right place to
   reproduce *behaviour* (locators, preparation, history state) and the wrong place to compare timings with
   CI.
+
+  **Current limitation (2026-10-19).** This reproduction path is no longer available in this sandbox:
+  the `@sparticuz/chromium` binary extracts but cannot start because the image lacks `libnspr4`/
+  `libnss3`, and the Debian package indexes are unreachable, so the libraries cannot be installed.
+  Playwright's own download is still blocked. Browser measurements here therefore have no current
+  local evidence; the CI rows below remain the acceptance evidence, and this document does not quote
+  a sandbox number as if it were one.
 - **No mid-range laptop has run this benchmark.** The four-fold throttle stands in for that hardware; §4
   says what the proxy can and cannot mean.
 
@@ -559,3 +566,45 @@ is stated per range and at the document's eight-range limit, over the same 1280 
 
 `rasteriseMask` draws painted strokes on a canvas first and then unions the ranges in; range
 preparation (parsing a hex colour, computing a falloff width) happens once per render, not per pixel.
+
+## 8. Photo pipeline at 12 MP — measured, not assumed
+
+The roadmap's Phase 4 wording asks for a 12 MP / 16 ms measurement. That target is about the CPU
+reference path (`src/core/photo/pipeline.ts`) unless a browser with WebGL2 is available, so the
+measurable half was measured directly, with numbers kept so the claim cannot drift into folklore.
+
+```bash
+FORGE_BENCH=1 npx vitest run src/core/photo/pipeline.bench.test.ts
+```
+
+The benchmark allocates a synthetic RGBA image, runs one unrecorded warm-up pass, then three recorded
+passes and reports the median; it is skipped in the normal suite (the 12 MP case takes seconds) and
+never fails on a slow machine, because its output is the artefact.
+
+- **Environment:** Node v22.22.3, 2 vCPU Intel Xeon @ 2.60 GHz, Linux x64 — the development sandbox,
+  not CI and not a GPU. Date: 2026-10-19.
+- **Input:** 4000 × 3000 (12.0 MP) and 1280 × 853 (1.1 MP), RGBA bytes, sRGB.
+
+| Stack | 12 MP median | 12 MP best / worst | 1280 px preview median |
+| --- | ---: | ---: | ---: |
+| 1 adjustment (exposure) | **1 089 ms** | 1 052 / 1 101 ms | **100 ms** |
+| 4 adjustments | **1 827 ms** | 1 784 / 1 962 ms | **179 ms** |
+| 12 adjustments | **5 301 ms** | 5 228 / 5 524 ms | **526 ms** |
+
+**Verdict.** The 16 ms budget is **not met**, and cannot be met by this JavaScript path at 12 MP: 16 ms
+for 12 million pixels is roughly 1.3 ns per pixel for the whole stack. The product does not pretend
+otherwise:
+
+- **Previews are capped at 1280 px** (`src/components/photo/use-photo-preview.ts`), where this CPU
+  fallback costs 100–526 ms — still above a frame, but this is the fallback. The WebGL2 renderer is
+  the interactive path on a machine with a GPU; its full-resolution timing has **not** been measured
+  here, because this sandbox cannot start a browser.
+- **The working copy is capped at 2048 px on the long edge** and embedded in the project. A 12 MP
+  photograph is downscaled on import and the interface says so
+  (`src/components/photo/photo-import-panel.tsx`).
+- **Export re-renders once** at the stored working copy, so an export pays one pass of the numbers
+  above at ≤2048 px, not a per-frame cost.
+- **Tiling** would bound peak memory for a larger canvas, but it would not change the per-pixel cost
+  that makes 12 MP / 16 ms unreachable on this path; the engine's real 12 MP story is the GPU path,
+  which remains unmeasured. Tiling is therefore not implemented and is labelled planned, rather than
+  added to make a number look closer.
