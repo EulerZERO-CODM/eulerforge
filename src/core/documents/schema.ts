@@ -14,6 +14,8 @@ import {
   MAX_CONTOURS,
   MAX_NODES_PER_CONTOUR,
   MAX_NODES_TOTAL,
+  PAINT_LIMITS,
+  PATTERN_MOTIFS,
   STROKE_LINE_CAPS,
   STROKE_LINE_JOINS,
   VECTOR_STYLE_LIMITS,
@@ -281,7 +283,50 @@ export const vectorPathSchema = z
     }
   }) satisfies z.ZodType<VectorPath>;
 
+/**
+ * Gradients and patterns, as stored.
+ *
+ * The same shape the vector kernel's `PaintSpec` describes. It is optional in the schema so a
+ * document written before paint existed still validates; absent means "solid, use `fill`". Stops are
+ * bounded and colours are hex, so nothing here can smuggle a CSS expression, a URL or a resource
+ * reference into a document.
+ */
+export const gradientStopSchema = z.object({
+  offset: finiteNumber('offset').min(0).max(1),
+  color: hexColorSchema,
+});
+
+export const paintSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('solid'), color: hexColorSchema }),
+  z.object({
+    kind: z.literal('linear-gradient'),
+    from: z.object({ x: finiteNumber('x'), y: finiteNumber('y') }),
+    to: z.object({ x: finiteNumber('x'), y: finiteNumber('y') }),
+    stops: z.array(gradientStopSchema).min(2).max(PAINT_LIMITS.maxStops),
+  }),
+  z.object({
+    kind: z.literal('radial-gradient'),
+    centre: z.object({ x: finiteNumber('x'), y: finiteNumber('y') }),
+    radius: finiteNumber('radius').min(0).max(4),
+    stops: z.array(gradientStopSchema).min(2).max(PAINT_LIMITS.maxStops),
+  }),
+  z.object({
+    kind: z.literal('pattern'),
+    motif: z.enum(PATTERN_MOTIFS),
+    foreground: hexColorSchema,
+    background: hexColorSchema.nullable(),
+    scale: finiteNumber('scale')
+      .min(PAINT_LIMITS.minPatternScale)
+      .max(PAINT_LIMITS.maxPatternScale),
+    rotation: finiteNumber('rotation')
+      .min(-PAINT_LIMITS.maxRotationDegrees)
+      .max(PAINT_LIMITS.maxRotationDegrees),
+  }),
+]);
+
 export const vectorStyleSchema = z.object({
+  fillPaint: paintSchema.nullable().optional(),
+  strokePaint: paintSchema.nullable().optional(),
   fill: hexColorSchema.nullable(),
   fillRule: z.enum(['nonzero', 'evenodd']),
   fillOpacity: finiteNumber('fillOpacity').min(0).max(1),

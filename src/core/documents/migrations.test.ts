@@ -196,6 +196,81 @@ describe('migrateDocument — legacy records to the current schema', () => {
   });
 });
 
+describe('v4 → v5: paint arrives without rewriting older documents', () => {
+  function v4PathDocument() {
+    const created = createDocument(
+      {
+        title: 'Saved before paint',
+        studioId: 'illustration',
+        documentTypeId: brand<'DocumentTypeId'>('illustration.artboard'),
+        canvas: DEFAULT_CANVAS,
+        scene: {
+          layers: [
+            {
+              id: brand<'LayerId'>('lyr-flat'),
+              name: 'Flat card',
+              visible: true,
+              locked: false,
+              opacity: 1,
+              frame: { x: 0, y: 0, width: 10, height: 10 },
+              type: 'path',
+              vector: {
+                path: {
+                  contours: [
+                    {
+                      closed: true,
+                      nodes: [
+                        { point: { x: 0, y: 0 }, handleIn: null, handleOut: null },
+                        { point: { x: 10, y: 0 }, handleIn: null, handleOut: null },
+                        { point: { x: 10, y: 10 }, handleIn: null, handleOut: null },
+                      ],
+                    },
+                  ],
+                },
+                style: {
+                  fill: '#22cc88',
+                  fillRule: 'nonzero',
+                  fillOpacity: 1,
+                  stroke: null,
+                  strokeWidth: 1,
+                  strokeOpacity: 1,
+                  lineCap: 'butt',
+                  lineJoin: 'miter',
+                  dashArray: [],
+                },
+              },
+            },
+          ],
+        },
+      },
+      { generateId: () => 'doc-v4-paint', now: () => new Date('2026-06-01T00:00:00.000Z') },
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    return JSON.parse(JSON.stringify(created.value)) as Record<string, unknown>;
+  }
+
+  it('stamps version 5 and leaves the flat fill meaning the same thing', () => {
+    const v4 = { ...v4PathDocument(), schemaVersion: 4 };
+    const migrated = migrateDocument(v4);
+    expect(migrated.ok).toBe(true);
+    if (!migrated.ok) return;
+    expect(migrated.value.schemaVersion).toBe(5);
+    const layer = migrated.value.scene.layers[0];
+    if (layer?.type !== 'path') throw new Error('expected a path layer');
+    expect(layer.vector.style.fill).toBe('#22cc88');
+    expect(layer.vector.style.fillPaint).toBeUndefined();
+  });
+
+  it('does not invent paint for a document that had none', () => {
+    const v4 = { ...v4PathDocument(), schemaVersion: 4 };
+    const migrated = migrateDocument(v4);
+    if (!migrated.ok) throw new Error(migrated.error.message);
+    const layer = migrated.value.scene.layers[0];
+    if (layer?.type !== 'path') throw new Error('expected a path layer');
+    expect(layer.vector.style.strokePaint).toBeUndefined();
+  });
+});
+
 describe('pendingMigrations', () => {
   it('lists the steps a version still has to pass through', () => {
     // One step per published version, so a version-0 record walks the whole documented chain.
@@ -210,8 +285,10 @@ describe('pendingMigrations', () => {
     expect(steps.map((step) => `${String(step.from)}->${String(step.to)}`)).toEqual([
       '2->3',
       '3->4',
+      '4->5',
     ]);
     expect(steps[0]?.description).toMatch(/vector path layers/i);
     expect(steps[1]?.description).toMatch(/studio payload/i);
+    expect(steps[2]?.description).toMatch(/gradient or pattern paint/i);
   });
 });

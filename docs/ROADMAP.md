@@ -139,23 +139,37 @@ handlers, `foreignObject`, external references and doctypes; it names anything i
 of approximating it. Round-trip tolerance is `1e-3` in user units (`src/core/svg/svg.test.ts`), and
 `e2e/illustration.spec.ts` exports a file in Chromium, reads its bytes and re-imports them.
 
-Known limits: text, gradients, filters, masks, clip paths and CSS style sheets are not importable; they
-are reported, not dropped silently.
+Fill and stroke can be a solid colour, a linear gradient, a radial gradient or a repeating motif
+pattern (`stripes`, `dots`, `grid`, `checks`). Paint is stored as fractions of the shape's bounding box
+and resolved against the same bounds by the canvas painter and the SVG writer, so the preview and the
+file cannot drift; gradients are written in `userSpaceOnUse` coordinates and a pattern carries its
+model parameters in a `data-forge-pattern` annotation that makes a re-import exact. Stops, direction,
+tile scale and rotation are editable and undoable, and `src/core/svg/paint.test.ts`,
+`src/core/vector/paint.test.ts`, `src/core/render/paint.test.ts` and
+`src/core/documents/paint-schema.test.ts` cover the model, both renderers, the file format and the
+schema boundary.
+
+Known limits: import carries gradients expressible as shape-relative fractions and this project's four
+motifs; arbitrary pattern content, gradient `href` inheritance, `spreadMethod` and focal radial
+gradients are reported as approximated. Text, filters, masks, clip paths and CSS style sheets are not
+importable; they are reported, not dropped silently.
 
 ### Illustration Studio workspace — partial
 
 `/studios/illustration` is a real, `available` studio with a working editor
 (`src/components/illustration/**`): pen drawing, shapes, node/handle editing, marquee and keyboard
-nudge, fill/stroke/opacity/cap/join/dash, boolean combination, shape-to-path conversion, SVG import and
-export, selection-scoped icon-set zip export (only the selected visible paths, with anything it cannot
-carry named), and Design ⇄ Illustration interchange with a per-layer report. Every edit is one
-labelled history entry.
+nudge, fill/stroke/opacity/cap/join/dash, gradient and pattern paint for either slot (editable stops,
+direction, motif, tile scale, background and rotation), boolean combination, shape-to-path conversion,
+SVG import and export, selection-scoped icon-set zip export (only the selected visible paths, with
+anything it cannot carry named), and Design ⇄ Illustration interchange with a per-layer report. Every
+edit is one labelled history entry; paint changes are clamped to the schema's documented ranges before
+they reach the document.
 
-Still missing, and therefore still labelled planned in the registry: gradient and pattern fills,
-tracing a raster image, text on a path, multi-artboard documents, and curve-exact booleans. Interchange
-refuses rotated layers rather than baking the rotation into a frame. Icon sets contain path layers only:
-a selected rectangle, ellipse, text or graphic layer is named as skipped, and shape layers must be
-converted to paths first. The browser suite is Chromium only.
+Still missing, and therefore still labelled planned in the registry: tracing a raster image, text on a
+path, multi-artboard documents, and curve-exact booleans. Interchange refuses rotated layers rather than
+baking the rotation into a frame. Icon sets contain path layers only: a selected rectangle, ellipse,
+text or graphic layer is named as skipped, and shape layers must be converted to paths first. The
+browser suite is Chromium only.
 
 ### Phase 4 — Raster engine and Photo Studio
 

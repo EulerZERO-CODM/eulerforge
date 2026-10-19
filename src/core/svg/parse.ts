@@ -30,6 +30,9 @@
 
 import { createPath, MAX_NODES_TOTAL, type VectorPath } from '../vector/types';
 import { parsePathData } from '../vector/path-data';
+import type { PaintSpec, PatternPaint } from '../vector/paint';
+import { boundsOfPath } from '../vector/bounds';
+import type { VectorBox } from '../vector/types';
 import { createShape, type SvgArtwork, type SvgShape, type SvgShapeStyle } from './artwork';
 import { ellipsePath, linePath, rectanglePath } from '../vector/shapes';
 import { apply, matrix, transformPath, type Matrix } from '../vector/transform';
@@ -404,7 +407,24 @@ function parseLength(value: string | undefined): number | null {
  */
 type StyleAccumulator = { -readonly [Key in keyof SvgShapeStyle]: SvgShapeStyle[Key] } & {
   unknown: string[];
+  /** Id of a paint definition the shape references, resolved once its bounds are known. */
+  fillPaintRef?: string | null;
+  strokePaintRef?: string | null;
 };
+
+/**
+ * A paint definition as the file states it.
+ *
+ * `fraction` definitions use SVG's `objectBoundingBox` units, which are already the stored
+ * model's fractions. `user` definitions are in absolute coordinates and are converted against
+ * the bounds of the shape that references them.
+ */
+type PaintDefinition =
+  | { readonly units: 'fraction'; readonly paint: PaintSpec }
+  | { readonly units: 'user'; readonly paint: PaintSpec; readonly tile: number | null };
+
+/** Definitions declared in the file, by id. Only same-document references are ever followed. */
+type PaintRegistry = ReadonlyMap<string, PaintDefinition>;
 
 function parseColour(
   value: string,
@@ -453,12 +473,28 @@ function parseNumberOrNull(value: string | undefined): number | null {
   return parsed;
 }
 
+/**
+ * Resolves `url(#id)` to a definition declared in the same document.
+ *
+ * Any other URL — `url(http://…)`, `url(image.png)`, an unparsable fragment or an id that is not
+ * in the file — returns null and falls through to the colour parser, which reports it. An imported
+ * file can therefore reference paint only by id inside itself, never a resource.
+ */
+function paintReference(value: string, paints: PaintRegistry): string | null {
+  const match = /^url\(\s*#([^)\s]+)\s*\)$/i.exec(value.trim());
+  if (!match) return null;
+  const id = match[1];
+  if (id === undefined) return null;
+  return paints.has(id) ? id : null;
+}
+
 function styleFromAttributes(
   attributes: ReadonlyMap<string, string>,
   inherited: StyleAccumulator,
   issues: SvgIssue[],
   inheritedColour: string | null,
   code: string,
+  paints: PaintRegistry = new Map(),
 ): StyleAccumulator {
   const declarations = new Map<string, string>();
   const styleAttribute = attributes.get('style');
@@ -475,11 +511,19 @@ function styleFromAttributes(
   const style: StyleAccumulator = { ...inherited, unknown: inherited.unknown };
   const unknown: string[] = [...inherited.unknown];
 
-  const fill = read('fill');
-  if (fill !== undefined) style.fill = parseColour(fill, inheritedColour, issues, code);
+  const fills = read('fill');
+  if (fills !== undefined) {
+    const reference = paintReference(fills, paints);
+    if (reference !== null) style.fillPaintRef = reference;
+    else style.fill = parseColour(fills, inheritedColour, issues, code);
+  }
 
   const stroke = read('stroke');
-  if (stroke !== undefined) style.stroke = parseColour(stroke, inheritedColour, issues, code);
+  if (stroke !== undefined) {
+    const reference = paintReference(stroke, paints);
+    if (reference !== null) style.strokePaintRef = reference;
+    else style.stroke = parseColour(stroke, inheritedColour, issues, code);
+  }
 
   const fillRule = read('fill-rule');
   if (fillRule === 'evenodd' || fillRule === 'nonzero') style.fillRule = fillRule;
@@ -575,6 +619,7 @@ function styleFromAttributes(
 type WalkContext = {
   readonly matrixValue: Matrix;
   readonly style: StyleAccumulator;
+  readonly paints: PaintRegistry;
   readonly opacity: number;
   readonly issues: SvgIssue[];
   readonly elements: string[];
@@ -713,6 +758,172 @@ function geometryFor(element: RawElement, issues: SvgIssue[]): VectorPath | null
   }
 }
 
+/**
+ * Reads every gradient and pattern the file declares.
+ *
+ * Only the two coordinate systems the stored model can express are accepted, and they are
+ * converted into the model's fractional form here: `objectBoundingBox` values are already
+ * fractions, and `userSpaceOnUse` ones are kept absolute and divided by the shape's bounds when
+ * the shape that references them is created. A definition this importer cannot express is named
+ * in the report rather than silently replaced with black.
+ */
+/**
+ * Turns a paint reference into stored paint for one shape.
+ *
+ * Absolute coordinates are divided by the shape's own bounds, which is the only place in the
+ * importer where both a definition and the shape that uses it are known. A definition that cannot
+ * be expressed — a foreign pattern with arbitrary contents, a gradient with fewer than two stops —
+ * is reported and returns null, so the caller keeps the solid colour rather than painting black.
+ */
+function resolvePaint(
+  id: string | null,
+  paints: PaintRegistry,
+  box: VectorBox,
+  slot: 'fill' | 'stroke',
+  issues: SvgIssue[],
+): PaintSpec | null {
+  if (id === null) return null;
+  const definition = paints.get(id);
+  if (!definition) return null;
+  const width = Math.max(box.maxX - box.minX, 1e-6);
+  const height = Math.max(box.maxY - box.minY, 1e-6);
+  const shorter = Math.min(width, height);
+
+  if (definition.units === 'fraction') return definition.paint;
+
+  const paint = definition.paint;
+  if (paint.kind === 'linear-gradient') {
+    return {
+      kind: 'linear-gradient',
+      from: { x: (paint.from.x - box.minX) / width, y: (paint.from.y - box.minY) / height },
+      to: { x: (paint.to.x - box.minX) / width, y: (paint.to.y - box.minY) / height },
+      stops: paint.stops,
+    };
+  }
+  if (paint.kind === 'radial-gradient') {
+    return {
+      kind: 'radial-gradient',
+      centre: {
+        x: (paint.centre.x - box.minX) / width,
+        y: (paint.centre.y - box.minY) / height,
+      },
+      radius: paint.radius / shorter,
+      stops: paint.stops,
+    };
+  }
+  if (paint.kind === 'pattern') {
+    const tile = definition.tile ?? shorter * 0.25;
+    return { ...paint, scale: tile / shorter };
+  }
+
+  issues.push({
+    severity: 'approximated',
+    code: `paint.${slot}-unrepresentable`,
+    message: `A ${slot} paint could not be expressed by this model and was replaced with its solid colour.`,
+  });
+  return null;
+}
+
+/** Reads one `<linearGradient>`, `<radialGradient>` or `<pattern>` definition. */
+function paintFor(element: RawElement, id: string, issues: SvgIssue[]): PaintDefinition | null {
+  const name = element.name.toLowerCase();
+  // Takes the source element explicitly: a stop's `offset` lives on the `<stop>`, not on the
+  // gradient that contains it.
+  const numberOn = (source: RawElement, attribute: string, fallback: number): number => {
+    const raw = source.attributes.get(attribute);
+    if (raw === undefined) return fallback;
+    const trimmed = raw.trim();
+    if (trimmed.endsWith('%')) {
+      const value = Number(trimmed.slice(0, -1));
+      return Number.isFinite(value) ? value / 100 : fallback;
+    }
+    const value = parseLength(trimmed);
+    return value !== null && Number.isFinite(value) ? value : fallback;
+  };
+  const number = (attribute: string, fallback: number): number =>
+    numberOn(element, attribute, fallback);
+  const units =
+    element.attributes.get('gradientUnits') ??
+    element.attributes.get('patternUnits') ??
+    'objectBoundingBox';
+  const absolute = units.toLowerCase() === 'userspaceonuse';
+
+  if (name === 'pattern') {
+    // Our own output carries the model's parameters, so a re-import is exact for a motif that is
+    // ours rather than a best guess at arbitrary geometry.
+    const annotation = element.attributes.get('data-forge-pattern');
+    const tile = number('width', 8);
+    if (annotation) {
+      try {
+        const parsed = JSON.parse(annotation) as PatternPaint;
+        return { units: 'user', paint: parsed, tile };
+      } catch {
+        // A malformed annotation falls through to the geometric reading below.
+      }
+    }
+    issues.push({
+      severity: 'approximated',
+      code: 'paint.pattern-unrepresentable',
+      message: `The pattern "${id}" is not one this editor can express; its shapes were kept and its paint fell back to a solid colour.`,
+    });
+    return null;
+  }
+
+  const stops: { offset: number; color: string }[] = [];
+  for (const child of element.children) {
+    if (child.name.toLowerCase() !== 'stop') continue;
+    const offset = numberOn(child, 'offset', 0);
+    const colour = child.attributes.get('stop-color') ?? '#000000';
+    const parsed = parseColour(colour, null, issues, 'paint.stop');
+    if (parsed === null) continue;
+    stops.push({ offset: Math.min(1, Math.max(0, offset)), color: parsed });
+  }
+  if (stops.length < 2) {
+    issues.push({
+      severity: 'approximated',
+      code: 'paint.gradient-too-few-stops',
+      message: `The gradient "${id}" has fewer than two usable stops and was replaced with its first colour.`,
+    });
+    return null;
+  }
+  const sorted = [...stops].sort((a, b) => a.offset - b.offset);
+
+  if (name === 'lineargradient') {
+    const paint: PaintSpec = {
+      kind: 'linear-gradient',
+      from: { x: number('x1', 0), y: number('y1', 0) },
+      to: { x: number('x2', 1), y: number('y2', 0) },
+      stops: sorted,
+    };
+    return absolute
+      ? { units: 'user' as const, paint, tile: null }
+      : { units: 'fraction' as const, paint };
+  }
+  const paint: PaintSpec = {
+    kind: 'radial-gradient',
+    centre: { x: number('cx', 0.5), y: number('cy', 0.5) },
+    radius: number('r', 0.5),
+    stops: sorted,
+  };
+  return absolute
+    ? { units: 'user' as const, paint, tile: null }
+    : { units: 'fraction' as const, paint };
+}
+
+function collectPaints(root: RawElement, issues: SvgIssue[]): PaintRegistry {
+  const registry = new Map<string, PaintDefinition>();
+  const visit = (element: RawElement): void => {
+    const name = element.name.toLowerCase();
+    const id = element.attributes.get('id');
+    if (id && (name === 'lineargradient' || name === 'radialgradient' || name === 'pattern')) {
+      const paint = paintFor(element, id, issues);
+      if (paint) registry.set(id, paint);
+    }
+    for (const child of element.children) visit(child);
+  };
+  visit(root);
+  return registry;
+}
 function walk(element: RawElement, context: WalkContext, depth: number): void {
   const name = element.name.toLowerCase();
   context.elements.push(name);
@@ -755,6 +966,7 @@ function walk(element: RawElement, context: WalkContext, depth: number): void {
     context.issues,
     null,
     'style',
+    context.paints,
   );
   const opacityAttribute = parseNumberOrNull(element.attributes.get('opacity'));
   const opacity =
@@ -797,15 +1009,38 @@ function walk(element: RawElement, context: WalkContext, depth: number): void {
     return;
   }
 
+  const placed = transformPath(geometry, localMatrix);
+  const bounds = boundsOfPath(placed);
+  const box = bounds ?? { minX: 0, minY: 0, maxX: 1, maxY: 1 };
+  const fillPaint = resolvePaint(
+    style.fillPaintRef ?? null,
+    context.paints,
+    box,
+    'fill',
+    context.issues,
+  );
+  const strokePaint = resolvePaint(
+    style.strokePaintRef ?? null,
+    context.paints,
+    box,
+    'stroke',
+    context.issues,
+  );
+  if (fillPaint === null && style.fillPaintRef) {
+    // Named above by resolvePaint; the shape still imports with the solid colour behind it.
+  }
+
   context.shapes.push(
     createShape(
       titleOf(element) ?? element.attributes.get('id') ?? context.title ?? name,
-      transformPath(geometry, localMatrix),
+      placed,
       {
-        fill: style.fill,
+        fillPaint,
+        strokePaint,
+        fill: fillPaint === null ? style.fill : null,
         fillRule: style.fillRule,
         fillOpacity: style.fillOpacity,
-        stroke: style.stroke,
+        stroke: strokePaint === null ? style.stroke : null,
         strokeWidth: style.strokeWidth,
         strokeOpacity: style.strokeOpacity,
         lineCap: style.lineCap,
@@ -978,10 +1213,12 @@ export function parseSvg(source: string): Result<SvgImportResult> {
     unknown: [],
   };
 
+  const paints = collectPaints(root, issues);
   const context: WalkContext = {
     matrixValue: matrix(1, 0, 0, 1, 0, 0),
     title: null,
-    style: styleFromAttributes(root.attributes, rootStyle, issues, null, 'style'),
+    style: styleFromAttributes(root.attributes, rootStyle, issues, null, 'style', paints),
+    paints,
     opacity: 1,
     issues,
     elements: [],

@@ -19,6 +19,10 @@
  */
 
 import { toPathData } from '../vector/path-data';
+import { boundsOfPath } from '../vector/bounds';
+import type { VectorBox as Box } from '../vector/types';
+import { resolveGradient, resolvePattern, type PaintSpec } from '../vector/paint';
+import { stylePaintsSomething } from '../vector/style';
 import { roundCoordinate } from '../vector/tolerance';
 import type { SvgArtwork, SvgShape, SvgShapeStyle } from './artwork';
 import { validateArtwork } from './artwork';
@@ -61,17 +65,39 @@ function isDefaultFill(style: SvgShapeStyle): boolean {
  * the specification's initial value rather than against what our own default happens to be — which
  * is why the defaults are spelled out next to the comparisons.
  */
-function styleAttributes(style: SvgShapeStyle, digits: number): readonly string[] {
+function styleAttributes(
+  style: SvgShapeStyle,
+  digits: number,
+  paintIds: { readonly fill: string | null; readonly stroke: string | null } = {
+    fill: null,
+    stroke: null,
+  },
+): readonly string[] {
   const attributes: string[] = [];
 
-  if (style.fill === null) attributes.push('fill="none"');
+  if (paintIds.fill !== null) attributes.push(`fill="url(#${paintIds.fill})"`);
+  else if (style.fill === null) attributes.push('fill="none"');
   else if (!isDefaultFill(style)) attributes.push(`fill="${escapeXmlAttribute(style.fill)}"`);
 
   if (style.fillRule !== 'nonzero') attributes.push(`fill-rule="${style.fillRule}"`);
   if (style.fillOpacity !== 1)
     attributes.push(`fill-opacity="${formatSvgNumber(style.fillOpacity, digits)}"`);
 
-  if (style.stroke !== null) {
+  if (paintIds.stroke !== null) {
+    attributes.push(`stroke="url(#${paintIds.stroke})"`);
+    if (style.strokeWidth !== 1)
+      attributes.push(`stroke-width="${formatSvgNumber(style.strokeWidth, digits)}"`);
+    if (style.strokeOpacity !== 1) {
+      attributes.push(`stroke-opacity="${formatSvgNumber(style.strokeOpacity, digits)}"`);
+    }
+    if (style.lineCap !== 'butt') attributes.push(`stroke-linecap="${style.lineCap}"`);
+    if (style.lineJoin !== 'miter') attributes.push(`stroke-linejoin="${style.lineJoin}"`);
+    if (style.dashArray.length > 0) {
+      attributes.push(
+        `stroke-dasharray="${style.dashArray.map((entry) => formatSvgNumber(entry, digits)).join(' ')}"`,
+      );
+    }
+  } else if (style.stroke !== null) {
     attributes.push(`stroke="${escapeXmlAttribute(style.stroke)}"`);
     if (style.strokeWidth !== 1)
       attributes.push(`stroke-width="${formatSvgNumber(style.strokeWidth, digits)}"`);
@@ -94,9 +120,13 @@ function shapeElement(
   shape: SvgShape,
   options: Required<Pick<SerializeOptions, 'digits' | 'pretty' | 'includeNames'>>,
   indent: string,
+  paintIds: { readonly fill: string | null; readonly stroke: string | null } = {
+    fill: null,
+    stroke: null,
+  },
 ): string {
   const data = toPathData(shape.path, { digits: options.digits });
-  const attributes = [`d="${data}"`, ...styleAttributes(shape.style, options.digits)];
+  const attributes = [`d="${data}"`, ...styleAttributes(shape.style, options.digits, paintIds)];
   if (shape.opacity !== 1)
     attributes.push(`opacity="${formatSvgNumber(shape.opacity, options.digits)}"`);
 
@@ -165,14 +195,135 @@ export function serializeSvg(artwork: SvgArtwork, options: SerializeOptions = {}
 
   const shapes = backgroundShape === null ? artwork.shapes : [backgroundShape, ...artwork.shapes];
   const indent = pretty ? '  ' : '';
+  /* Gradients and patterns are written once, into `<defs>`, and referenced by id from the shapes that
+     use them. Ids are positional (`paint-1`, `paint-2`, …) so two exports of the same artwork are
+     byte-identical, and the reference is a same-document `url(#…)` — never a URL, so an exported file
+     cannot ask a viewer to fetch anything. */
+  const definitions: string[] = [];
+  let paintCount = 0;
+  const allocate = (paint: PaintSpec | null | undefined, box: Box): string | null => {
+    if (!paint || paint.kind === 'solid') return null;
+    paintCount += 1;
+    const id = `paint-${String(paintCount)}`;
+    definitions.push(paintDefinition(id, paint, box, { digits, pretty }, pretty ? '  ' : ''));
+    return id;
+  };
+
+  const geometry: string[] = [];
   for (const shape of shapes) {
     // A shape with no geometry is skipped with the same outcome as an empty `<path>`: nothing painted.
     if (shape.path.contours.length === 0) continue;
-    parts.push(shapeElement(shape, { digits, pretty, includeNames }, indent));
+    if (!stylePaintsSomething(shape.style)) continue;
+    const box = boundsOfPath(shape.path);
+    const valid = box ?? { minX, minY, maxX, maxY };
+    const fillId = allocate(shape.style.fillPaint, valid);
+    const strokeId = allocate(shape.style.strokePaint, valid);
+    geometry.push(
+      shapeElement(shape, { digits, pretty, includeNames }, indent, {
+        fill: fillId,
+        stroke: strokeId,
+      }),
+    );
   }
+
+  if (definitions.length > 0) {
+    parts.push(pretty ? '<defs>' : '<defs>');
+    parts.push(...definitions);
+    parts.push('</defs>');
+  }
+  parts.push(...geometry);
   parts.push('</svg>');
 
   return ok(pretty ? parts.join('\n') : parts.join(''));
+}
+
+/**
+ * One gradient or pattern, as an SVG definition.
+ *
+ * `userSpaceOnUse` with absolute coordinates (rather than `objectBoundingBox`) is deliberate: the
+ * canvas painter resolves the same fractions against the same bounds, so the file and the preview
+ * describe identical geometry, and a viewer that computes bounding boxes differently cannot shift a
+ * gradient off its shape.
+ */
+function paintDefinition(
+  id: string,
+  paint: PaintSpec,
+  box: Box,
+  options: Required<Pick<SerializeOptions, 'digits' | 'pretty'>>,
+  indent: string,
+): string {
+  const { digits, pretty } = options;
+  const n = (value: number): string => formatSvgNumber(value, digits);
+
+  if (paint.kind === 'linear-gradient') {
+    const resolved = resolveGradient(paint, box);
+    if (resolved.kind === 'linear') {
+      const stops = resolved.stops
+        .map(
+          (stop) =>
+            `${indent}  <stop offset="${n(stop.offset)}" stop-color="${escapeXmlAttribute(stop.color)}"/>`,
+        )
+        .join(pretty ? '\n' : '');
+      return `${indent}<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${n(resolved.x1)}" y1="${n(resolved.y1)}" x2="${n(resolved.x2)}" y2="${n(resolved.y2)}">${pretty ? `\n${stops}\n${indent}` : stops}</linearGradient>`;
+    }
+  }
+
+  if (paint.kind === 'radial-gradient') {
+    const resolved = resolveGradient(paint, box);
+    if (resolved.kind === 'radial') {
+      const stops = resolved.stops
+        .map(
+          (stop) =>
+            `${indent}  <stop offset="${n(stop.offset)}" stop-color="${escapeXmlAttribute(stop.color)}"/>`,
+        )
+        .join(pretty ? '\n' : '');
+      return `${indent}<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${n(resolved.cx)}" cy="${n(resolved.cy)}" r="${n(resolved.radius)}">${pretty ? `\n${stops}\n${indent}` : stops}</radialGradient>`;
+    }
+  }
+
+  // A pattern: the tile is the motif's primitives, written in the same order the painter draws them.
+  const pattern = paint as Extract<PaintSpec, { kind: 'pattern' }>;
+  const resolved = resolvePattern(pattern, box);
+  const body: string[] = [];
+  if (resolved.background !== null) {
+    body.push(
+      `${indent}  <rect x="0" y="0" width="${n(resolved.tile)}" height="${n(resolved.tile)}" fill="${escapeXmlAttribute(resolved.background)}"/>`,
+    );
+  }
+  for (const primitive of resolved.primitives) {
+    if (primitive.kind === 'rect') {
+      body.push(
+        `${indent}  <rect x="${n(primitive.x)}" y="${n(primitive.y)}" width="${n(primitive.width)}" height="${n(primitive.height)}" fill="${escapeXmlAttribute(primitive.color)}"/>`,
+      );
+    } else {
+      body.push(
+        `${indent}  <circle cx="${n(primitive.cx)}" cy="${n(primitive.cy)}" r="${n(primitive.radius)}" fill="${escapeXmlAttribute(primitive.color)}"/>`,
+      );
+    }
+  }
+  const transform =
+    resolved.rotation === 0
+      ? ''
+      : ` patternTransform="rotate(${n(resolved.rotation)} ${n(resolved.pivot.x)} ${n(resolved.pivot.y)})"`;
+  /* The motif's parameters are also written as an attribute. A pattern drawn as primitives is
+     unambiguous to a viewer but ambiguous to an *importer*: stripes, a grid and arbitrary artwork
+     can produce the same rectangles. Carrying the model's own description makes a re-import exact,
+     and every viewer ignores an attribute it does not know. */
+  const annotation = escapeXmlAttribute(
+    JSON.stringify({
+      kind: 'pattern',
+      motif: resolved.motif,
+      foreground: pattern.foreground,
+      background: pattern.background,
+      scale: pattern.scale,
+      rotation: resolved.rotation,
+    }),
+  );
+  const viewBox =
+    box.maxX - box.minX === 0 && box.maxY - box.minY === 0
+      ? ''
+      : ` x="${n(resolved.grid.x)}" y="${n(resolved.grid.y)}"`;
+  return `${indent}<pattern id="${id}" patternUnits="userSpaceOnUse"${viewBox} width="${n(resolved.tile)}" height="${n(resolved.tile)}" data-forge-pattern="${annotation}"${transform}>${pretty ? `\n${body.join('\n')}\n${indent}` : body.join('')}</pattern>`;
 }
 
 /**

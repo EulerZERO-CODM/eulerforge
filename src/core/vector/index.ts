@@ -8,6 +8,7 @@
 export * from './types';
 export * from './tolerance';
 export * from './style';
+export * from './paint';
 export {
   segmentsOf,
   segmentBetween,

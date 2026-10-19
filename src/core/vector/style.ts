@@ -11,6 +11,8 @@
  * that depends on the CSS environment, so a document stored today renders the same colour tomorrow.
  */
 
+import { normalisePaint, type PaintSpec } from './paint';
+
 /** A colour as `#rrggbb`, or `null` for "no paint" — a real state, not a missing value. */
 export type VectorPaint = string | null;
 
@@ -22,10 +24,23 @@ export type StrokeLineJoin = (typeof STROKE_LINE_JOINS)[number];
 
 export type VectorStyle = {
   readonly fill: VectorPaint;
+  /**
+   * A gradient or pattern fill. When present it *is* the fill; `fill` remains the solid colour that
+   * predates it, and stays meaningful because it is what a renderer that cannot express paint (an
+   * icon-set manifest, a swatch, a fallback) has to show. Documents written before gradients existed
+   * have no value here, which reads as `null` — a solid fill, exactly as before.
+   *
+   * `undefined` is spelled into the type as well as the optional marker because the schema that
+   * reads a stored document produces exactly that, and `exactOptionalPropertyTypes` distinguishes
+   * "absent" from "present and undefined" — both of which mean the same thing here.
+   */
+  readonly fillPaint?: PaintSpec | null | undefined;
   readonly fillRule: 'nonzero' | 'evenodd';
   /** 0–1. Independent of `fill` so a hue can be faded without losing it. */
   readonly fillOpacity: number;
   readonly stroke: VectorPaint;
+  /** A gradient or pattern stroke, used in place of `stroke` when present. */
+  readonly strokePaint?: PaintSpec | null | undefined;
   /** In artwork units. Zero means the stroke draws nothing, which the painter and the importer agree on. */
   readonly strokeWidth: number;
   readonly strokeOpacity: number;
@@ -82,7 +97,9 @@ export function withStyle(style: VectorStyle, patch: Partial<VectorStyle>): Vect
  * whether it draws something.
  */
 export function stylePaintsSomething(style: VectorStyle): boolean {
-  return style.fill !== null || (style.stroke !== null && style.strokeWidth > 0);
+  const fills = style.fillPaint != null || style.fill !== null;
+  const strokes = (style.strokePaint != null || style.stroke !== null) && style.strokeWidth > 0;
+  return fills || strokes;
 }
 
 /**
@@ -103,6 +120,8 @@ export function normaliseVectorStyle(input: Partial<VectorStyle>): VectorStyle {
 
   return Object.freeze({
     fill: fill === null ? null : (normaliseHexColour(fill) ?? DEFAULT_VECTOR_STYLE.fill),
+    fillPaint: normalisePaint(input.fillPaint ?? null),
+    strokePaint: normalisePaint(input.strokePaint ?? null),
     fillRule: input.fillRule ?? DEFAULT_VECTOR_STYLE.fillRule,
     fillOpacity: clamp01(input.fillOpacity ?? DEFAULT_VECTOR_STYLE.fillOpacity),
     stroke: stroke === null ? null : (normaliseHexColour(stroke) ?? DEFAULT_VECTOR_STYLE.stroke),

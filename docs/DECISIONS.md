@@ -894,3 +894,59 @@ server never stores what the app cannot open" true by construction.
 - **Conflict resolution is a choice, not a merge.** Two independently edited documents offer "keep
   this browser's copy" or "keep the server's copy"; there is no automatic three-way merge, and
   saying otherwise would be the most dangerous kind of dishonesty in this feature.
+
+## ADR-0028 — Paint is geometry, and gradients are resolved from the shape's own bounds
+
+**Status:** accepted (Phase 3 hardening). Schema v5.
+
+**Context.** Phase 3's remaining honest gap was that shapes could only be painted with a flat colour.
+Paint is where a vector editor most easily lies to itself: a preview drawn one way and an exported file
+another, a gradient anchored to a shape in the editor and to the canvas in the file, or a "gradient"
+that is really a bitmap baked at the zoom level it happened to be viewed at. The repository rules also
+forbid adding a heavyweight graphics dependency without a compelling reason.
+
+**Decision.** Paint is described once, in `src/core/vector/paint.ts`, in the vocabulary both renderers
+speak:
+
+- four kinds: `solid`, `linear-gradient`, `radial-gradient`, `pattern`;
+- gradient points and centres are **fractions of the shape's bounding box** (`objectBoundingBox`
+  semantics), and a radial radius is a fraction of the shorter side;
+- a pattern is one of four deterministic motifs (`stripes`, `dots`, `grid`, `checks`) with a tile size
+  as a fraction of the shorter side, a rotation about the bounds centre and a foreground/background
+  colour — not a reference to arbitrary artwork;
+- stops are sorted, clamped and de-duplicated by `normaliseStops`, so the stored document, the canvas
+  gradient and the file always agree;
+- the canvas painter builds a real `CanvasGradient` from `resolveGradient`, and draws a pattern by
+  clipping to the path and tiling the motif's primitives — the same primitives `resolvePattern` hands
+  the SVG writer;
+- the SVG writer emits `userSpaceOnUse` definitions in absolute coordinates derived from the same
+  bounds, positional ids (`paint-1`, …) so re-exporting is byte-identical, and a
+  `data-forge-pattern` annotation on patterns so a re-import is exact;
+- the importer accepts only same-document `url(#id)` references to definitions it actually read,
+  converts absolute gradient coordinates back to shape-relative fractions, and reports anything it
+  cannot represent as `approximated` while keeping the shape's solid colour.
+
+**Why this over a library.** The four motifs and two gradient types cover the studio's stated scope,
+are ~250 lines with no dependency, are resolution-independent, and are serialisable without an
+intermediate bitmap. A full SVG-paint library would add a dependency and still not solve the harder
+problem — that the preview and the file must agree — which is solved here by construction: one
+resolver, two consumers.
+
+**Why the schema version bumps to 5.** ADR-0005 requires a bump, a migration step and a fixture test
+for every schema change. A v4 build reading a v5 document would silently drop `fillPaint`/
+`strokePaint` (they are optional and unknown keys are stripped), which is exactly the silent field
+loss ADR-0005 exists to prevent. The v4 → v5 migration rewrites nothing: a flat fill keeps its
+meaning, and the new keys are simply absent. `src/core/documents/migrations.test.ts` proves that a v4
+path document loads unchanged apart from its version stamp.
+
+**Consequences, stated plainly.**
+- Gradients cannot be anchored to strokes independently of the geometry, there is no gradient
+  `spreadMethod`/focal radial support, and arbitrary imported `<pattern>` content is approximated to a
+  solid colour rather than imitated.
+- Pattern tiles are square and anchored to the bounds' top-left corner; there is no per-side tiling.
+- A pattern is drawn as clipped primitives by the canvas painter, so a very small tile scale on a very
+  large shape costs more draw calls than a real `CanvasPattern` would. The UI caps scale at 0.02 of the
+  shorter side, and the painter's tile count is bounded by the shape's diagonal.
+- Flat fills and strokes remain the default and the fallback everywhere: icon-set manifests and any
+  consumer that needs one colour use `representativeColour`, which is documented as a stand-in, not a
+  render.

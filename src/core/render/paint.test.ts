@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { imageFitScale, imagePlacement, paintPlan, textLineOrigin } from './paint';
-import type { ImageOp, RenderPlan, TextOp } from './plan';
+import type { ImageOp, PathOp, RenderPlan, TextOp } from './plan';
 import { createRecordingContext, STUB_IMAGE } from '../../testing/render';
 import { createRect } from '../documents/geometry';
 import { defaultShapeSettings, defaultTextSettings } from '../documents/layer-defaults';
+import { rectanglePath } from '../vector/shapes';
+import { normaliseVectorStyle, type VectorStyle } from '../vector';
 
 function imageOp(overrides: Partial<ImageOp> = {}): ImageOp {
   return {
@@ -313,5 +315,197 @@ describe('textLineOrigin', () => {
       opacity: 1,
     };
     expect(textLineOrigin(op, 0)).toEqual({ x: 250, y: 220 });
+  });
+});
+
+describe('paintPath with gradients and patterns', () => {
+  const box = { minX: 20, minY: 40, maxX: 120, maxY: 90 } as const; // 100 × 50
+
+  function pathOp(style: Partial<VectorStyle>): PathOp {
+    return {
+      kind: 'path',
+      layerId: 'lyr-path',
+      layerName: 'Path',
+      frame: createRect(20, 40, 100, 50),
+      path: rectanglePath(box),
+      style: normaliseVectorStyle({ fill: null, ...style }),
+      opacity: 1,
+    };
+  }
+
+  it('builds a real linear gradient over the shape’s bounds and adds every stop in order', () => {
+    const { context, calls, gradients } = createRecordingContext();
+    paintPlan(
+      context,
+      planOf([
+        pathOp({
+          fillPaint: {
+            kind: 'linear-gradient',
+            from: { x: 0, y: 0 },
+            to: { x: 1, y: 0 },
+            stops: [
+              { offset: 0, color: '#ff0000' },
+              { offset: 1, color: '#0000ff' },
+            ],
+          },
+        }),
+      ]),
+      { clear: false },
+    );
+
+    const created = calls.find((call) => call.op === 'createLinearGradient');
+    expect(created?.args).toEqual([20, 40, 120, 40]);
+    expect(gradients).toHaveLength(1);
+    expect(gradients[0]?.stops).toEqual([
+      { offset: 0, color: '#ff0000' },
+      { offset: 1, color: '#0000ff' },
+    ]);
+    expect(calls.some((call) => call.op === 'fill')).toBe(true);
+  });
+
+  it('builds a radial gradient with a zero inner radius at the resolved centre', () => {
+    const { context, calls, gradients } = createRecordingContext();
+    paintPlan(
+      context,
+      planOf([
+        pathOp({
+          fillPaint: {
+            kind: 'radial-gradient',
+            centre: { x: 0.5, y: 0.5 },
+            radius: 0.5,
+            stops: [
+              { offset: 0, color: '#ffffff' },
+              { offset: 1, color: '#000000' },
+            ],
+          },
+        }),
+      ]),
+      { clear: false },
+    );
+
+    const created = calls.find((call) => call.op === 'createRadialGradient');
+    expect(created?.args).toEqual([70, 65, 0, 70, 65, 25]);
+    expect(gradients[0]?.kind).toBe('radial');
+    expect(gradients[0]?.stops).toHaveLength(2);
+  });
+
+  it('clips to the path and tiles the motif for a pattern fill', () => {
+    const { context, calls, names } = createRecordingContext();
+    paintPlan(
+      context,
+      planOf([
+        pathOp({
+          fillPaint: {
+            kind: 'pattern',
+            motif: 'stripes',
+            foreground: '#112233',
+            background: '#ffffff',
+            scale: 0.2,
+            rotation: 0,
+          },
+        }),
+      ]),
+      { clear: false },
+    );
+
+    expect(names()).toContain('clip');
+    const fillRects = calls.filter((call) => call.op === 'fillRect');
+    // One background rectangle plus at least one stripe per tile.
+    expect(fillRects.length).toBeGreaterThan(1);
+    // The background covers the shape's bounds.
+    expect(fillRects[0]?.args).toEqual([20, 40, 100, 50]);
+  });
+
+  it('rotates about the bounds centre when the pattern is rotated', () => {
+    const { context, calls } = createRecordingContext();
+    paintPlan(
+      context,
+      planOf([
+        pathOp({
+          fillPaint: {
+            kind: 'pattern',
+            motif: 'dots',
+            foreground: '#112233',
+            background: null,
+            scale: 0.2,
+            rotation: 30,
+          },
+        }),
+      ]),
+      { clear: false },
+    );
+
+    const translate = calls.filter((call) => call.op === 'translate').map((call) => call.args);
+    expect(translate).toContainEqual([70, 65]);
+    const rotate = calls.find((call) => call.op === 'rotate');
+    expect(rotate?.args[0]).toBeCloseTo((30 * Math.PI) / 180, 9);
+  });
+
+  it('draws a solid paint through the same path as a paint, not a separate branch', () => {
+    const { context, calls, gradients } = createRecordingContext();
+    paintPlan(context, planOf([pathOp({ fillPaint: { kind: 'solid', color: '#123456' } })]), {
+      clear: false,
+    });
+    expect(gradients).toHaveLength(0);
+    expect(calls.some((call) => call.op === 'fill')).toBe(true);
+  });
+
+  it('paints nothing when the style has neither ink nor an enabled stroke', () => {
+    const { context, names } = createRecordingContext();
+    paintPlan(context, planOf([pathOp({ fill: null, fillPaint: null, stroke: null })]), {
+      clear: false,
+    });
+    expect(names()).not.toContain('fill');
+    expect(names()).not.toContain('stroke');
+  });
+
+  it('uses a stroke paint for the outline and restores the dash afterwards', () => {
+    const { context, calls, gradients } = createRecordingContext();
+    paintPlan(
+      context,
+      planOf([
+        pathOp({
+          fill: null,
+          fillPaint: null,
+          strokeWidth: 4,
+          dashArray: [6, 2],
+          strokePaint: {
+            kind: 'linear-gradient',
+            from: { x: 0, y: 0 },
+            to: { x: 1, y: 1 },
+            stops: [
+              { offset: 0, color: '#00ff00' },
+              { offset: 1, color: '#ff00ff' },
+            ],
+          },
+        }),
+      ]),
+      { clear: false },
+    );
+    expect(gradients).toHaveLength(1);
+    expect(calls.some((call) => call.op === 'stroke')).toBe(true);
+    const dashCalls = calls.filter((call) => call.op === 'setLineDash');
+    expect(dashCalls.at(-1)?.args).toEqual([[]]);
+  });
+
+  it('leaves the recording context balanced after gradient and pattern fills', () => {
+    const { context, depth } = createRecordingContext();
+    paintPlan(
+      context,
+      planOf([
+        pathOp({
+          fillPaint: {
+            kind: 'pattern',
+            motif: 'grid',
+            foreground: '#112233',
+            background: null,
+            scale: 0.2,
+            rotation: 0,
+          },
+        }),
+      ]),
+      { clear: false },
+    );
+    expect(depth()).toBe(0);
   });
 });

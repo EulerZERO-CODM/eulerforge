@@ -373,6 +373,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
         ],
         evidence: [
           'src/core/svg/svg.test.ts',
+          'src/core/svg/paint.test.ts',
           'src/core/svg/from-scene.test.ts',
           'src/core/svg/icon-set.test.ts',
           'e2e/illustration.spec.ts (exports a real SVG, reads its bytes and re-imports them)',
@@ -390,7 +391,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Studio flips to `available` in the registry with a working entry point',
         ],
         capabilityIds: ['studios.illustration'],
-        gap: 'Gradient/pattern fills, tracing a raster image and text on a path are not implemented and stay labelled planned. Interchange refuses rotated layers rather than baking the rotation, so it is lossless within a smaller subset than the editor itself. Icon sets contain path layers only: a selected rectangle, ellipse, text or graphic layer is named as skipped rather than converted.',
+        gap: 'Tracing a raster image, text on a path and multi-artboard documents are not implemented and stay labelled planned. Interchange refuses rotated layers rather than baking the rotation, so it is lossless within a smaller subset than the editor itself. Icon sets contain path layers only: a selected rectangle, ellipse, text or graphic layer is named as skipped rather than converted.',
       },
     ],
     exitCriteria: [

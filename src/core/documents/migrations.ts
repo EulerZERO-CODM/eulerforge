@@ -16,7 +16,7 @@ import type { ForgeDocument } from './types';
 import { defaultStudioPayload } from './payload';
 import { SCREEN_DPI } from './units';
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 export type Migration = {
   readonly from: number;
@@ -122,6 +122,23 @@ const migrateV2ToV3: Migration = {
 };
 
 /**
+ * v4 → v5: vector styles can carry gradient or pattern paint.
+ *
+ * A v4 document's flat `fill`/`stroke` mean exactly what they meant before, so nothing is rewritten:
+ * the optional `fillPaint`/`strokePaint` keys are simply absent, which the schema reads as "solid".
+ * The version is bumped because a v5 *writer* can produce a document a v4 build would open with the
+ * paint fields silently dropped — and ADR-0005 makes silent field loss the one thing a reader must be
+ * able to detect. Stamping the step also keeps the migration chain complete and testable.
+ */
+const migrateV4ToV5: Migration = {
+  from: 4,
+  to: 5,
+  description:
+    'Vector styles may carry gradient or pattern paint; existing flat fills are unchanged.',
+  migrate: (raw) => ({ ...raw, schemaVersion: 5 }),
+};
+
+/**
  * v3 → v4: documents gained a studio payload for Photo, Motion and Video.
  *
  * Existing projects are design canvases and vector artboards, which carry no payload, so the honest
@@ -145,6 +162,7 @@ export const MIGRATIONS: readonly Migration[] = [
   migrateV1ToV2,
   migrateV2ToV3,
   migrateV3ToV4,
+  migrateV4ToV5,
 ];
 
 export function readSchemaVersion(raw: unknown): number | undefined {

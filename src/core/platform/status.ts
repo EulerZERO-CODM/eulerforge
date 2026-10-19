@@ -137,15 +137,18 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     area: 'core',
     label: 'SVG serialisation and safe import',
     description:
-      'A deterministic serializer writes paths, shapes, fills, strokes, opacity and transforms with a computed `viewBox`, drops redundant markup and omits defaults. The importer rejects scripts, event handlers, `foreignObject`, external references and doctypes, reports malformed input with a message, and re-imports its own output within a documented tolerance (1e-3 in user units).',
+      'A deterministic serializer writes paths, shapes, fills, strokes, opacity, transforms, linear/radial gradients and repeating motif patterns with a computed `viewBox`, drops redundant markup and omits defaults. Gradients are written in `userSpaceOnUse` coordinates resolved from the shape bounds, so the canvas preview and the file describe the same geometry. The importer rejects scripts, event handlers, `foreignObject`, external references and doctypes, reports malformed input with a message, and re-imports its own output within a documented tolerance (1e-3 in user units).',
     status: 'implemented',
     verification: [
       'src/core/svg/svg.test.ts',
+      'src/core/svg/paint.test.ts',
+      'src/core/vector/paint.test.ts',
+      'src/core/render/paint.test.ts',
       'src/core/svg/from-scene.test.ts',
       'src/core/svg/icon-set.test.ts',
       'src/core/export/checklist.test.ts',
     ],
-    gap: 'Import supports the artwork subset the serializer writes plus common shorthand: text, filters, masks, clip paths, gradients and CSS style sheets are reported as unsupported rather than approximated.',
+    gap: "Import carries linear and radial gradients whose geometry can be expressed as shape-relative fractions, and this project's four pattern motifs through their written annotation. Arbitrary `<pattern>` content, gradient `href` inheritance, `spreadMethod`, focal radial gradients, text, filters, masks, clip paths and CSS style sheets are reported as unsupported or approximated rather than silently dropped.",
   },
   {
     id: 'core.rendering',
@@ -330,15 +333,17 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     area: 'studios',
     label: 'Illustration Studio vector editor',
     description:
-      'A real vector workspace on the shared kernel: draw with the pen, place rectangles/ellipses/polygons, drag out shapes, edit nodes and Bezier handles, marquee-select, nudge and transform, set real fill/stroke/opacity/cap/join/dash, run boolean operations, convert shapes to editable paths, import and export SVG, export an icon set from the selection (unselected, hidden and non-path layers are never packaged; anything it cannot carry is named), and hand artwork to the Design Studio and back. Every edit is one labelled undoable action, and the studio links its limitations (no gradients, no tracing, no rotation-preserving interchange) instead of hiding them.',
+      'A real vector workspace on the shared kernel: draw with the pen, place rectangles/ellipses/polygons, drag out shapes, edit nodes and Bezier handles, marquee-select, nudge and transform, set real fill/stroke/opacity/cap/join/dash, paint either slot with a linear gradient, a radial gradient or a repeating motif pattern (editable stops, direction, tile scale and rotation), run boolean operations, convert shapes to editable paths, import and export SVG, export an icon set from the selection (unselected, hidden and non-path layers are never packaged; anything it cannot carry is named), and hand artwork to the Design Studio and back. Every edit is one labelled undoable action, and the studio links its limitations instead of hiding them.',
     status: 'partial',
     verification: [
       'src/components/illustration/illustration-workspace.test.tsx',
+      'src/components/illustration/paint-controls.tsx',
       'src/core/editor/vector-commands.test.ts',
       'src/core/documents/interchange.test.ts',
+      'src/core/documents/paint-schema.test.ts',
       'src/components/create/creation-flow.test.tsx',
     ],
-    gap: 'Gradient and pattern fills, tracing a raster image, text on a path, and ungrouped multi-artboard documents are not implemented and are labelled planned in the registry. Node editing works on one path at a time. The browser suite runs on Chromium only, so Firefox and WebKit are unverified.',
+    gap: 'Tracing a raster image, text on a path, and ungrouped multi-artboard documents are not implemented and are labelled planned in the registry. Interchange converts within a subset: rotated layers are refused rather than silently flattened. Node editing works on one path at a time. The browser suite runs on Chromium only, so Firefox and WebKit are unverified.',
   },
   {
     id: 'studios.photo',

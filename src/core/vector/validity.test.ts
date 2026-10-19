@@ -131,6 +131,27 @@ describe('defects', () => {
     const report = checkTopology(broken);
     expect(report.structureIssues.some((entry) => entry.code === 'non-finite')).toBe(true);
     expect(report.valid).toBe(false);
+    // Geometry is not attempted: flattening non-finite curves cannot converge and the crossing
+    // scan would take minutes over the resulting point cloud.
+    expect(report.flattened.segments).toBe(0);
+    expect(report.issues).toEqual([]);
+  });
+
+  it('returns promptly for a path whose coordinates are all NaN', () => {
+    // Regression: a rectangle built from `{ x, y, width, height }` instead of a `VectorBox` yields
+    // NaN everywhere, and the topology report used to hang for minutes.
+    const box = {
+      minX: Number.NaN,
+      minY: Number.NaN,
+      maxX: Number.NaN,
+      maxY: Number.NaN,
+    } as const;
+    const started = performance.now();
+    const report = checkTopology(rectanglePath(box));
+    const elapsed = performance.now() - started;
+    expect(report.valid).toBe(false);
+    expect(report.structureIssues.some((entry) => entry.severe)).toBe(true);
+    expect(elapsed).toBeLessThan(500);
   });
 
   it('reports a contour with no nodes without throwing', () => {

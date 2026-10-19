@@ -12,8 +12,21 @@
 
 import type { Rect } from '../documents/geometry';
 import { alignmentOffset, lineBaseline, paintTextLine } from './text-layout';
-import { segmentsOf, stylePaintsSomething } from '../vector';
+import {
+  boundsOfPath,
+  resolveGradient,
+  resolvePattern,
+  segmentsOf,
+  stylePaintsSomething,
+  type PaintSpec,
+  type VectorBox,
+} from '../vector';
 import type { DrawOp, EllipseOp, ImageOp, PathOp, RectOp, RenderPlan, TextOp } from './plan';
+
+/** A gradient handle: the two calls the painter makes on what `create*Gradient` returns. */
+export type CanvasGradientLike = {
+  addColorStop(offset: number, color: string): void;
+};
 
 export type PainterContext = {
   fillStyle: string | CanvasGradient | CanvasPattern;
@@ -26,6 +39,8 @@ export type PainterContext = {
   imageSmoothingEnabled: boolean;
   save(): void;
   restore(): void;
+  translate(x: number, y: number): void;
+  rotate(angle: number): void;
   /** Applies the output scale. Export multiplies by it; the artboard passes zoom instead. */
   scale(x: number, y: number): void;
   clearRect(x: number, y: number, width: number, height: number): void;
@@ -49,6 +64,15 @@ export type PainterContext = {
   setLineDash(segments: readonly number[]): void;
   rect(x: number, y: number, width: number, height: number): void;
   clip(): void;
+  createLinearGradient(x0: number, y0: number, x1: number, y1: number): CanvasGradientLike;
+  createRadialGradient(
+    x0: number,
+    y0: number,
+    r0: number,
+    x1: number,
+    y1: number,
+    r1: number,
+  ): CanvasGradientLike;
   roundRect(x: number, y: number, width: number, height: number, radii: number): void;
   ellipse(
     x: number,
@@ -206,27 +230,147 @@ export function paintPath(context: PainterContext, op: PathOp): void {
     }
   };
 
-  if (style.fill !== null && style.fillOpacity > 0) {
+  /* Paint is resolved against the artwork's bounds, once, so a gradient and a pattern share the
+     same frame of reference as the geometry they cover. */
+  const box = boundsOfPath(op.path) ?? {
+    minX: op.frame.x,
+    minY: op.frame.y,
+    maxX: op.frame.x + op.frame.width,
+    maxY: op.frame.y + op.frame.height,
+  };
+
+  const fillPaint = style.fillPaint ?? null;
+  const strokePaint = style.strokePaint ?? null;
+
+  if ((fillPaint !== null || style.fill !== null) && style.fillOpacity > 0) {
     context.globalAlpha = op.opacity * style.fillOpacity;
     context.beginPath();
     trace();
-    context.fillStyle = style.fill;
-    context.fill(style.fillRule);
+    if (fillPaint !== null) paintWith(context, fillPaint, box, () => context.fill(style.fillRule));
+    else {
+      context.fillStyle = style.fill as string;
+      context.fill(style.fillRule);
+    }
   }
 
-  if (style.stroke !== null && style.strokeWidth > 0 && style.strokeOpacity > 0) {
+  if (
+    (strokePaint !== null || style.stroke !== null) &&
+    style.strokeWidth > 0 &&
+    style.strokeOpacity > 0
+  ) {
     context.globalAlpha = op.opacity * style.strokeOpacity;
     context.beginPath();
     trace();
-    context.strokeStyle = style.stroke;
     context.lineWidth = style.strokeWidth;
     context.lineJoin = style.lineJoin;
     context.lineCap = style.lineCap;
     context.setLineDash(style.dashArray);
-    context.stroke();
+    if (strokePaint !== null) paintWith(context, strokePaint, box, () => context.stroke());
+    else {
+      context.strokeStyle = style.stroke as string;
+      context.stroke();
+    }
     context.setLineDash([]);
   }
 
+  context.restore();
+}
+
+/**
+ * Paints whatever the current path encloses, with a solid colour, a gradient or a pattern.
+ *
+ * The three cases differ only in how the ink gets there. A gradient is a real canvas gradient built
+ * from the same resolved geometry the SVG writer emits; a pattern clips to the path and draws the
+ * motif's primitives directly, which keeps the preview and the exported `<pattern>` the same picture
+ * and avoids an intermediate bitmap that would have to be resampled.
+ */
+function paintWith(
+  context: PainterContext,
+  paint: PaintSpec,
+  box: VectorBox,
+  apply: () => void,
+): void {
+  if (paint.kind === 'solid') {
+    context.fillStyle = paint.color;
+    context.strokeStyle = paint.color;
+    apply();
+    return;
+  }
+
+  if (paint.kind === 'linear-gradient' || paint.kind === 'radial-gradient') {
+    const resolved = resolveGradient(paint, box);
+    const gradient =
+      resolved.kind === 'linear'
+        ? context.createLinearGradient(resolved.x1, resolved.y1, resolved.x2, resolved.y2)
+        : context.createRadialGradient(
+            resolved.cx,
+            resolved.cy,
+            0,
+            resolved.cx,
+            resolved.cy,
+            resolved.radius,
+          );
+    for (const stop of resolved.stops) gradient.addColorStop(stop.offset, stop.color);
+    context.fillStyle = gradient;
+    context.strokeStyle = gradient;
+    apply();
+    return;
+  }
+
+  // A pattern: clip to the shape, then tile the motif's primitives across its bounds.
+  const resolved = resolvePattern(paint, box);
+  context.save();
+  context.clip();
+  if (resolved.background !== null) {
+    context.fillStyle = resolved.background;
+    context.fillRect(
+      resolved.area.minX,
+      resolved.area.minY,
+      boxWidth(resolved.area),
+      boxHeight(resolved.area),
+    );
+  }
+  if (resolved.rotation !== 0) {
+    context.translate(resolved.pivot.x, resolved.pivot.y);
+    context.rotate((resolved.rotation * Math.PI) / 180);
+    context.translate(-resolved.pivot.x, -resolved.pivot.y);
+  }
+
+  const width = boxWidth(resolved.area);
+  const height = boxHeight(resolved.area);
+  // Enough tiles to cover the bounds after rotation: the diagonal, not the width.
+  const columns = Math.ceil(Math.hypot(width, height) / resolved.tile) + 2;
+  const startX = resolved.grid.x;
+  const startY = resolved.grid.y;
+  for (let row = 0; row < columns; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const originX = startX + column * resolved.tile;
+      const originY = startY + row * resolved.tile;
+      for (const primitive of resolved.primitives) {
+        context.fillStyle = primitive.color;
+        if (primitive.kind === 'rect') {
+          context.fillRect(
+            originX + primitive.x,
+            originY + primitive.y,
+            primitive.width,
+            primitive.height,
+          );
+        } else {
+          context.beginPath();
+          context.ellipse(
+            originX + primitive.cx,
+            originY + primitive.cy,
+            primitive.radius,
+            primitive.radius,
+            0,
+            0,
+            Math.PI * 2,
+          );
+          context.fill();
+        }
+      }
+    }
+  }
   context.restore();
 }
 
@@ -417,4 +561,12 @@ export function textLineOrigin(op: TextOp, index: number): { x: number; y: numbe
     x: op.frame.x + alignmentOffset(op.settings.align, op.frame.width, width),
     y: op.frame.y + lineBaseline(index, op.lineHeightPx),
   };
+}
+
+function boxWidth(box: VectorBox): number {
+  return box.maxX - box.minX;
+}
+
+function boxHeight(box: VectorBox): number {
+  return box.maxY - box.minY;
 }

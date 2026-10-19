@@ -346,7 +346,7 @@ export const ILLUSTRATION_STUDIO: StudioDefinition = {
   accent: 'violet',
   availability: 'available',
   maturityNote:
-    'A working vector workspace: pen and shape tools, node and handle editing with keyboard access, fill/stroke/dash/cap/join controls, union/subtract/intersect/exclude, SVG import and export, icon-set export, and interchange with the Design Studio. Not implemented: gradients and patterns, per-node pressure or variable-width strokes, text outlining, auto-trace, and rotation of a whole shape (the document model has no rotation).',
+    'A working vector workspace: pen and shape tools, node and handle editing with keyboard access, fill/stroke/dash/cap/join controls, gradient and pattern paint for either slot, union/subtract/intersect/exclude, SVG import and export, icon-set export, and interchange with the Design Studio. Not implemented: blur and image filters, per-node pressure or variable-width strokes, text outlining, auto-trace, and rotation of a whole shape (the document model has no rotation).',
   produces: [
     'Icons and pictograms',
     'Logos and marks',
@@ -381,14 +381,21 @@ export const ILLUSTRATION_STUDIO: StudioDefinition = {
       label: 'Strokes, fills and dashes',
       status: 'available',
       detail:
-        'Flat fill and stroke colours, fill rule, stroke width, opacity, line cap, line join and dash patterns — all stored in the document and written to every export.',
+        'Solid fill and stroke colours, fill rule, stroke width, opacity, line cap, line join and dash patterns — all stored in the document and written to every export.',
     },
     {
       id: 'gradients.fills',
-      label: 'Gradient, pattern and filtered fills',
+      label: 'Gradient and pattern fills',
+      status: 'available',
+      detail:
+        'Fill or stroke either slot with a linear gradient, a radial gradient or a repeating motif pattern (stripes, dots, grid or checks). Stops, direction, centre, radius, tile scale, background and rotation are editable and undoable; the canvas preview and the SVG export resolve the same geometry from the shape bounds, and a re-import restores the paint exactly.',
+    },
+    {
+      id: 'filters.fills',
+      label: 'Blur and image filters',
       status: 'planned',
       detail:
-        'Needs a paint-model extension: the document currently stores one flat colour per paint.',
+        'Filter effects are not part of the document model; imported filter references are reported rather than imitated.',
     },
     {
       id: 'svg.io',

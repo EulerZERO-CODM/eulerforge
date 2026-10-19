@@ -41,6 +41,7 @@ import {
   BOOLEAN_OPERATION_LABELS,
   booleanPaths,
   boundsOfPath,
+  describePaint,
   matrixBetweenBoxes,
   transformPath,
   translatePath,
@@ -530,6 +531,16 @@ function describeStyleChange(
   name: string,
   patch: Partial<VectorStyle> & { readonly opacity?: number | undefined },
 ): string {
+  if (patch.fillPaint !== undefined) {
+    return patch.fillPaint === null
+      ? `Remove fill paint from “${name}”`
+      : `Set ${describePaint(patch.fillPaint, 'fill')} on “${name}”`;
+  }
+  if (patch.strokePaint !== undefined) {
+    return patch.strokePaint === null
+      ? `Remove stroke paint from “${name}”`
+      : `Set ${describePaint(patch.strokePaint, 'stroke')} on “${name}”`;
+  }
   if (patch.fill !== undefined) return `Set fill of “${name}”`;
   if (patch.stroke !== undefined)
     return patch.stroke === null ? `Remove stroke from “${name}”` : `Set stroke of “${name}”`;

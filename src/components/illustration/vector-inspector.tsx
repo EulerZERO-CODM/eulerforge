@@ -10,6 +10,7 @@ import {
   type BooleanOperation,
 } from '../../core/vector/boolean';
 import { STROKE_LINE_CAPS, STROKE_LINE_JOINS } from '../../core/vector/style';
+import { stylePaintsSomething } from '../../core/vector/style';
 import { segmentTotal } from '../../core/vector/pick';
 import { DEFAULT_VECTOR_STYLE } from '../../core/vector/style';
 import {
@@ -27,6 +28,7 @@ import { useForgeServices } from '../../state/forge-provider';
 import { Button } from '../ui/button';
 import { Field, Input, Select } from '../ui/field';
 import { InlineNote } from '../ui/states';
+import { PaintControls } from './paint-controls';
 import type { WorkspaceApi } from '../workspace/workspace-api';
 
 const CAP_LABELS: Record<(typeof STROKE_LINE_CAPS)[number], string> = {
@@ -371,6 +373,8 @@ function NodeSection({
 function PaintSection({ api, layer }: { readonly api: WorkspaceApi; readonly layer: PathLayer }) {
   const style = layer.vector.style;
   const dash = style.dashArray.join(' ');
+  const hasFill = style.fillPaint != null || style.fill !== null;
+  const hasStroke = (style.strokePaint != null || style.stroke !== null) && style.strokeWidth > 0;
 
   return (
     <div className="space-y-3">
@@ -395,13 +399,17 @@ function PaintSection({ api, layer }: { readonly api: WorkspaceApi; readonly lay
             <Button
               variant="outline"
               size="sm"
-              aria-pressed={style.fill === null}
+              aria-pressed={!hasFill}
               data-testid="fill-none"
               onClick={() => {
-                void api.run(setVectorStyleCommand(api.doc, [layer.id], { fill: null }));
+                // Clearing only the colour would leave a gradient painting the shape, so this
+                // removes both: "no fill" has to mean the shape shows no fill.
+                void api.run(
+                  setVectorStyleCommand(api.doc, [layer.id], { fill: null, fillPaint: null }),
+                );
               }}
             >
-              {style.fill === null ? 'No fill' : 'Remove'}
+              {hasFill ? 'Remove' : 'No fill'}
             </Button>
           </div>
         </Field>
@@ -424,16 +432,41 @@ function PaintSection({ api, layer }: { readonly api: WorkspaceApi; readonly lay
             <Button
               variant="outline"
               size="sm"
-              aria-pressed={style.stroke === null}
+              aria-pressed={!hasStroke}
               data-testid="stroke-none"
               onClick={() => {
-                void api.run(setVectorStyleCommand(api.doc, [layer.id], { stroke: null }));
+                void api.run(
+                  setVectorStyleCommand(api.doc, [layer.id], { stroke: null, strokePaint: null }),
+                );
               }}
             >
-              {style.stroke === null ? 'No stroke' : 'Remove'}
+              {hasStroke ? 'Remove' : 'No stroke'}
             </Button>
           </div>
         </Field>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <PaintControls
+          slot="fill"
+          paint={style.fillPaint ?? null}
+          baseColour={style.fill ?? DEFAULT_VECTOR_STYLE.fill ?? '#000000'}
+          onChange={(paint) => {
+            void api.run(setVectorStyleCommand(api.doc, [layer.id], { fillPaint: paint }), {
+              coalesceKey: 'vector:fill-paint',
+            });
+          }}
+        />
+        <PaintControls
+          slot="stroke"
+          paint={style.strokePaint ?? null}
+          baseColour={style.stroke ?? '#000000'}
+          onChange={(paint) => {
+            void api.run(setVectorStyleCommand(api.doc, [layer.id], { strokePaint: paint }), {
+              coalesceKey: 'vector:stroke-paint',
+            });
+          }}
+        />
       </div>
 
       <Field label="Stroke width" hint="Document units">
@@ -538,12 +571,13 @@ function PaintSection({ api, layer }: { readonly api: WorkspaceApi; readonly lay
       <p
         className={cn(
           'text-2xs',
-          style.fill === null && style.stroke === null ? 'text-amber-400' : 'text-fg-subtle',
+          stylePaintsSomething(style) ? 'text-fg-subtle' : 'text-amber-400',
         )}
+        data-testid="paint-summary"
       >
-        {style.fill === null && style.stroke === null
-          ? 'This shape has neither a fill nor a stroke, so it is invisible on the artboard and in an export.'
-          : 'Gradients, patterns and filters are not part of the document model; these flat colours and dashes are what every exporter writes.'}
+        {stylePaintsSomething(style)
+          ? 'Gradients and patterns are stored as paint geometry, so the artboard, the SVG export and a re-import describe the same picture. Blur and image filters are still not part of the document model.'
+          : 'This shape has neither a fill nor a stroke, so it is invisible on the artboard and in an export.'}
       </p>
     </div>
   );

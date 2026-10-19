@@ -71,7 +71,7 @@ describe('createDocument', () => {
   });
 });
 
-describe('migration to v4', () => {
+describe('migration from v3', () => {
   const v3 = {
     id: 'doc-old',
     schemaVersion: 3,
@@ -95,7 +95,8 @@ describe('migration to v4', () => {
     const migrated = migrateDocument(v3);
     expect(migrated.ok).toBe(true);
     if (!migrated.ok) return;
-    expect(migrated.value.schemaVersion).toBe(4);
+    // The chain keeps walking: this record predates paint too, so it lands on the current version.
+    expect(migrated.value.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(migrated.value.studioPayload).toBeNull();
     expect(migrated.value.scene.layers).toEqual([]);
     expect(migrated.value.revision).toBe(3);

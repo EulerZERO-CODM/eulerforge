@@ -634,3 +634,220 @@ describe('SVG and icon-set panels', () => {
     expect(created.scene.layers[0].vector.path.contours[0]?.nodes).toHaveLength(4);
   });
 });
+
+describe('gradient and pattern paint', () => {
+  let services: TestForgeServices;
+
+  beforeEach(() => {
+    services = createTestServices();
+  });
+
+  function selectedPath(session: Awaited<ReturnType<typeof mount>>['session']) {
+    const layer = session.getState().document.scene.layers[0];
+    if (layer?.type !== 'path') throw new Error('expected a path layer');
+    return layer;
+  }
+
+  it('changes a solid fill into a linear gradient and records one undoable action', async () => {
+    const user = userEvent.setup();
+    const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
+    const { session } = await mount(services, [layer]);
+
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+    await user.selectOptions(screen.getByTestId('fill-paint-kind'), 'linear-gradient');
+
+    await waitFor(() => {
+      expect(selectedPath(session).vector.style.fillPaint?.kind).toBe('linear-gradient');
+    });
+    expect(session.getState().history.at(-1)?.label).toBe('Set linear gradient, 2 stops on “Card”');
+    expect(screen.getByTestId('fill-paint-description')).toHaveTextContent(
+      /linear gradient, 2 stops/,
+    );
+    expect(screen.getByTestId('fill-paint-stop-colour-0')).toBeInTheDocument();
+    expect(screen.getByTestId('fill-paint-stop-colour-1')).toBeInTheDocument();
+
+    await session.undo();
+    await waitFor(() => {
+      expect(selectedPath(session).vector.style.fillPaint).toBeNull();
+    });
+    await session.redo();
+    await waitFor(() => {
+      expect(selectedPath(session).vector.style.fillPaint?.kind).toBe('linear-gradient');
+    });
+  });
+
+  it('edits stop colours and positions, adds and removes stops', async () => {
+    const user = userEvent.setup();
+    const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
+    const { session } = await mount(services, [layer]);
+
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+    await user.selectOptions(screen.getByTestId('fill-paint-kind'), 'linear-gradient');
+    await waitFor(() => {
+      expect(selectedPath(session).vector.style.fillPaint?.kind).toBe('linear-gradient');
+    });
+
+    fireEvent.change(screen.getByTestId('fill-paint-stop-colour-0'), {
+      target: { value: '#ff0000' },
+    });
+    await waitFor(() => {
+      const paint = selectedPath(session).vector.style.fillPaint;
+      if (paint?.kind !== 'linear-gradient') throw new Error('expected a gradient');
+      expect(paint.stops[0]?.color).toBe('#ff0000');
+    });
+
+    fireEvent.change(screen.getByTestId('fill-paint-stop-offset-1'), {
+      target: { value: '0.75' },
+    });
+    await waitFor(() => {
+      const paint = selectedPath(session).vector.style.fillPaint;
+      if (paint?.kind !== 'linear-gradient') throw new Error('expected a gradient');
+      expect(paint.stops[1]?.offset).toBe(0.75);
+    });
+
+    await user.click(screen.getByTestId('fill-paint-stop-add'));
+    await waitFor(() => {
+      const paint = selectedPath(session).vector.style.fillPaint;
+      if (paint?.kind !== 'linear-gradient') throw new Error('expected a gradient');
+      expect(paint.stops).toHaveLength(3);
+    });
+
+    await user.click(screen.getByTestId('fill-paint-stop-remove-2'));
+    await waitFor(() => {
+      const paint = selectedPath(session).vector.style.fillPaint;
+      if (paint?.kind !== 'linear-gradient') throw new Error('expected a gradient');
+      expect(paint.stops).toHaveLength(2);
+    });
+
+    // Two stops is the minimum a gradient needs, so removal is refused by disabling the control.
+    expect(screen.getByTestId('fill-paint-stop-remove-0')).toBeDisabled();
+  });
+
+  it('edits the gradient direction as fractions of the shape bounds', async () => {
+    const user = userEvent.setup();
+    const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
+    const { session } = await mount(services, [layer]);
+
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+    await user.selectOptions(screen.getByTestId('fill-paint-kind'), 'linear-gradient');
+    await waitFor(() => {
+      expect(selectedPath(session).vector.style.fillPaint?.kind).toBe('linear-gradient');
+    });
+
+    fireEvent.change(screen.getByTestId('fill-linear-to-y'), { target: { value: '1' } });
+    await waitFor(() => {
+      const paint = selectedPath(session).vector.style.fillPaint;
+      if (paint?.kind !== 'linear-gradient') throw new Error('expected a gradient');
+      expect(paint.to).toEqual({ x: 1, y: 1 });
+    });
+  });
+
+  it('converts to a radial gradient and clamps a radius typed past the limit', async () => {
+    const user = userEvent.setup();
+    const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
+    const { session } = await mount(services, [layer]);
+
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+    await user.selectOptions(screen.getByTestId('fill-paint-kind'), 'radial-gradient');
+    await waitFor(() => {
+      expect(selectedPath(session).vector.style.fillPaint?.kind).toBe('radial-gradient');
+    });
+
+    fireEvent.change(screen.getByTestId('fill-radial-radius'), { target: { value: '9' } });
+    await waitFor(() => {
+      const paint = selectedPath(session).vector.style.fillPaint;
+      if (paint?.kind !== 'radial-gradient') throw new Error('expected a radial gradient');
+      expect(paint.radius).toBe(4);
+    });
+  });
+
+  it('builds a pattern from the current colour and edits every parameter', async () => {
+    const user = userEvent.setup();
+    const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
+    const { session } = await mount(services, [layer]);
+
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+    await user.selectOptions(screen.getByTestId('fill-paint-kind'), 'pattern');
+    await waitFor(() => {
+      expect(selectedPath(session).vector.style.fillPaint?.kind).toBe('pattern');
+    });
+
+    const seeded = selectedPath(session).vector.style.fillPaint;
+    if (seeded?.kind !== 'pattern') throw new Error('expected a pattern');
+    // The pattern is seeded from the fill the shape already had, not from an arbitrary colour.
+    expect(seeded.foreground).toBe('#22cc88');
+
+    await user.selectOptions(screen.getByTestId('fill-pattern-motif'), 'dots');
+    await waitFor(() => {
+      const paint = selectedPath(session).vector.style.fillPaint;
+      if (paint?.kind !== 'pattern') throw new Error('expected a pattern');
+      expect(paint.motif).toBe('dots');
+    });
+
+    fireEvent.change(screen.getByTestId('fill-pattern-scale'), { target: { value: '0.3' } });
+    fireEvent.change(screen.getByTestId('fill-pattern-rotation'), { target: { value: '45' } });
+    await waitFor(() => {
+      const paint = selectedPath(session).vector.style.fillPaint;
+      if (paint?.kind !== 'pattern') throw new Error('expected a pattern');
+      expect(paint.scale).toBe(0.3);
+      expect(paint.rotation).toBe(45);
+    });
+
+    await user.click(screen.getByTestId('fill-pattern-background-none'));
+    await waitFor(() => {
+      const paint = selectedPath(session).vector.style.fillPaint;
+      if (paint?.kind !== 'pattern') throw new Error('expected a pattern');
+      expect(paint.background).toBeNull();
+    });
+  });
+
+  it('keeps fill and stroke paint independent', async () => {
+    const user = userEvent.setup();
+    const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
+    const { session } = await mount(services, [layer]);
+
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+    await user.selectOptions(screen.getByTestId('fill-paint-kind'), 'linear-gradient');
+    await waitFor(() => {
+      expect(selectedPath(session).vector.style.fillPaint?.kind).toBe('linear-gradient');
+    });
+
+    await user.selectOptions(screen.getByTestId('stroke-paint-kind'), 'pattern');
+    await waitFor(() => {
+      const style = selectedPath(session).vector.style;
+      expect(style.strokePaint?.kind).toBe('pattern');
+      expect(style.fillPaint?.kind).toBe('linear-gradient');
+    });
+    expect(session.getState().history.at(-1)?.label).toContain('Set stripes pattern');
+  });
+
+  it('returns to a solid fill and reports that the shape still paints', async () => {
+    const user = userEvent.setup();
+    const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
+    const { session } = await mount(services, [layer]);
+
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+    await user.selectOptions(screen.getByTestId('fill-paint-kind'), 'linear-gradient');
+    await waitFor(() => {
+      expect(selectedPath(session).vector.style.fillPaint?.kind).toBe('linear-gradient');
+    });
+
+    await user.click(screen.getByTestId('fill-paint-remove'));
+    await waitFor(() => {
+      expect(selectedPath(session).vector.style.fillPaint).toBeNull();
+    });
+    // The solid colour the shape had before the gradient is still there.
+    expect(selectedPath(session).vector.style.fill).toBe('#22cc88');
+    expect(screen.getByTestId('paint-summary')).toHaveTextContent(
+      /Gradients and patterns are stored/,
+    );
+
+    await user.click(screen.getByTestId('fill-none'));
+    await waitFor(() => {
+      const style = selectedPath(session).vector.style;
+      expect(style.fill).toBeNull();
+      expect(style.fillPaint).toBeNull();
+    });
+    expect(screen.getByTestId('paint-summary')).toHaveTextContent(/invisible on the artboard/);
+  });
+});

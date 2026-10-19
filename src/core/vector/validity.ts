@@ -7,7 +7,10 @@
  *
  * What is checked, and why each one can actually go wrong:
  *
- * 1. **Structure** — the path is non-empty, has finite coordinates and respects the limits.
+ * 1. **Structure** — the path is non-empty, has finite coordinates and respects the limits. A
+ *    non-finite coordinate short-circuits the remaining checks: it cannot be measured, and
+ *    flattening it would recurse to the subdivision limit before the quadratic crossing scan even
+ *    started.
  * 2. **No self-intersection** — within one contour, no two non-adjacent segments cross. A
  *    self-intersecting ring has no well-defined interior for a non-zero fill rule, so its area and
  *    its rendering depend on the renderer.
@@ -165,6 +168,22 @@ export function checkTopology(path: VectorPath, options: TopologyOptions = {}): 
   const requireClosed = options.requireClosed ?? true;
   const issues: TopologyIssue[] = [];
   const structureIssues = validatePath(path, tolerance);
+
+  // Structure first. A non-finite coordinate makes every test below meaningless, and it is not
+  // merely wasted work: no flatness test can ever be satisfied by NaN, so flattening recurses to
+  // the depth limit and the quadratic self-intersection scan then runs over millions of points,
+  // which does not finish in any useful time. Reporting the structure defects immediately is both
+  // the honest answer and the only answer the caller can act on.
+  if (structureIssues.some((entry) => entry.code === 'non-finite')) {
+    return {
+      valid: false,
+      issues,
+      outerContours: [],
+      holeContours: [],
+      flattened: { tolerance: tolerance.flatten, segments: 0 },
+      structureIssues,
+    };
+  }
 
   const flattened: FlatContour[] = path.contours.map((contour) =>
     flattenContour(contour, tolerance.flatten),

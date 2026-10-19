@@ -46,6 +46,10 @@ type StoredVectorLayer = {
       readonly fill: string | null;
       readonly stroke: string | null;
       readonly strokeWidth: number;
+      readonly fillPaint?: {
+        readonly kind: string;
+        readonly stops?: readonly { readonly offset: number; readonly color: string }[];
+      } | null;
     };
   };
 };
@@ -452,6 +456,64 @@ test.describe('Illustration Studio', () => {
       expect(Math.abs(node.point.y - (source?.point.y ?? 0))).toBeLessThan(1e-3);
     }
     expect(reimported.vector.style.fill).toBe('#22cc88');
+  });
+
+  test('paints a gradient in the browser, exports it, and re-imports the same paint', async ({
+    page,
+  }) => {
+    await createVectorDocument(page, 'Gradient paint');
+    await drawShape(page, 'rectangle', { x: 32, y: 32 }, { x: 224, y: 224 });
+    const drawn = (await pathLayers(page))[0];
+    if (!drawn) throw new Error('the rectangle should be in the document');
+    await selectLayer(page, drawn.id);
+
+    // A solid fill first, so the gradient is seeded from a colour the test chose.
+    await page.getByTestId('fill-colour').fill('#22cc88');
+    await page.getByTestId('fill-paint-kind').selectOption('linear-gradient');
+    await expect
+      .poll(async () => (await pathLayers(page))[0]?.vector?.style.fillPaint?.kind)
+      .toBe('linear-gradient');
+    const stored = (await pathLayers(page))[0]?.vector?.style.fillPaint;
+    expect(stored?.stops).toHaveLength(2);
+    expect(stored?.stops?.[0]?.color).toBe('#22cc88');
+
+    // The artboard is a real canvas: sample it and check the two ends of the gradient differ.
+    const samples = await page.evaluate(() => {
+      const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="vector-canvas"]');
+      if (!canvas) throw new Error('the vector canvas is missing');
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('the artboard has no 2D context');
+      const middle = Math.floor(canvas.height / 2);
+      const read = (fraction: number): number[] =>
+        Array.from(context.getImageData(Math.floor(canvas.width * fraction), middle, 1, 1).data);
+      return { left: read(0.2), right: read(0.8) };
+    });
+    const channelDifference =
+      Math.abs(samples.left[0]! - samples.right[0]!) +
+      Math.abs(samples.left[1]! - samples.right[1]!) +
+      Math.abs(samples.left[2]! - samples.right[2]!);
+    expect(channelDifference).toBeGreaterThan(40);
+
+    await expect(page.getByTestId('svg-export-summary')).toContainText('.svg');
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByTestId('svg-export').click(),
+    ]);
+    const path = await download.path();
+    if (!path) throw new Error('the SVG download produced no file');
+    const bytes = await readFile(path, 'utf8');
+    expect(bytes).toContain('<linearGradient');
+    expect(bytes).toContain('gradientUnits="userSpaceOnUse"');
+    expect(bytes).toContain('fill="url(#paint-1)"');
+    expect(bytes.match(/<stop /g)).toHaveLength(2);
+
+    // Re-import the downloaded bytes and prove the paint survives the file, not just the model.
+    await page.getByTestId('svg-paste').fill(bytes);
+    await page.getByTestId('svg-import-paste').click();
+    await expect.poll(async () => (await pathLayers(page)).length).toBe(3);
+    const imported = (await pathLayers(page)).at(-1);
+    expect(imported?.vector?.style.fillPaint?.kind).toBe('linear-gradient');
+    expect(imported?.vector?.style.fillPaint?.stops?.[0]?.color).toBe('#22cc88');
   });
 
   test('exports an icon set as a real zip containing one file per selected object', async ({
