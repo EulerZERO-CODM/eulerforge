@@ -28,6 +28,7 @@ import {
   type VectorStyle,
   DEFAULT_VECTOR_STYLE,
 } from '../vector';
+import type { PathText } from '../documents/layer-types';
 import type { Result } from '../result';
 import { err, forgeError, ok } from '../result';
 
@@ -52,6 +53,8 @@ export type SvgShape = {
   readonly style: SvgShapeStyle;
   /** 0–1. Shape-level transparency, like SVG's `opacity`. */
   readonly opacity: number;
+  /** Text laid along the shape's own contour, written as a `<textPath>` reference to it. */
+  readonly text?: PathText | null | undefined;
 };
 
 export type SvgArtwork = {
@@ -72,12 +75,14 @@ export function createShape(
   path: VectorPath,
   style: ShapeStyleInput = {},
   opacity = 1,
+  text: PathText | null = null,
 ): SvgShape {
   return Object.freeze({
     name,
     path,
     style: { ...DEFAULT_SHAPE_STYLE, ...style },
     opacity: clamp01(opacity),
+    text,
   });
 }
 

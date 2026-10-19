@@ -18,6 +18,7 @@
  * geometry.
  */
 
+import { PATH_TEXT_FONT_FAMILIES, type PathText } from '../documents/layer-types';
 import { toPathData } from '../vector/path-data';
 import { boundsOfPath } from '../vector/bounds';
 import type { VectorBox as Box } from '../vector/types';
@@ -124,18 +125,54 @@ function shapeElement(
     fill: null,
     stroke: null,
   },
+  pathId: string | null = null,
 ): string {
   const data = toPathData(shape.path, { digits: options.digits });
   const attributes = [`d="${data}"`, ...styleAttributes(shape.style, options.digits, paintIds)];
   if (shape.opacity !== 1)
     attributes.push(`opacity="${formatSvgNumber(shape.opacity, options.digits)}"`);
+  // The id exists only so the element's own `<textPath>` can point at it; a shape with no text
+  // stays anonymous, which keeps the output of every document written before text-on-path identical.
+  if (pathId !== null) attributes.push(`id="${pathId}"`);
 
-  const element = `${indent}<path ${attributes.join(' ')}/>`;
-  if (!options.includeNames) return element;
+  const elements = [`${indent}<path ${attributes.join(' ')}/>`];
+  if (pathId !== null && shape.text) {
+    elements.push(pathTextElement(pathId, shape.text, options, indent));
+  }
+  if (!options.includeNames) return elements.join(options.pretty ? '\n' : '');
   const title = `${indent}<title>${escapeXmlText(shape.name)}</title>`;
   return options.pretty
-    ? `${indent}<g>\n${title}\n${element}\n${indent}</g>`
-    : `${indent}<g>${title}${element}</g>`;
+    ? `${indent}<g>\n${[title, ...elements].join('\n')}\n${indent}</g>`
+    : `${indent}<g>${[title, ...elements].join('')}</g>`;
+}
+
+/**
+ * Text laid on the shape's contour, as a real `<textPath>`.
+ *
+ * The file stores the *parameters* — the run, its size, spacing and start offset — and references
+ * the shape's own `id`; it does not store glyph positions. That is what keeps the text editable and
+ * attached to the geometry after a round trip. `dy` carries the baseline mode for other viewers, and
+ * `data-forge-baseline` records it exactly so this project's importer does not have to guess from a
+ * length that a viewer may resolve differently.
+ */
+function pathTextElement(
+  id: string,
+  text: PathText,
+  options: Required<Pick<SerializeOptions, 'digits' | 'pretty' | 'includeNames'>>,
+  indent: string,
+): string {
+  const digits = options.digits;
+  const family = PATH_TEXT_FONT_FAMILIES[text.fontStackId];
+  const dy =
+    text.baseline === 'centre' ? ' dy="0.35em"' : text.baseline === 'below' ? ' dy="0.7em"' : '';
+  const baseline = text.baseline === 'above' ? '' : ` data-forge-baseline="${text.baseline}"`;
+  return (
+    `${indent}<text fill="${text.colour}" font-family="${family}" ` +
+    `font-size="${formatSvgNumber(text.fontSize, digits)}" ` +
+    `letter-spacing="${formatSvgNumber(text.letterSpacing, digits)}"${dy}>` +
+    `<textPath href="#${id}" startOffset="${formatSvgNumber(text.startOffset * 100, 2)}%"${baseline}>` +
+    `${escapeXmlText(text.content)}</textPath></text>`
+  );
 }
 
 /**
@@ -210,6 +247,7 @@ export function serializeSvg(artwork: SvgArtwork, options: SerializeOptions = {}
   };
 
   const geometry: string[] = [];
+  let textCount = 0;
   for (const shape of shapes) {
     // A shape with no geometry is skipped with the same outcome as an empty `<path>`: nothing painted.
     if (shape.path.contours.length === 0) continue;
@@ -218,11 +256,18 @@ export function serializeSvg(artwork: SvgArtwork, options: SerializeOptions = {}
     const valid = box ?? { minX, minY, maxX, maxY };
     const fillId = allocate(shape.style.fillPaint, valid);
     const strokeId = allocate(shape.style.strokePaint, valid);
+    const pathId =
+      shape.text && shape.text.content.trim().length > 0
+        ? `text-path-${String(++textCount)}`
+        : null;
     geometry.push(
-      shapeElement(shape, { digits, pretty, includeNames }, indent, {
-        fill: fillId,
-        stroke: strokeId,
-      }),
+      shapeElement(
+        shape,
+        { digits, pretty, includeNames },
+        indent,
+        { fill: fillId, stroke: strokeId },
+        pathId,
+      ),
     );
   }
 

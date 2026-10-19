@@ -23,7 +23,9 @@ import {
   transformShape,
   validateArtwork,
   type SvgArtwork,
+  type SvgShape,
 } from './artwork';
+import { normalisePathText, type PathText } from '../documents/layer-types';
 import { serializeNaiveSvg } from './naive';
 import { parseSvg, parseTransform } from './parse';
 import { formatSvgNumber, iconIdFor, serializeIconSprite, serializeSvg } from './serialize';
@@ -556,6 +558,142 @@ describe('import: unsupported content is reported, never dropped silently', () =
     const codes = result.value.issues.map((issue) => issue.code);
     expect(codes).toContain('rect.degenerate');
     expect(codes).toContain('circle.degenerate');
+  });
+});
+
+describe('text on a path', () => {
+  const RUN: PathText = normalisePathText({
+    content: 'Along the curve',
+    fontSize: 24,
+    letterSpacing: 1.5,
+    startOffset: 0.25,
+    baseline: 'below',
+    colour: '#112233',
+    fontStackId: 'serif',
+  });
+
+  function artworkWithText(text: PathText = RUN): SvgArtwork {
+    return createArtwork({ width: 100, height: 100 }, [
+      createShape(
+        'Arc',
+        pathOf('M0 50 C 25 0 75 0 100 50').path,
+        { fill: null, stroke: '#000000', strokeWidth: 2 },
+        1,
+        text,
+      ),
+    ]);
+  }
+
+  function textImport(svg: string): {
+    readonly shape: SvgShape;
+    readonly codes: readonly string[];
+  } {
+    const result = parseSvg(svg);
+    if (!result.ok) throw new Error(result.error.message);
+    const shape = result.value.artwork.shapes[0];
+    if (!shape) throw new Error('the fixture produced no shape');
+    return { shape, codes: result.value.issues.map((issue) => issue.code) };
+  }
+
+  it('writes the run as a real textPath that points at its own shape', () => {
+    const svg = serialized(artworkWithText());
+    expect(svg).toContain('id="text-path-1"');
+    expect(svg).toContain('<textPath href="#text-path-1" startOffset="25%"');
+    expect(svg).toContain('font-family="serif"');
+    expect(svg).toContain('font-size="24"');
+    expect(svg).toContain('letter-spacing="1.5"');
+    expect(svg).toContain('fill="#112233"');
+    expect(svg).toContain('dy="0.7em"');
+    expect(svg).toContain('data-forge-baseline="below"');
+    expect(svg).toContain('>Along the curve</textPath>');
+  });
+
+  it('keeps every setting through a round trip', () => {
+    const written = serializeSvg(artworkWithText(), { includeNames: true });
+    if (!written.ok) throw new Error(written.error.message);
+    const read = parseSvg(written.value);
+    if (!read.ok) throw new Error(read.error.message);
+    const text = read.value.artwork.shapes[0]?.text;
+    expect(text).toBeDefined();
+    expect(text?.content).toBe(RUN.content);
+    expect(text?.fontSize).toBeCloseTo(RUN.fontSize, 3);
+    expect(text?.letterSpacing).toBeCloseTo(RUN.letterSpacing, 3);
+    expect(text?.startOffset).toBeCloseTo(RUN.startOffset, 4);
+    expect(text?.baseline).toBe('below');
+    expect(text?.colour).toBe(RUN.colour);
+    expect(text?.fontStackId).toBe('serif');
+    // A round trip through this project's own writer produces no warnings: the file carries the
+    // baseline exactly, so the importer never has to guess.
+    expect(read.value.issues).toEqual([]);
+  });
+
+  it('resolves a reference even when the text is written before the shape', () => {
+    const { shape, codes } = textImport(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">` +
+        `<text font-size="10" fill="#ff0000"><textPath href="#curve">Forward</textPath></text>` +
+        `<path id="curve" d="M0 50 C 25 0 75 0 100 50" fill="none" stroke="#000"/></svg>`,
+    );
+    expect(shape.text?.content).toBe('Forward');
+    expect(shape.text?.colour).toBe('#ff0000');
+    expect(codes).not.toContain('text.path-missing');
+  });
+
+  it('refuses the whole file when its text points outside it', () => {
+    // The safety scan runs before any element is read, so a `<textPath>` naming a remote document
+    // cannot smuggle a request past the importer: the file is refused, not merely the element.
+    const result = parseSvg(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">` +
+        `<path id="curve" d="M0 50 C 25 0 75 0 100 50"/>` +
+        `<text><textPath href="https://example.com/other.svg#curve">Remote</textPath></text></svg>`,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toMatch(/external/i);
+  });
+
+  it('reports a textPath that names no path at all', () => {
+    const { shape, codes } = textImport(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">` +
+        `<path id="curve" d="M0 50 C 25 0 75 0 100 50"/>` +
+        `<text><textPath>Unattached</textPath></text></svg>`,
+    );
+    expect(shape.text ?? null).toBeNull();
+    expect(codes).toContain('text.external-reference');
+  });
+
+  it('reports a reference to a shape that is not in the file', () => {
+    const { shape, codes } = textImport(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">` +
+        `<path id="curve" d="M0 50 C 25 0 75 0 100 50"/>` +
+        `<text><textPath href="#missing">Orphan</textPath></text></svg>`,
+    );
+    expect(shape.text ?? null).toBeNull();
+    expect(codes).toContain('text.path-missing');
+  });
+
+  it('converts an absolute start offset and says that it approximated it', () => {
+    const { shape, codes } = textImport(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">` +
+        `<path id="curve" d="M0 0 L100 0"/>` +
+        `<text font-size="10"><textPath href="#curve" startOffset="50">Half way</textPath></text></svg>`,
+    );
+    expect(codes).toContain('text.start-offset');
+    expect(shape.text?.startOffset).toBeCloseTo(0.5, 4);
+  });
+
+  it('writes no text element for an empty run, and no id either', () => {
+    const svg = serialized(artworkWithText(normalisePathText({ ...RUN, content: '   ' })));
+    expect(svg).not.toContain('<textPath');
+    expect(svg).not.toContain('id="text-path-1"');
+  });
+
+  it('still reports free-standing text rather than pretending to place it', () => {
+    const result = parseSvg(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><text x="1" y="5">Label</text><path d="M0 0 L10 0 L10 10 Z"/></svg>`,
+    );
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.artwork.shapes).toHaveLength(1);
+    expect(result.value.issues.map((issue) => issue.code)).toContain('unsupported.text');
   });
 });
 

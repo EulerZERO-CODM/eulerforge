@@ -28,12 +28,20 @@
  * hostile file fails fast instead of exhausting the tab.
  */
 
+import {
+  PATH_TEXT_LIMITS,
+  normalisePathText,
+  type FontStackId,
+  type PathText,
+  type PathTextBaseline,
+} from '../documents/layer-types';
 import { createPath, MAX_NODES_TOTAL, type VectorPath } from '../vector/types';
 import { parsePathData } from '../vector/path-data';
 import type { PaintSpec, PatternPaint } from '../vector/paint';
 import { boundsOfPath } from '../vector/bounds';
 import type { VectorBox } from '../vector/types';
 import { createShape, type SvgArtwork, type SvgShape, type SvgShapeStyle } from './artwork';
+import { layoutPathText } from '../vector/path-text';
 import { ellipsePath, linePath, rectanglePath } from '../vector/shapes';
 import { apply, matrix, transformPath, type Matrix } from '../vector/transform';
 import { createArtwork } from './artwork';
@@ -75,9 +83,6 @@ const FORBIDDEN_ELEMENTS = new Set([
 
 /** Drawing elements that are recognised but not supported: reported, never silently dropped. */
 const UNSUPPORTED_ELEMENTS = new Set([
-  'text',
-  'tspan',
-  'textpath',
   'image',
   'use',
   'symbol',
@@ -616,6 +621,14 @@ function styleFromAttributes(
   return style;
 }
 
+/** Text read from a `<text><textPath>` element, waiting for its target shape. */
+type PendingPathText = {
+  readonly targetId: string;
+  readonly text: PathText;
+  /** SVG allows a length here; converting it needs the contour, which is only known at resolution. */
+  readonly absoluteOffset: number | null;
+};
+
 type WalkContext = {
   readonly matrixValue: Matrix;
   readonly style: StyleAccumulator;
@@ -626,6 +639,9 @@ type WalkContext = {
   /** Name from the enclosing group's `<title>`, used when an element has no id of its own. */
   readonly title: string | null;
   shapes: SvgShape[];
+  /** Ids parallel to `shapes`, so a `<textPath>` reference can find its target after the walk. */
+  shapeIds: (string | null)[];
+  pendingText: PendingPathText[];
   nodes: number;
 };
 
@@ -936,6 +952,20 @@ function walk(element: RawElement, context: WalkContext, depth: number): void {
     return;
   }
 
+  if (name === 'text') {
+    readTextElement(element, context);
+    return;
+  }
+  // `<textPath>` and `<tspan>` outside a `<text>` are not drawing elements of their own.
+  if (name === 'textpath' || name === 'tspan') {
+    context.issues.push({
+      severity: 'ignored',
+      code: `unsupported.${name}`,
+      message: `<${name}> outside a <text> element was left out.`,
+    });
+    return;
+  }
+
   if (UNSUPPORTED_ELEMENTS.has(name)) {
     context.issues.push({
       severity: 'ignored',
@@ -1030,6 +1060,7 @@ function walk(element: RawElement, context: WalkContext, depth: number): void {
     // Named above by resolvePaint; the shape still imports with the solid colour behind it.
   }
 
+  context.shapeIds.push(element.attributes.get('id') ?? null);
   context.shapes.push(
     createShape(
       titleOf(element) ?? element.attributes.get('id') ?? context.title ?? name,
@@ -1048,8 +1079,120 @@ function walk(element: RawElement, context: WalkContext, depth: number): void {
         dashArray: style.dashArray,
       },
       opacity,
+      null,
     ),
   );
+}
+
+/** Maps a CSS `font-family` value back to one of the three stacks this project ships. */
+function fontStackFor(value: string | undefined, issues: SvgIssue[]): FontStackId {
+  const family = (value ?? '').toLowerCase();
+  if (family.includes('mono')) return 'mono';
+  if (family.includes('serif') && !family.includes('sans')) return 'serif';
+  if (family.length > 0 && !family.includes('sans') && !family.includes('system-ui')) {
+    issues.push({
+      severity: 'approximated',
+      code: 'text.font-family',
+      message: `The font family "${family}" was approximated to the system sans stack.`,
+    });
+  }
+  return 'sans';
+}
+
+/**
+ * Reads a `<text>` element that references a path with `<textPath href="#id">`.
+ *
+ * Only what this project writes is imported exactly: a run, its size, spacing, colour, start offset
+ * and the baseline mode it recorded. Anything else — a bare `<text x y>`, a `rotate` list, a
+ * `textLength` — is reported rather than guessed at.
+ */
+function readTextElement(element: RawElement, context: WalkContext): void {
+  const textPath = element.children.find((child) => child.name.toLowerCase() === 'textpath');
+  if (!textPath) {
+    context.issues.push({
+      severity: 'ignored',
+      code: 'unsupported.text',
+      message:
+        'A <text> element that is not laid on a path was left out; this importer carries text attached to a shape, not free-standing labels.',
+    });
+    return;
+  }
+  const href =
+    textPath.attributes.get('href') ??
+    textPath.attributes.get('xlink:href') ??
+    element.attributes.get('href') ??
+    element.attributes.get('xlink:href') ??
+    '';
+  // Anything with a scheme or a path was already refused by the safety scan before the walk, so what
+  // is left here is a missing or empty reference — reported rather than guessed at.
+  if (!href.startsWith('#')) {
+    context.issues.push({
+      severity: 'warning',
+      code: 'text.external-reference',
+      message:
+        'A <textPath> that does not reference an element in this file was left out: imported files may not load anything external.',
+    });
+    return;
+  }
+  const rawContent = textPath.text.trim();
+  if (rawContent.length === 0) return;
+  const content =
+    rawContent.length > PATH_TEXT_LIMITS.maxContentLength
+      ? rawContent.slice(0, PATH_TEXT_LIMITS.maxContentLength)
+      : rawContent;
+  if (content !== rawContent) {
+    context.issues.push({
+      severity: 'approximated',
+      code: 'text.truncated',
+      message: `Text longer than ${String(PATH_TEXT_LIMITS.maxContentLength)} characters was truncated.`,
+    });
+  }
+
+  const offsetAttribute =
+    textPath.attributes.get('startoffset') ?? textPath.attributes.get('startOffset');
+  const offsetText = offsetAttribute?.trim() ?? '';
+  const offsetIsAbsolute = offsetText.length > 0 && !offsetText.endsWith('%');
+  const absoluteOffset = ((): number | null => {
+    if (!offsetIsAbsolute) return null;
+    const numeric = Number(offsetText);
+    return Number.isFinite(numeric) ? numeric : null;
+  })();
+  const startOffset = ((): number => {
+    if (offsetText.length === 0) return 0;
+    const numeric = Number(offsetIsAbsolute ? offsetText : offsetText.slice(0, -1));
+    if (!Number.isFinite(numeric)) return 0;
+    return offsetIsAbsolute ? 0 : numeric / 100;
+  })();
+
+  const annotated = textPath.attributes.get('data-forge-baseline');
+  const baseline: PathTextBaseline =
+    annotated === 'centre' || annotated === 'below' || annotated === 'above'
+      ? annotated
+      : element.attributes.get('dy')?.includes('0.7') === true
+        ? 'below'
+        : element.attributes.get('dy') !== undefined
+          ? 'centre'
+          : 'above';
+
+  const fill = element.attributes.get('fill');
+  const colour =
+    fill === undefined
+      ? '#000000'
+      : (parseColour(fill, '#000000', context.issues, 'text') ?? '#000000');
+
+  context.pendingText.push({
+    targetId: href.slice(1),
+    text: normalisePathText({
+      content,
+      fontSize: parseLength(element.attributes.get('font-size')) ?? 16,
+      letterSpacing: parseLength(element.attributes.get('letter-spacing')) ?? 0,
+      startOffset,
+      baseline,
+      colour,
+      fontStackId: fontStackFor(element.attributes.get('font-family'), context.issues),
+    }),
+    absoluteOffset,
+  });
 }
 
 function checkSafety(root: RawElement, issues: SvgIssue[]): void {
@@ -1223,10 +1366,49 @@ export function parseSvg(source: string): Result<SvgImportResult> {
     issues,
     elements: [],
     shapes: [],
+    shapeIds: [],
+    pendingText: [],
     nodes: 0,
   };
 
   for (const child of root.children) walk(child, context, 1);
+
+  // Text may be written before or after the shape it names, so the reference is resolved once the
+  // whole file has been walked rather than requiring document order.
+  for (const pending of context.pendingText) {
+    const index = context.shapeIds.indexOf(pending.targetId);
+    const shape = index >= 0 ? context.shapes[index] : undefined;
+    if (!shape) {
+      issues.push({
+        severity: 'warning',
+        code: 'text.path-missing',
+        message: `Text on the path "${pending.targetId}" was left out: the file has no shape with that id.`,
+      });
+      continue;
+    }
+    let text = pending.text;
+    if (pending.absoluteOffset !== null) {
+      // "startOffset" is a length in user units unless it carries a percentage. Converting it
+      // needs the contour's real length, which is why this happens after the walk rather than during
+      // it; the approximation is reported because the length is measured on the flattened outline.
+      const length = layoutPathText(
+        shape.path,
+        { content: '', fontSize: 16, letterSpacing: 0, startOffset: 0 },
+        () => 0,
+      ).pathLength;
+      text = normalisePathText({
+        ...text,
+        startOffset: length > 0 ? pending.absoluteOffset / length : 0,
+      });
+      issues.push({
+        severity: 'approximated',
+        code: 'text.start-offset',
+        message:
+          'An absolute start offset was converted to a fraction of the flattened contour length.',
+      });
+    }
+    context.shapes[index] = Object.freeze({ ...shape, text });
+  }
   if (context.elements.length > SVG_LIMITS.maxElements) {
     return err(
       forgeError(

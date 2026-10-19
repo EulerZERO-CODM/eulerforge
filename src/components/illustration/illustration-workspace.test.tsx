@@ -26,7 +26,7 @@ import { useDocumentSession } from '../../state/hooks';
 import { EMPTY_SELECTION, type Selection } from '../../core/editor/selection';
 import { readZipEntry, readZipEntryNames } from '../../core/svg/zip';
 import type * as DownloadAdapter from '../../lib/browser/download';
-import { downloadBytes } from '../../lib/browser/download';
+import { downloadBytes, downloadText } from '../../lib/browser/download';
 import type { SceneImages } from '../workspace/use-scene-images';
 import { useState } from 'react';
 
@@ -37,7 +37,7 @@ import { useState } from 'react';
  */
 vi.mock('../../lib/browser/download', async (importOriginal) => {
   const actual = await importOriginal<typeof DownloadAdapter>();
-  return { ...actual, downloadBytes: vi.fn(() => true) };
+  return { ...actual, downloadBytes: vi.fn(() => true), downloadText: vi.fn(() => true) };
 });
 
 vi.mock('next/navigation', () => ({
@@ -849,5 +849,135 @@ describe('gradient and pattern paint', () => {
       expect(style.fillPaint).toBeNull();
     });
     expect(screen.getByTestId('paint-summary')).toHaveTextContent(/invisible on the artboard/);
+  });
+});
+
+describe('text on a path', () => {
+  let services: TestForgeServices;
+
+  beforeEach(() => {
+    services = createTestServices();
+  });
+
+  function arc() {
+    return pathLayer('Arc', 'M20 100 C 60 20 140 20 180 100');
+  }
+
+  function textOf(session: Awaited<ReturnType<typeof mount>>['session']) {
+    const layer = session.getState().document.scene.layers[0];
+    if (layer?.type !== 'path') throw new Error('expected a path layer');
+    return layer.vector.text ?? null;
+  }
+
+  it('types a run onto the selected path as one undoable action', async () => {
+    const user = userEvent.setup();
+    const layer = arc();
+    const { session } = await mount(services, [layer]);
+
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+    const input = screen.getByTestId('text-content');
+    expect(input).toHaveValue('');
+    // Nothing is laid out yet, so the typography controls are disabled rather than silently inert.
+    expect(screen.getByTestId('text-font-size')).toBeDisabled();
+    expect(screen.getByTestId('text-remove')).toBeDisabled();
+
+    await user.type(input, 'Hello curve');
+    await waitFor(() => {
+      expect(textOf(session)?.content).toBe('Hello curve');
+    });
+    // Typing coalesces into one history entry, so one undo removes the whole run.
+    expect(session.getState().history.at(-1)?.label).toBe('Set text on “Arc”');
+    expect(screen.getByTestId('text-summary')).toHaveTextContent(/11 characters at 28 units/);
+
+    await session.undo();
+    await waitFor(() => {
+      expect(textOf(session)).toBeNull();
+    });
+  });
+
+  it('edits size, spacing, offset, baseline, font and colour, each as its own labelled action', async () => {
+    const user = userEvent.setup();
+    const layer = arc();
+    const { session } = await mount(services, [layer]);
+
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+    await user.type(screen.getByTestId('text-content'), 'Curve');
+    await waitFor(() => {
+      expect(textOf(session)?.content).toBe('Curve');
+    });
+
+    fireEvent.change(screen.getByTestId('text-font-size'), { target: { value: '40' } });
+    await waitFor(() => {
+      expect(textOf(session)?.fontSize).toBe(40);
+    });
+
+    fireEvent.change(screen.getByTestId('text-letter-spacing'), { target: { value: '3' } });
+    await waitFor(() => {
+      expect(textOf(session)?.letterSpacing).toBe(3);
+    });
+
+    fireEvent.change(screen.getByTestId('text-start-offset'), { target: { value: '50' } });
+    await waitFor(() => {
+      expect(textOf(session)?.startOffset).toBeCloseTo(0.5, 6);
+    });
+
+    await user.selectOptions(screen.getByTestId('text-baseline'), 'below');
+    await waitFor(() => {
+      expect(textOf(session)?.baseline).toBe('below');
+    });
+
+    await user.selectOptions(screen.getByTestId('text-font-stack'), 'mono');
+    await waitFor(() => {
+      expect(textOf(session)?.fontStackId).toBe('mono');
+    });
+
+    fireEvent.change(screen.getByTestId('text-colour'), { target: { value: '#00ff00' } });
+    await waitFor(() => {
+      expect(textOf(session)?.colour).toBe('#00ff00');
+    });
+
+    expect(screen.getByTestId('text-summary')).toHaveTextContent(
+      '5 characters at 40 units, below the line, starting 50% along the contour.',
+    );
+    expect(session.getState().history.map((entry) => entry.label)).toEqual(
+      expect.arrayContaining([
+        'Set text size on “Arc”',
+        'Set text spacing on “Arc”',
+        'Set text start offset on “Arc”',
+        'Set text baseline on “Arc”',
+        'Set text font on “Arc”',
+        'Set text colour on “Arc”',
+      ]),
+    );
+  });
+
+  it('removes the run without touching the geometry, and exports it as a real textPath', async () => {
+    const user = userEvent.setup();
+    const layer = arc();
+    const { session } = await mount(services, [layer]);
+
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+    await user.type(screen.getByTestId('text-content'), 'Export me');
+    await waitFor(() => {
+      expect(textOf(session)?.content).toBe('Export me');
+    });
+
+    vi.mocked(downloadText).mockClear();
+    await user.click(screen.getByTestId('svg-export'));
+    const call = vi.mocked(downloadText).mock.calls.at(-1);
+    if (!call) throw new Error('the drawing never reached the download adapter');
+    const svg = call[0];
+    expect(svg).toContain('<textPath href="#text-path-1"');
+    expect(svg).toContain('>Export me</textPath>');
+
+    const before = session.getState().document.scene.layers[0];
+    await user.click(screen.getByTestId('text-remove'));
+    await waitFor(() => {
+      expect(textOf(session)).toBeNull();
+    });
+    const after = session.getState().document.scene.layers[0];
+    if (before?.type !== 'path' || after?.type !== 'path') throw new Error('path expected');
+    expect(after.vector.path).toEqual(before.vector.path);
+    expect(after.frame).toEqual(before.frame);
   });
 });

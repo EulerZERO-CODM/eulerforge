@@ -301,3 +301,54 @@ describe('paint survives interchange', () => {
     expect(limitation).not.toMatch(/not part of either document model/i);
   });
 });
+
+describe('text on a path survives interchange', () => {
+  const run = {
+    content: 'Across studios',
+    fontSize: 14,
+    letterSpacing: 1,
+    startOffset: 0.2,
+    baseline: 'above' as const,
+    colour: '#334455',
+    fontStackId: 'serif' as const,
+  };
+
+  function writtenLayer(): Layer {
+    const parsed = parsePathData('M2 10 C 6 2 14 2 18 10');
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    return make(
+      {
+        type: 'path',
+        frame: { x: 2, y: 2, width: 16, height: 8 },
+        vector: {
+          path: parsed.value.path,
+          style: { fill: null, stroke: '#000000' },
+          text: run,
+        },
+      },
+      'Written arc',
+    );
+  }
+
+  it('carries the run to a design canvas and back', () => {
+    const source = writtenLayer();
+    const toDesign = layersToDesign([source]);
+    if (!toDesign.ok) throw new Error(toDesign.error.message);
+    const designLayer = toDesign.value.layers[0];
+    if (designLayer?.type !== 'path') throw new Error('expected a path layer');
+    expect(designLayer.vector.text).toEqual(run);
+
+    const back = layersToVector([designLayer]);
+    if (!back.ok) throw new Error(back.error.message);
+    const vectorLayer = back.value.layers[0];
+    if (vectorLayer?.type !== 'path') throw new Error('expected a path layer');
+    expect(vectorLayer.vector.text).toEqual(run);
+    // The run is not reported as skipped: it travels with the path.
+    expect(toDesign.value.skipped).toEqual([]);
+    expect(back.value.skipped).toEqual([]);
+  });
+
+  it('says that path text crosses, next to the paint it already listed', () => {
+    expect(INTERCHANGE_LIMITATIONS.join(' ')).toMatch(/text laid along the path/i);
+  });
+});

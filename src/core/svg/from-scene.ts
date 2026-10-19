@@ -130,7 +130,15 @@ export function artworkFromDocument(
       });
       continue;
     }
-    shapes.push(createShape(layer.name, geometry, styleFor(layer), layer.opacity));
+    shapes.push(
+      createShape(
+        layer.name,
+        geometry,
+        styleFor(layer),
+        layer.opacity,
+        layer.type === 'path' ? (layer.vector.text ?? null) : null,
+      ),
+    );
   }
 
   const includeBackground = options.includeBackground ?? true;
@@ -239,7 +247,11 @@ export function layersFromArtwork(
           width: bounds.maxX - bounds.minX,
           height: bounds.maxY - bounds.minY,
         },
-        vector: { path: geometry, style: shape.style },
+        vector: {
+          path: geometry,
+          style: shape.style,
+          ...(shape.text ? { text: shape.text } : {}),
+        },
       },
       {
         name: name.slice(0, 80),

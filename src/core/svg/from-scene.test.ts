@@ -272,3 +272,68 @@ describe('SVG round trip through the document model', () => {
     expect(asLayerId('lyr-1')).toBe('lyr-1');
   });
 });
+
+describe('text on a path', () => {
+  const RUN = {
+    content: 'Runs along',
+    fontSize: 12,
+    letterSpacing: 0.5,
+    startOffset: 0.1,
+    baseline: 'centre' as const,
+    colour: '#ff0000',
+    fontStackId: 'mono' as const,
+  };
+
+  function textLayer(name = 'Arc'): Layer {
+    const parsed = parsePathData('M4 4 C 8 0 24 0 28 4');
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    const created = createLayer(
+      {
+        type: 'path',
+        frame: { x: 4, y: 4, width: 24, height: 0 },
+        vector: { path: parsed.value.path, style: { fill: null, stroke: '#000000' }, text: RUN },
+      },
+      { name, generateId: nextId },
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    return created.value;
+  }
+
+  it('carries the run into the artwork instead of reporting a text layer', () => {
+    const exported = artworkFromDocument(documentWith([textLayer()]));
+    expect(exported.unsupported).toEqual([]);
+    expect(exported.artwork.shapes[0]?.text?.content).toBe('Runs along');
+    expect(exported.artwork.shapes[0]?.text?.fontStackId).toBe('mono');
+  });
+
+  it('keeps the run through SVG, back into a path layer', () => {
+    const exported = artworkFromDocument(documentWith([textLayer()]));
+    const written = serializeSvg(exported.artwork, { includeNames: true });
+    if (!written.ok) throw new Error(written.error.message);
+    const read = parseSvg(written.value);
+    if (!read.ok) throw new Error(read.error.message);
+
+    const imported = layersFromArtwork(read.value.artwork, { generateId: nextId });
+    if (!imported.ok) throw new Error(imported.error.message);
+    const layer = imported.value.layers[0];
+    if (!layer) throw new Error('the fixture produced no layer');
+    expect(layer.vector.text).toMatchObject({
+      content: RUN.content,
+      baseline: RUN.baseline,
+      colour: RUN.colour,
+      fontStackId: RUN.fontStackId,
+    });
+    expect(layer.vector.text?.fontSize).toBeCloseTo(RUN.fontSize, 3);
+    expect(layer.vector.text?.startOffset).toBeCloseTo(RUN.startOffset, 4);
+  });
+
+  it('moves the path without detaching the text when an import is offset', () => {
+    const exported = artworkFromDocument(documentWith([textLayer()]));
+    const moved = layersFromArtwork(exported.artwork, {
+      offset: { x: 100, y: 50 },
+      generateId: nextId,
+    });
+    if (!moved.ok) throw new Error(moved.error.message);
+    expect(moved.value.layers[0]?.vector.text?.content).toBe('Runs along');
+  });
+});
