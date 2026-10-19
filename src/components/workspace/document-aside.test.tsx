@@ -219,7 +219,9 @@ describe('DocumentAside', () => {
     // The limitations of the model are stated on every interchange, not only when something is
     // dropped, so a user can read what will not travel before they create anything.
     await user.click(screen.getByText(/what the model cannot carry/i));
-    expect(screen.getByText(/no rotation is applied or lost/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/rotated geometry rather than as a frame with an angle/i),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(/text becomes paths only when font outlining exists/i),
     ).toBeInTheDocument();

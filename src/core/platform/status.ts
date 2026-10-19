@@ -396,6 +396,21 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     ],
   },
   {
+    id: 'assistant.core',
+    area: 'studios',
+    label: 'AI Creative Assistant (native planner)',
+    description:
+      'A typed tool registry, a deterministic planner, an executor that applies real document commands and a panel that shows the plan, streams a status per step, and can pause or cancel between steps. Twelve tools span photo adjustments, range selections and export; illustration fill, stroke, text-on-path and SVG export; and design text and rectangle layers. Every step is validated before it runs and verifies the document afterwards; steps after a failure are reported as skipped, and completed steps are ordinary undoable history entries. No model is configured in this build, so the planner understands a documented vocabulary and returns explicit refusals with alternatives for everything else — including the two studios (motion, video) whose timelines are not connected yet.',
+    status: 'partial',
+    verification: [
+      'src/core/assistant/assistant.test.ts',
+      'src/core/assistant/registry.ts',
+      'src/core/assistant/executor.ts',
+      'src/components/illustration/illustration-workspace.test.tsx (the panel plans, runs, refuses and undoes)',
+    ],
+    gap: 'The panel is mounted in the Illustration Studio only; the photo and design tools are implemented and tested but not yet wired into their surfaces. There is no provider route or credential configuration, so nothing here invokes a model; the registry ships the provider-facing tool catalogue but no adapter. Runs are not resumed across reloads, there is no before/after preview beyond the studio’s own canvas, and motion and video tools are registered as unavailable rather than implemented.',
+  },
+  {
     id: 'photo.masks',
     area: 'studios',
     label: 'Masking and retouching',

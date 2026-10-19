@@ -87,6 +87,7 @@ export function setPhotoSourceCommand(
 export function addPhotoAdjustmentCommand(
   document: ForgeDocument,
   kind: PhotoAdjustmentKind,
+  value?: number,
 ): Result<SceneCommand> {
   const payload = photoPayload(document);
   if (!payload.ok) return payload;
@@ -99,10 +100,16 @@ export function addPhotoAdjustmentCommand(
     );
   }
   const info = PHOTO_ADJUSTMENT_INFO[kind];
+  // A caller that already knows the value (the assistant's plan does) avoids adding a second command
+  // just to move the slider it has only just created.
+  const initial =
+    value === undefined || !Number.isFinite(value)
+      ? info.initial
+      : Math.min(info.max, Math.max(info.min, value));
   const adjustment: PhotoAdjustment = {
     id: createPayloadItemId(kind),
     kind,
-    value: info.initial,
+    value: initial,
     enabled: true,
   };
   return withPayload(

@@ -3,6 +3,10 @@
 import { useState } from 'react';
 
 import type { Scene } from '../../core/documents/layer-types';
+import { svgExportPayload } from '../../core/export/svg-export';
+import { err, forgeError, ok } from '../../core/result';
+import { downloadText } from '../../lib/browser/download';
+import { AssistantPanel } from '../assistant/assistant-panel';
 import { isPathLayer } from '../../core/documents/layer-types';
 import type { ReorderTarget } from '../../core/documents/layer-operations';
 import {
@@ -136,6 +140,41 @@ export function IllustrationWorkspace({
             void api.run(deleteLayersCommand(api.doc, [id]));
           }}
         />
+
+        <div className="border-line border-t pt-4">
+          <AssistantPanel
+            api={api}
+            studio="illustration"
+            selection={selection}
+            canUndo={canUndo}
+            onUndo={onUndo}
+            download={async (kind) => {
+              if (kind !== 'svg') {
+                return err(
+                  forgeError('unsupported', 'The Illustration Studio exports SVG only.', {
+                    retryable: false,
+                  }),
+                );
+              }
+              const payload = svgExportPayload(api.doc);
+              if (!payload.ok) return err(payload.error);
+              const started = downloadText(
+                payload.value.contents,
+                payload.value.fileName,
+                payload.value.mimeType,
+              );
+              if (!started) {
+                return err(
+                  forgeError('unknown', 'The browser refused the download.', { retryable: true }),
+                );
+              }
+              return ok({
+                fileName: payload.value.fileName,
+                bytes: payload.value.bytes,
+              });
+            }}
+          />
+        </div>
 
         <div className="border-line border-t pt-4">
           <VectorInspector

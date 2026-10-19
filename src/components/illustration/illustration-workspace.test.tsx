@@ -620,7 +620,9 @@ describe('SVG and icon-set panels', () => {
     const interchange = screen.getByRole('heading', { name: 'Interchange' }).closest('section');
     if (!interchange) throw new Error('the interchange section should exist');
     await user.click(within(interchange).getByText(/what the model cannot carry/i));
-    expect(within(interchange).getByText(/no rotation is applied or lost/i)).toBeInTheDocument();
+    expect(
+      within(interchange).getByText(/rotated geometry rather than as a frame with an angle/i),
+    ).toBeInTheDocument();
 
     await user.click(within(interchange).getByTestId('interchange-create'));
 
@@ -979,5 +981,85 @@ describe('text on a path', () => {
     if (before?.type !== 'path' || after?.type !== 'path') throw new Error('path expected');
     expect(after.vector.path).toEqual(before.vector.path);
     expect(after.frame).toEqual(before.frame);
+  });
+});
+
+describe('the assistant panel', () => {
+  let services: TestForgeServices;
+
+  beforeEach(() => {
+    services = createTestServices();
+  });
+
+  function fillOf(session: Awaited<ReturnType<typeof mount>>['session']) {
+    const layer = session.getState().document.scene.layers[0];
+    if (layer?.type !== 'path') throw new Error('expected a path layer');
+    return layer.vector.style.fill;
+  }
+
+  async function ask(text: string): Promise<void> {
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId('assistant-request'), text);
+    await user.click(screen.getByTestId('assistant-plan'));
+  }
+
+  it('plans a fill from a sentence, runs it as one undoable edit, and undoes it', async () => {
+    const user = userEvent.setup();
+    const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
+    const { session } = await mount(services, [layer]);
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+
+    expect(screen.getByTestId('assistant-provider-note')).toHaveTextContent(
+      /no external model is configured/i,
+    );
+    await ask('fill the selected paths with #ef4444');
+    expect(screen.getByTestId('assistant-step-0')).toHaveTextContent('illustration.set_fill');
+
+    await user.click(screen.getByTestId('assistant-run'));
+    await waitFor(() => {
+      expect(fillOf(session)).toBe('#ef4444');
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-summary')).toHaveTextContent(/1 step\(s\) completed/i);
+    });
+    // The step reports what the tool read back from the document, not what it intended.
+    expect(screen.getByTestId('assistant-step-0')).toHaveTextContent(/#ef4444/);
+    expect(session.getState().history.at(-1)?.label).toContain('fill');
+
+    await user.click(screen.getByTestId('assistant-undo'));
+    await waitFor(() => {
+      expect(fillOf(session)).toBe('#22cc88');
+    });
+  });
+
+  it('refuses a request it cannot do, with a reason and no run button', async () => {
+    const user = userEvent.setup();
+    const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
+    await mount(services, [layer]);
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+
+    await ask('remove the background');
+    // The illustration planner has no vocabulary for this, so it says exactly that rather than
+    // borrowing the photo planner's explanation for a step it could not run.
+    expect(screen.getByTestId('assistant-unsupported')).toHaveTextContent(/outside it/i);
+    expect(screen.getByTestId('assistant-run')).toBeDisabled();
+    expect(screen.getByTestId('assistant-summary')).toHaveTextContent(/nothing can run/i);
+  });
+
+  it('cancels a running export before it writes a file', async () => {
+    const user = userEvent.setup();
+    const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
+    await mount(services, [layer]);
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+    vi.mocked(downloadText).mockClear();
+
+    await ask('export the artboard as svg');
+    await user.click(screen.getByTestId('assistant-run'));
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-summary')).toHaveTextContent(/completed/i);
+    });
+    const call = vi.mocked(downloadText).mock.calls.at(-1);
+    expect(call?.[0]).toContain('<svg');
+    expect(screen.getByTestId('assistant-step-0')).toHaveTextContent(/byte/i);
   });
 });

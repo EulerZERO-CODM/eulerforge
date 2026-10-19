@@ -176,6 +176,21 @@ in a frame property; a rectangle or ellipse cannot be rotated in either studio. 
 ellipse, text or graphic layer is named as skipped, and shape layers must be converted to paths first.
 The browser suite is Chromium only.
 
+### AI Creative Assistant — partial
+
+`src/core/assistant/**` is a typed tool registry (twelve native tools across photo, illustration and
+design, plus motion and video entries that are explicitly `unavailable`), a deterministic native
+planner, and an executor that applies the same document commands, history and exporters the interface
+uses. A step is only successful when its tool reads the result back from the document; a failure stops
+the line and marks the rest skipped; pause and cancel are checked between steps. The panel in the
+Illustration Studio shows the plan before it runs, the status and inspection of every step, the
+refusals with reasons and alternatives, and an undo that goes through the studio's own history.
+
+This build configures no model. The panel says so, the planner refuses requests outside its documented
+vocabulary, and nothing in the registry claims to be AI-powered. The provider-facing tool catalogue is
+generated from the registry, but no adapter or credential route exists yet, the panel is mounted only
+in Illustration, and runs are not resumable across reloads.
+
 ### Phase 4 — Raster engine and Photo Studio
 
 Shipped, and still open. The raster engine is a WebGL2 fragment pipeline (one pass per adjustment)
