@@ -23,7 +23,7 @@ A small set of Next.js route handlers (`src/app/api/**`) over a dependency-free 
 | `/api/documents/:id/shares/:shareId`    | `DELETE`          | Revoke a link                                                         |
 | `/api/shared/:token`                    | `GET`             | Read-only document for a link holder, no session required            |
 | `/api/catalogue`                        | `GET`             | Paginated catalogue with licence and provenance                       |
-| `/api/server/status`                    | `GET`             | What this server offers, its schema version and limits                |
+| `/api/server/status`                    | `GET`             | What this deployment can do, its schema version and limits            |
 
 The interface for it is the settings page (`/settings` → *Account and sync*). Nothing else in the
 application changes when it is absent.
@@ -100,7 +100,7 @@ The server is tested by calling the **real route handlers** with real `Request` 
 temporary data directory — not by mocking fetch:
 
 ```bash
-npx vitest run src/server        # 49 tests
+npx vitest run src/server        # 50 tests
 ```
 
 They cover: cookie attributes, password hashing never storing the plaintext, duplicate-email and

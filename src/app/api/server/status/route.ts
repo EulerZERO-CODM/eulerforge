@@ -16,16 +16,20 @@ export const runtime = 'nodejs';
 
 export async function GET(): Promise<Response> {
   const store = await getStore();
+  // Capabilities are reported as what this deployment can do, not what the build contains. A
+  // serverless host without a persistent volume refuses account storage, so claiming "accounts:
+  // true" beside "available: false" would be a capability claim the route cannot honour.
+  const stored = store.ok;
   return jsonResponse({
     server: 'eulerforge-file-store',
     schemaVersion: SERVER_SCHEMA_VERSION,
-    available: store.ok,
-    ...(store.ok ? {} : { unavailable: store.error.message }),
+    available: stored,
+    ...(stored ? {} : { unavailable: store.error.message }),
     features: {
-      accounts: true,
-      sessions: true,
-      documentSync: true,
-      readOnlyShareLinks: true,
+      accounts: stored,
+      sessions: stored,
+      documentSync: stored,
+      readOnlyShareLinks: stored,
       remoteCatalogue: 'bundled-sample',
     },
     limits: {

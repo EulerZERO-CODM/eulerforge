@@ -833,4 +833,35 @@ describe('the catalogue and health endpoints', () => {
     expect(parsed.limits.documentBytes).toBeGreaterThan(0);
     expect(JSON.stringify(parsed)).not.toContain(directory);
   });
+
+  it('reports stored features as unavailable on a serverless host, rather than claiming them', async () => {
+    const previousVercel = process.env.VERCEL;
+    const previousDataDir = process.env.FORGE_DATA_DIR;
+    process.env.VERCEL = '1';
+    delete process.env.FORGE_DATA_DIR;
+    setServerDataDirForTests(null);
+    try {
+      const response = await statusGET();
+      expect(response.status).toBe(200);
+      const parsed = await body<{
+        available: boolean;
+        unavailable: string;
+        features: Record<string, boolean | string>;
+      }>(response);
+      expect(parsed.available).toBe(false);
+      expect(parsed.unavailable).toMatch(/not persistent/i);
+      expect(parsed.features.accounts).toBe(false);
+      expect(parsed.features.sessions).toBe(false);
+      expect(parsed.features.documentSync).toBe(false);
+      expect(parsed.features.readOnlyShareLinks).toBe(false);
+      // The bundled catalogue needs no filesystem and stays honest about its source.
+      expect(parsed.features.remoteCatalogue).toBe('bundled-sample');
+    } finally {
+      if (previousVercel === undefined) delete process.env.VERCEL;
+      else process.env.VERCEL = previousVercel;
+      if (previousDataDir === undefined) delete process.env.FORGE_DATA_DIR;
+      else process.env.FORGE_DATA_DIR = previousDataDir;
+      setServerDataDirForTests(directory);
+    }
+  });
 });
