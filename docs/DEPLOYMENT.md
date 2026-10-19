@@ -91,9 +91,21 @@ those variables are absent, the provider disclosure panel says that no model is 
 ### Status of the preview
 
 On the audit branch (`arena/83956338-eulerforge`) the production build succeeds locally
-(`npm run build`) and the full local gates (`npm run verify`) pass. **No Vercel deployment was created from this environment**, so there is no deployed URL,
-deployment log or smoke-test result to report. A preview must be imported from the repository by a
-person with access to the Vercel account; after it builds, the checks that matter are:
+(`npm run build`) and the full local gates (`npm run verify`) pass.
+
+A Vercel project named **`eulerforge-preview`** exists (`prj_lo9EFheigszfnWCZHN3iiYvuSuHL`) with
+`NEXT_PUBLIC_FORGE_ENVIRONMENT=preview` set for the preview and development targets. **No deployment
+succeeded**, so there is no preview URL, build log or smoke-test result to report:
+
+- creating a deployment from the GitHub branch is refused by Vercel with *“The provided GitHub
+  repository can't be found”*, which means the Vercel GitHub App is not installed for
+  `EulerZERO-CODM/eulerforge` (or the repository is not connected to that account). Connecting the
+  repository in Vercel's dashboard is a one-time external step that cannot be done through the API
+  from here;
+- without a deployment, the project has no environment values for a preview host, so
+  `NEXT_PUBLIC_FORGE_SITE_URL` is deliberately unset rather than pointed at a guessed URL.
+
+After the repository is connected and a preview deployment exists, the checks that matter are:
 
 1. `/studios` lists five studios and each route loads;
 2. Design: place a shape, save, reload the page, confirm the document is restored;
