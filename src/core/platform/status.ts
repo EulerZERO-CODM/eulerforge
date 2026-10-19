@@ -346,7 +346,7 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
       'src/core/svg/svg.test.ts',
       'src/components/create/creation-flow.test.tsx',
     ],
-    gap: 'Tracing a raster image and ungrouped multi-artboard documents are not implemented and are labelled planned in the registry. Text on a path is one run per path: there is no second run, no per-glyph editing and no font embedding, so a file opened where the chosen system stack is missing falls back to that system’s own font. Interchange converts within a subset: rotated layers are refused rather than silently flattened. Node editing works on one path at a time. The browser suite runs on Chromium only, so Firefox and WebKit are unverified.',
+    gap: 'Tracing a raster image and ungrouped multi-artboard documents are not implemented and are labelled planned in the registry. Text on a path is one run per path: there is no second run, no per-glyph editing and no font embedding, so a file opened where the chosen system stack is missing falls back to that system’s own font. Interchange uses axis-aligned frames in both studios: a rotated path is carried as rotated geometry and crosses unchanged, while a rectangle or ellipse cannot be rotated in the first place. Node editing works on one path at a time. The browser suite runs on Chromium only, so Firefox and WebKit are unverified.',
   },
   {
     id: 'studios.photo',

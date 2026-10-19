@@ -62,7 +62,7 @@ const IMAGE_SKIP = 'A graphic layer is a bitmap, not geometry.';
  * the rest is complete.
  */
 export const INTERCHANGE_LIMITATIONS: readonly string[] = [
-  'Frames are axis-aligned in both studios, so no rotation is applied or lost.',
+  'Frames are axis-aligned in both studios: a rotated shape is stored as rotated geometry rather than as a frame with an angle, so a path crosses unchanged while a rectangle or ellipse cannot be rotated in the first place.',
   'Path layers cross in both directions with their geometry, paint and styles unchanged, including gradient and pattern fills and any text laid along the path. Rectangle and ellipse layers carry solid paint only, and no studio applies blur or image filters.',
   'Text becomes paths only when font outlining exists; until then it is listed as skipped.',
   'Boolean operations flatten curved outlines to line segments at the documented flattening tolerance, so a combined shape is polygonal rather than curved.',

@@ -392,7 +392,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
           'Studio flips to `available` in the registry with a working entry point',
         ],
         capabilityIds: ['studios.illustration'],
-        gap: 'Tracing a raster image and multi-artboard documents are not implemented and stay labelled planned. Text on a path is a single run per path with a system font stack, not an embedded font. Interchange refuses rotated layers rather than baking the rotation, so it is lossless within a smaller subset than the editor itself. Icon sets contain path layers only: a selected rectangle, ellipse, text or graphic layer is named as skipped rather than converted.',
+        gap: 'Tracing a raster image and multi-artboard documents are not implemented and stay labelled planned. Text on a path is a single run per path with a system font stack, not an embedded font. Interchange carries rotated geometry unchanged, because rotation lives in the path’s nodes rather than in a frame property; a rectangle or ellipse cannot be rotated in either studio. Icon sets contain path layers only: a selected rectangle, ellipse, text or graphic layer is named as skipped rather than converted.',
       },
     ],
     exitCriteria: [

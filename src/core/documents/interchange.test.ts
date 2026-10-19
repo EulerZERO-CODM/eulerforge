@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import { areaOfPath, boundsOfPath } from '../vector';
 import { parsePathData } from '../vector/path-data';
+import { createPath } from '../vector/types';
 import {
   INTERCHANGE_LIMITATIONS,
   geometryBoundsOf,
@@ -350,5 +351,88 @@ describe('text on a path survives interchange', () => {
 
   it('says that path text crosses, next to the paint it already listed', () => {
     expect(INTERCHANGE_LIMITATIONS.join(' ')).toMatch(/text laid along the path/i);
+  });
+});
+
+describe('rotation is carried by geometry, not by a frame property', () => {
+  /** A 20 × 10 rectangle rotated by 30° about its centre: only its nodes move. */
+  function rotatedPath() {
+    const angle = Math.PI / 6;
+    const corners = [
+      [0, 0],
+      [20, 0],
+      [20, 10],
+      [0, 10],
+    ] as const;
+    const nodes = corners.map(([x, y]) => {
+      const dx = x - 10;
+      const dy = y - 5;
+      return {
+        point: {
+          x: 10 + dx * Math.cos(angle) - dy * Math.sin(angle),
+          y: 10 + dx * Math.sin(angle) + dy * Math.cos(angle),
+        },
+        handleIn: null,
+        handleOut: null,
+      };
+    });
+    return createPath([{ closed: true, nodes }]);
+  }
+
+  function rotatedLayer(): Layer {
+    const path = rotatedPath();
+    const bounds = boundsOfPath(path);
+    if (!bounds) throw new Error('the rotated fixture has no bounds');
+    return make(
+      {
+        type: 'path',
+        frame: {
+          x: bounds.minX,
+          y: bounds.minY,
+          width: bounds.maxX - bounds.minX,
+          height: bounds.maxY - bounds.minY,
+        },
+        vector: { path, style: { fill: '#445566' } },
+      },
+      'Rotated card',
+    );
+  }
+
+  it('crosses to a design canvas and back with every node unchanged', () => {
+    const source = rotatedLayer();
+    const toDesign = layersToDesign([source]);
+    if (!toDesign.ok) throw new Error(toDesign.error.message);
+    const back = layersToVector(toDesign.value.layers);
+    if (!back.ok) throw new Error(back.error.message);
+
+    const before = source.type === 'path' ? source.vector.path : null;
+    const after = back.value.layers[0];
+    if (before === null || after?.type !== 'path') throw new Error('expected path layers');
+    expect(after.vector.path.contours).toHaveLength(1);
+    const beforeNodes = before.contours[0]?.nodes ?? [];
+    const afterNodes = after.vector.path.contours[0]?.nodes ?? [];
+    expect(afterNodes).toHaveLength(beforeNodes.length);
+    afterNodes.forEach((node, index) => {
+      expect(node.point.x).toBeCloseTo(beforeNodes[index]!.point.x, 9);
+      expect(node.point.y).toBeCloseTo(beforeNodes[index]!.point.y, 9);
+    });
+  });
+
+  it('keeps the rotated bounding box rather than snapping the frame straight', () => {
+    const source = rotatedLayer();
+    if (source.type !== 'path') throw new Error('fixture');
+    const bounds = boundsOfPath(source.vector.path);
+    if (!bounds) throw new Error('fixture has no bounds');
+    // A 20 × 10 box turned 30° is wider and taller than the box it started as, and neither side is
+    // axis-aligned: the frame is the *rotated* bounds, which is exactly what the interchange copies.
+    expect(source.frame.width).toBeCloseTo(bounds.maxX - bounds.minX, 9);
+    expect(source.frame.height).toBeCloseTo(bounds.maxY - bounds.minY, 9);
+    expect(source.frame.width).toBeGreaterThan(20);
+  });
+
+  it('states the real limitation instead of claiming layers are refused', () => {
+    const limitation = INTERCHANGE_LIMITATIONS.join(' ');
+    expect(limitation).toMatch(/rotated geometry/i);
+    expect(limitation).not.toMatch(/refuse/i);
   });
 });

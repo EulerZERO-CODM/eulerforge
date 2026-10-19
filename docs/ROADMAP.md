@@ -171,8 +171,8 @@ SVG boundary writes the run as a real `<text>`/`<textPath>` pair and reads that 
 Still missing, and therefore still labelled planned in the registry: tracing a raster image,
 multi-artboard documents, and curve-exact booleans. Text on a path is one run per path, drawn with a
 system font stack — no per-glyph editing, second run or font embedding, so a document opened where a
-stack is unavailable falls back to the system's own font. Interchange refuses rotated layers rather
-than baking the rotation into a frame. Icon sets contain path layers only: a selected rectangle,
+stack is unavailable falls back to the system's own font. Interchange carries rotated geometry unchanged, because rotation lives in a path's nodes rather than
+in a frame property; a rectangle or ellipse cannot be rotated in either studio. Icon sets contain path layers only: a selected rectangle,
 ellipse, text or graphic layer is named as skipped, and shape layers must be converted to paths first.
 The browser suite is Chromium only.
 
