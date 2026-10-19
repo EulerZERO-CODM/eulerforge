@@ -17,8 +17,9 @@
 import {
   buildProviderMessages,
   planFromProvider,
-  publicProviderStatus,
   PROVIDER_LIMITS,
+  PROVIDER_TIMEOUT_MS,
+  publicProviderStatus,
   readProviderConfig,
   type ProviderDocumentSummary,
 } from '../../../../core/assistant/provider';
@@ -35,9 +36,6 @@ import {
 } from '../../../../server/http';
 
 export const runtime = 'nodejs';
-
-/** A slow provider must not hold a request open indefinitely. */
-const PROVIDER_TIMEOUT_MS = 25_000;
 
 /**
  * Twenty plans per ten minutes per client.

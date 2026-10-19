@@ -103,7 +103,7 @@ The server is tested by calling the **real route handlers** with real `Request` 
 temporary data directory — not by mocking fetch:
 
 ```bash
-npx vitest run src/server        # 51 tests
+npx vitest run src/server        # 52 tests
 ```
 
 They cover: cookie attributes, password hashing never storing the plaintext, duplicate-email and
@@ -158,6 +158,9 @@ billing or payments. The learn/Learning hub, studios and exports do not need any
   registrations per client per hour, and twenty assistant plans per client per ten minutes — the
   planner is the one route that spends the operator's model quota. It stops a scripted loop against
   one instance; it does not survive a restart and does not coordinate across instances.
+- **The provider call is bounded.** A model that never answers is aborted after 25 seconds and
+  reported as an unreachable provider; the route never forwards the provider's error body, which can
+  echo the prompt, and never returns the key or endpoint.
 - **No email verification.** Anyone who can reach the endpoint can register an address they do not
   own. That is acceptable for a self-hosted tool and is written down rather than implied.
 - **Share links are bearer capabilities.** Anyone with the link can read the saved snapshot until it

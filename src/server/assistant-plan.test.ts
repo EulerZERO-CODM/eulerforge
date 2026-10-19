@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { assistantLimiter, GET, POST } from '../app/api/assistant/plan/route';
-import { PROVIDER_ENV } from '../core/assistant/provider';
+import { PROVIDER_ENV, PROVIDER_TIMEOUT_MS } from '../core/assistant/provider';
 
 /**
  * The model-assisted planning route, exercised as a handler.
@@ -229,6 +229,38 @@ describe('POST /api/assistant/plan', () => {
     const payload = (await response.json()) as { error: { kind: string; message: string } };
     expect(payload.error.kind).toBe('provider-unavailable');
     expect(payload.error.message).toMatch(/could not be reached/i);
+  });
+
+  it('gives up on a provider that never answers, at the documented deadline', async () => {
+    configure();
+    vi.useFakeTimers();
+    let aborted = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => {
+              aborted = true;
+              reject(new DOMException('The operation was aborted.', 'AbortError'));
+            });
+          }),
+      ),
+    );
+    try {
+      const pending = post();
+      await vi.advanceTimersByTimeAsync(PROVIDER_TIMEOUT_MS);
+      const response = await pending;
+      expect(aborted).toBe(true);
+      expect(response.status).toBe(502);
+      const payload = (await response.json()) as {
+        error: { kind: string; message: string };
+      };
+      expect(payload.error.kind).toBe('provider-unavailable');
+      expect(payload.error.message).toMatch(/could not be reached/i);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -68,6 +68,15 @@ export const PROVIDER_LIMITS = {
   maxUnsupported: 8,
 } as const;
 
+/**
+ * How long the planning route waits for a provider before giving up.
+ *
+ * A model that never answers must not hold the request open forever; the route turns the abort into
+ * the same actionable 502 an unreachable provider gets. Exported so the contract is testable without
+ * a real 25-second wait.
+ */
+export const PROVIDER_TIMEOUT_MS = 25_000;
+
 function missingList(fields: readonly (readonly [string, string])[]): string {
   return fields
     .filter(([, value]) => value.trim().length === 0)

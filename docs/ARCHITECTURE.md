@@ -314,6 +314,39 @@ Four rules hold the boundary:
 4. **Ownership is enforced in the store, not the UI.** Another account's document, share or session
    resolves to `not-found`; the API does not confirm that an id exists.
 
+### The assistant is a planner, an executor and a boundary
+
+The assistant is not a chat panel bolted onto the studios. It is three separate things, and the
+separation is what makes it safe (ADR-0031):
+
+```
+goal ──▶ planner                      a plan: typed tool calls, never code
+           native planner (no network, deterministic)
+           or POST /api/assistant/plan (server-side model, validated against the registry)
+        ↓
+      assistant/executor.ts            runs the plan through the studio's own commands
+        ↓ commit → WorkspaceApi.run   the same history entry a panel click produces
+        ↓ verify → read the document back after every step
+        ↓ checkpoint → localStorage keyed by document id, step index after each commit
+```
+
+Four rules hold the assistant boundary:
+
+1. **A plan is data, not code.** A step names a tool from `assistant/registry.ts` and arguments
+   validated against that tool's schema; there is no eval, no generated script and no path to a file
+   system. An unknown tool, another studio's tool, an unavailable tool or an out-of-range argument
+   rejects the whole plan.
+2. **Planning is not execution.** The panel shows the plan before anything runs. Execution goes
+   through the workspace's ordinary command API, so every step is undoable and every step is verified
+   by reading the document back; a commit that claims success without changing the document is
+   reported as a failure.
+3. **The provider key stays on the server.** `ASSISTANT_PROVIDER_*` is read only in the route, the
+   route returns a plan plus a model label, and the disclosure endpoint reports whether a model is
+   configured without naming a URL or a key. With no provider, the native planner is the only planner
+   and the panel says so.
+4. **Interruption is recoverable.** A step commits before its checkpoint advances, so resuming offers
+   only the steps that did not run; a checkpoint from another document is not offered at all.
+
 ## Data flow of a real edit
 
 ```
