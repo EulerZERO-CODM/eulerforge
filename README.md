@@ -186,6 +186,8 @@ Rules that keep this maintainable:
 - [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision records (ADR-0001 … ADR-0032).
 - [`docs/SERVER.md`](docs/SERVER.md) — the optional account/sync server: endpoints, data layout,
   migrations, local setup, tests and deployment limits.
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — host requirements, environment variables, the
+  serverless storage refusal and what a Vercel preview must be checked for.
 - [`AGENTS.md`](AGENTS.md) — conventions for humans and coding agents working in this repository.
 
 ## Status and limitations
