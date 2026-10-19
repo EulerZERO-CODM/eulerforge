@@ -4,6 +4,10 @@ import { useState } from 'react';
 
 import type { PhotoPoint, PhotoPayload } from '../../core/documents/payload';
 import { setPhotoEngineCommand } from '../../core/photo/commands';
+import { err, forgeError, ok, type Result } from '../../core/result';
+import { downloadBytes } from '../../lib/browser/download';
+import { renderPhotoExport } from '../../lib/browser/photo-export';
+import { AssistantPanel } from '../assistant/assistant-panel';
 import { PhotoExportPanel } from './photo-export-panel';
 import { PhotoImportPanel } from './photo-import-panel';
 import { PhotoStage } from './photo-stage';
@@ -83,6 +87,59 @@ export function PhotoWorkspace({
         aria-label="Photo inspector"
         className="forge-scroll min-w-0 space-y-7 lg:sticky lg:top-[4.25rem] lg:max-h-[calc(100dvh-5.5rem)] lg:overflow-y-auto lg:pr-1"
       >
+        <AssistantPanel
+          api={api}
+          studio="photo"
+          selection={[]}
+          onUndo={onUndo}
+          canUndo={canUndo}
+          download={async (
+            kind,
+            document,
+          ): Promise<Result<{ fileName: string; bytes: number }>> => {
+            if (kind === 'svg') {
+              return err(
+                forgeError('unsupported', 'Photo Studio exports raster images, not SVG.', {
+                  detail: 'Export PNG, JPEG or WebP; the photo stack has no vector representation.',
+                  retryable: false,
+                }),
+              );
+            }
+            // The run's own edits are in `document`; the `payload` prop is from before the run.
+            const current = document.studioPayload;
+            if (!current || current.kind !== 'photo') {
+              return err(
+                forgeError('unsupported', 'The document no longer holds a photo timeline.', {
+                  retryable: false,
+                }),
+              );
+            }
+            const rendered = await renderPhotoExport({
+              document,
+              payload: current,
+              format: kind,
+              quality: 0.92,
+            });
+            if (!rendered.ok) return rendered;
+            const delivered = downloadBytes(
+              rendered.value.bytes,
+              rendered.value.fileName,
+              rendered.value.mimeType,
+            );
+            if (!delivered) {
+              return err(
+                forgeError('unsupported', 'The file was encoded but the browser refused it.', {
+                  detail: 'Object URLs are unavailable in this context, so no file was delivered.',
+                  retryable: false,
+                }),
+              );
+            }
+            return ok({
+              fileName: rendered.value.fileName,
+              bytes: rendered.value.bytes.byteLength,
+            });
+          }}
+        />
         <AdjustmentPanel api={api} payload={payload} />
         <MaskPanel
           api={api}

@@ -273,6 +273,7 @@ export function planNatively(studio: AssistantStudio, request: string): Result<A
   const clauses = splitClauses(request);
   const calls: ToolCall[] = [];
   const unsupported: UnsupportedRequest[] = [];
+  const unmatched: string[] = [];
 
   for (const clause of clauses) {
     const compiled =
@@ -285,6 +286,9 @@ export function planNatively(studio: AssistantStudio, request: string): Result<A
             : { calls: [], unsupported: [], understood: false };
     calls.push(...compiled.calls);
     unsupported.push(...compiled.unsupported);
+    // A clause the vocabulary could not act on is not silently dropped just because another clause
+    // was understood: "remove the background and add a rectangle" must say both things.
+    if (!compiled.understood) unmatched.push(clause);
   }
 
   // A provider may repeat itself; the native vocabulary does not need to. Identical calls collapse,
@@ -324,6 +328,17 @@ export function planNatively(studio: AssistantStudio, request: string): Result<A
         },
       ],
       source: 'native',
+    });
+  }
+
+  const explained = new Set<string>();
+  for (const clause of unmatched.slice(0, 4)) {
+    if (explained.has(clause)) continue;
+    explained.add(clause);
+    unsupported.push({
+      request: clause,
+      why: `The native planner has no vocabulary for “${clause}” in ${STUDIO_LABELS[studio]}.`,
+      alternatives: STUDIO_ALTERNATIVES[studio],
     });
   }
 

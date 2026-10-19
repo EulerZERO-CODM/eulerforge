@@ -440,7 +440,7 @@ describe('Photo Studio', () => {
     await user.click(screen.getByTestId('photo-range-add-luminance'));
 
     await waitFor(() => {
-      expect(payloadOf(session).mask?.ranges).toHaveLength(1);
+      expect(payloadOf(session).mask?.ranges ?? []).toHaveLength(1);
     });
     const range = payloadOf(session).mask?.ranges?.[0];
     expect(range).toMatchObject({ kind: 'luminance', min: 0.2, max: 0.8, feather: 0.2 });
@@ -459,7 +459,7 @@ describe('Photo Studio', () => {
     });
     await user.click(screen.getByTestId('photo-range-add-luminance'));
     await waitFor(() => {
-      expect(payloadOf(session).mask?.ranges).toHaveLength(1);
+      expect(payloadOf(session).mask?.ranges ?? []).toHaveLength(1);
     });
     expect(payloadOf(session).mask?.ranges?.[0]).toMatchObject({
       kind: 'luminance',
@@ -498,7 +498,7 @@ describe('Photo Studio', () => {
 
     await user.click(screen.getByTestId('photo-range-remove-0'));
     await waitFor(() => {
-      expect(payloadOf(session).mask?.ranges).toHaveLength(1);
+      expect(payloadOf(session).mask?.ranges ?? []).toHaveLength(1);
     });
     expect(payloadOf(session).mask?.ranges?.[0]?.kind).toBe('colour');
     expect(session.getState().history.at(-1)?.label).toBe('Remove range selection');
@@ -519,7 +519,7 @@ describe('Photo Studio', () => {
     const { session } = await mount(services, { ...defaultPhotoPayload(), source: SOURCE });
     await user.click(screen.getByTestId('photo-range-add-luminance'));
     await waitFor(() => {
-      expect(payloadOf(session).mask?.ranges).toHaveLength(1);
+      expect(payloadOf(session).mask?.ranges ?? []).toHaveLength(1);
     });
 
     // A range is coverage, so the mask controls stop being disabled when there are no strokes.
@@ -610,5 +610,68 @@ describe('Photo Studio', () => {
     await mount(services, { ...defaultPhotoPayload(), source: null });
     expect(screen.getByText(/Import a PNG, JPEG or WebP to start editing/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Export PNG' })).toBeDisabled();
+  });
+});
+
+describe('the assistant in Photo Studio', () => {
+  let services: TestForgeServices;
+
+  beforeEach(() => {
+    services = createTestServices();
+    vi.mocked(downloadBytes).mockClear();
+  });
+
+  it('runs a three-step plan, changes the document, writes a real file and undoes the last edit', async () => {
+    const user = userEvent.setup();
+    const { session } = await mount(services);
+
+    await user.type(
+      screen.getByTestId('assistant-request'),
+      'select dark pixels, brighten and export a png',
+    );
+    await user.click(screen.getByTestId('assistant-plan'));
+
+    expect(screen.getByTestId('assistant-step-0')).toHaveTextContent('photo.range_select');
+    expect(screen.getByTestId('assistant-step-1')).toHaveTextContent('photo.adjust');
+    expect(screen.getByTestId('assistant-step-2')).toHaveTextContent('photo.export');
+
+    await user.click(screen.getByTestId('assistant-run'));
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-summary')).toHaveTextContent(/3 step\(s\) completed/i);
+    });
+
+    const payload = payloadOf(session);
+    const ranges = payload.mask?.ranges ?? [];
+    expect(ranges).toHaveLength(1);
+    expect(ranges[0]).toMatchObject({
+      kind: 'luminance',
+      min: 0,
+      max: 0.35,
+      feather: 0.15,
+    });
+    expect(payload.adjustments).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: 'exposure', value: 20 })]),
+    );
+    // The export step reports what the browser encoder produced, not an intention.
+    expect(screen.getByTestId('assistant-step-2')).toHaveTextContent(
+      /PNG bytes were produced by the browser encoder/i,
+    );
+    // The exporter received the document *after* the adjustment, not the pre-run payload.
+    const engine = await import('../../lib/browser/photo-engine');
+    const lastRender = vi.mocked(engine.renderPhoto).mock.calls.at(-1)?.[0];
+    expect(lastRender?.payload.mask?.ranges ?? []).toHaveLength(1);
+    expect(lastRender?.payload.adjustments).toHaveLength(1);
+
+    const [bytes, fileName, mimeType] = vi.mocked(downloadBytes).mock.calls.at(-1) ?? [];
+    expect((bytes as Uint8Array).byteLength).toBe(1234);
+    expect(String(fileName)).toMatch(/\.png$/);
+    expect(mimeType).toBe('image/png');
+
+    // One undo removes the adjustment but keeps the selection, because they were separate actions.
+    await user.click(screen.getByTestId('assistant-undo'));
+    await waitFor(() => {
+      expect(payloadOf(session).adjustments).toHaveLength(0);
+    });
+    expect(payloadOf(session).mask?.ranges ?? []).toHaveLength(1);
   });
 });

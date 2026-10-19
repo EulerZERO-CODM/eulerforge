@@ -502,4 +502,13 @@ describe('Video Studio workspace', () => {
     ).toBeGreaterThan(0);
     expect(screen.getAllByText(/“lost\.webm”/).length).toBeGreaterThan(0);
   });
+
+  it('offers a refusal-only assistant surface, naming the missing tool and the alternatives', async () => {
+    await mount(services);
+    expect(screen.getByTestId('assistant-unavailable')).toHaveTextContent(
+      /cannot edit Video Studio/i,
+    );
+    expect(screen.getByTestId('assistant-unavailable-tools')).toHaveTextContent('video.trim');
+    expect(screen.queryByTestId('assistant-request')).toBeNull();
+  });
 });

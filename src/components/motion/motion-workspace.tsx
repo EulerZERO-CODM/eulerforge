@@ -15,6 +15,7 @@ import {
 import { Button } from '../ui/button';
 import { Field, Input } from '../ui/field';
 import { InlineNote } from '../ui/states';
+import { AssistantUnavailable } from '../assistant/assistant-unavailable';
 import { HistoryPanel } from '../workspace/history-panel';
 import type { WorkspaceApi } from '../workspace/workspace-api';
 import { KeyframePanel } from './keyframe-panel';
@@ -203,6 +204,7 @@ export function MotionWorkspace({
         />
         <TimingPanel api={api} payload={payload} />
         <MotionExportPanel doc={api.doc} payload={payload} />
+        <AssistantUnavailable studio="motion" />
         <HistoryPanel
           labels={history}
           canUndo={canUndo}

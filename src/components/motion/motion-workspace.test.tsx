@@ -311,4 +311,16 @@ describe('Motion Studio', () => {
     await user.click(screen.getByRole('button', { name: 'Pause' }));
     expect(screen.getByRole('button', { name: 'Play' })).toBeInTheDocument();
   });
+
+  it('offers a refusal-only assistant surface, naming the missing tool and the alternatives', async () => {
+    await mount(services);
+    expect(screen.getByTestId('assistant-unavailable')).toHaveTextContent(
+      /cannot edit Motion Studio/i,
+    );
+    expect(screen.getByTestId('assistant-unavailable-tools')).toHaveTextContent(
+      'motion.add_keyframe',
+    );
+    expect(screen.getByTestId('assistant-unavailable-tools')).toHaveTextContent(/keyframe/i);
+    expect(screen.queryByTestId('assistant-request')).toBeNull();
+  });
 });

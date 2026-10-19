@@ -246,6 +246,16 @@ describe('the native planner', () => {
     expect(result.value.steps).toHaveLength(5);
   });
 
+  it('does not drop a clause it could not act on just because another clause was understood', () => {
+    const result = planNatively('design', 'remove the background and add a rectangle 100x50');
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.steps.map((step) => step.tool)).toEqual(['design.add_rectangle']);
+    expect(result.value.unsupported).toHaveLength(1);
+    expect(result.value.unsupported[0]?.request).toMatch(/remove the background/i);
+    expect(result.value.unsupported[0]?.why).toMatch(/no vocabulary/i);
+    expect(result.value.unsupported[0]?.alternatives.length).toBeGreaterThan(0);
+  });
+
   it('asks for the encoder the sentence names', () => {
     const result = planNatively('photo', 'export a jpeg');
     if (!result.ok) throw new Error(result.error.message);

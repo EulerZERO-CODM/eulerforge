@@ -10,6 +10,7 @@ import { openMediaStore } from '../../lib/browser/media-store';
 import { VideoMediaPool } from '../../lib/browser/video-engine';
 import { Button } from '../ui/button';
 import { InlineNote } from '../ui/states';
+import { AssistantUnavailable } from '../assistant/assistant-unavailable';
 import { HistoryPanel } from '../workspace/history-panel';
 import type { WorkspaceApi } from '../workspace/workspace-api';
 import { ClipInspector } from './clip-inspector';
@@ -213,6 +214,7 @@ export function VideoWorkspace({
           time={playback.time}
         />
         <VideoExportPanel doc={api.doc} payload={payload} store={store} />
+        <AssistantUnavailable studio="video" />
         <HistoryPanel
           labels={history}
           canUndo={canUndo}

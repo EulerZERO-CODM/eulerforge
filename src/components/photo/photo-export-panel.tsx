@@ -7,15 +7,9 @@ import {
   PHOTO_EXPORT_FORMATS,
   PHOTO_EXPORT_INFO,
   formatByteSize,
-  planPhotoExport,
   type PhotoExportFormat,
 } from '../../core/photo/export';
-import {
-  canEncodeImage,
-  canvasToBytes,
-  decodePhotoSource,
-  renderPhoto,
-} from '../../lib/browser/photo-engine';
+import { renderPhotoExport } from '../../lib/browser/photo-export';
 import { downloadBytes } from '../../lib/browser/download';
 import type { PhotoPayload } from '../../core/documents/payload';
 import { Button } from '../ui/button';
@@ -60,58 +54,24 @@ export function PhotoExportPanel({
       setError({ message: 'There is no imported photo to export.', detail: null });
       return;
     }
-    const plan = planPhotoExport(
-      {
-        documentTitle: document.title,
-        payload,
-        width: document.canvas.width,
-        height: document.canvas.height,
-        format,
-        quality: quality / 100,
-      },
-      { mimeTypeSupported: canEncodeImage(PHOTO_EXPORT_INFO[format].mimeType) },
-    );
-    if (!plan.ok) {
-      setError({ message: plan.error.message, detail: plan.error.detail ?? null });
-      return;
-    }
-    if (!plan.value.mimeTypeSupported) {
-      setError({
-        message: `This browser cannot encode ${PHOTO_EXPORT_INFO[format].label}.`,
-        detail: 'Choose PNG or JPEG; the check is made by asking the browser’s own encoder.',
-      });
-      return;
-    }
-
     setBusy(true);
-    const decoded = await decodePhotoSource(payload.source.href);
-    if (!decoded.ok) {
-      setBusy(false);
-      setError({ message: decoded.error.message, detail: decoded.error.detail ?? null });
-      return;
-    }
-    const rendered = await renderPhoto({
-      image: decoded.value.image,
+    // One implementation for the panel and the assistant: the same plan, render and encoder.
+    const rendered = await renderPhotoExport({
+      document,
       payload,
-      width: plan.value.width,
-      height: plan.value.height,
+      format,
+      quality: quality / 100,
     });
+    setBusy(false);
     if (!rendered.ok) {
-      setBusy(false);
       setError({ message: rendered.error.message, detail: rendered.error.detail ?? null });
       return;
     }
-    const bytes = await canvasToBytes(
-      rendered.value.canvas,
-      plan.value.mimeType,
-      plan.value.quality,
+    const delivered = downloadBytes(
+      rendered.value.bytes,
+      rendered.value.fileName,
+      rendered.value.mimeType,
     );
-    setBusy(false);
-    if (!bytes.ok) {
-      setError({ message: bytes.error.message, detail: bytes.error.detail ?? null });
-      return;
-    }
-    const delivered = downloadBytes(bytes.value, plan.value.fileName, plan.value.mimeType);
     if (!delivered) {
       setError({
         message: 'The file was encoded but the browser refused the download.',
@@ -120,12 +80,12 @@ export function PhotoExportPanel({
       return;
     }
     setReport({
-      fileName: plan.value.fileName,
-      bytes: bytes.value.byteLength,
+      fileName: rendered.value.fileName,
+      bytes: rendered.value.bytes.byteLength,
       engine: rendered.value.engine,
       fallbackReason: rendered.value.fallbackReason,
-      width: plan.value.width,
-      height: plan.value.height,
+      width: rendered.value.width,
+      height: rendered.value.height,
     });
   }
 

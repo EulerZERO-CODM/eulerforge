@@ -148,7 +148,7 @@ export function IllustrationWorkspace({
             selection={selection}
             canUndo={canUndo}
             onUndo={onUndo}
-            download={async (kind) => {
+            download={async (kind, document) => {
               if (kind !== 'svg') {
                 return err(
                   forgeError('unsupported', 'The Illustration Studio exports SVG only.', {
@@ -156,7 +156,9 @@ export function IllustrationWorkspace({
                   }),
                 );
               }
-              const payload = svgExportPayload(api.doc);
+              // The export must carry the edits this run just made, so it is built from the
+              // document the executor passes in rather than from the pre-run render closure.
+              const payload = svgExportPayload(document);
               if (!payload.ok) return err(payload.error);
               const started = downloadText(
                 payload.value.contents,

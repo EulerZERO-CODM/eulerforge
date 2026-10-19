@@ -20,6 +20,7 @@ import { storageBadge } from '../../state/storage-status';
 import type { Result } from '../../core/result';
 import type { CommitOptions, DocumentPatch } from '../../state/document-session';
 import type { SceneCommand } from '../../core/editor/commands';
+import { AssistantPanel } from '../assistant/assistant-panel';
 import { IllustrationWorkspace, isVectorDocument } from '../illustration/illustration-workspace';
 import { MotionWorkspace, isMotionDocument } from '../motion/motion-workspace';
 import { PhotoWorkspace, isPhotoDocument } from '../photo/photo-workspace';
@@ -374,6 +375,15 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
           </div>
 
           <DocumentAside
+            assistant={
+              <AssistantPanel
+                api={api}
+                studio="design"
+                selection={selection}
+                onUndo={undo}
+                canUndo={state.canUndo}
+              />
+            }
             api={api}
             scene={doc.scene}
             images={images}

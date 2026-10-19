@@ -20,6 +20,7 @@ import {
 import type { Result } from '../../core/result';
 import { Button } from '../ui/button';
 import { InlineNote } from '../ui/states';
+import type { ForgeDocument } from '../../core/documents/types';
 import type { WorkspaceApi } from '../workspace/workspace-api';
 
 type DownloadKind = 'svg' | 'png' | 'jpeg' | 'webp';
@@ -31,8 +32,14 @@ export type AssistantPanelProps = {
   /** Undo the run's last edit, from the same history the editor uses. */
   readonly onUndo: () => void;
   readonly canUndo: boolean;
-  /** Produces a real file for an export step; without it, export steps refuse rather than pretend. */
-  readonly download?: (kind: DownloadKind) => Promise<Result<{ fileName: string; bytes: number }>>;
+  /**
+   * Produces a real file for an export step; without it, export steps refuse rather than pretend.
+   * The document is the one the run has *now*, after any edits the plan made before this step.
+   */
+  readonly download?: (
+    kind: DownloadKind,
+    document: ForgeDocument,
+  ) => Promise<Result<{ fileName: string; bytes: number }>>;
 };
 
 /**
@@ -232,7 +239,7 @@ export function AssistantPanel({
       current: () => latest.current.document,
       selection: () => latest.current.selection,
       commit: async (command) => api.run(ok(command)),
-      download: async (kind) => {
+      download: async (kind, document) => {
         if (!download) {
           return {
             ok: false,
@@ -243,7 +250,7 @@ export function AssistantPanel({
             },
           };
         }
-        return download(kind);
+        return download(kind, document);
       },
     };
 

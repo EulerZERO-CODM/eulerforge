@@ -1046,6 +1046,24 @@ describe('the assistant panel', () => {
     expect(screen.getByTestId('assistant-summary')).toHaveTextContent(/nothing can run/i);
   });
 
+  it('exports the fill the same run just applied, not the document from before it', async () => {
+    const user = userEvent.setup();
+    const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
+    await mount(services, [layer]);
+    await user.click(screen.getByTestId(`layer-name-${String(layer.id)}`));
+    vi.mocked(downloadText).mockClear();
+
+    await ask('fill the selected paths with #ef4444 and export the artboard as svg');
+    await user.click(screen.getByTestId('assistant-run'));
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-summary')).toHaveTextContent(/2 step\(s\) completed/i);
+    });
+
+    // The exporter ran after the fill, so the bytes carry the new colour rather than the old one.
+    const call = vi.mocked(downloadText).mock.calls.at(-1);
+    expect(call?.[0]).toContain('fill="#ef4444"');
+  });
+
   it('cancels a running export before it writes a file', async () => {
     const user = userEvent.setup();
     const layer = pathLayer('Card', 'M20 20 L120 20 L120 80 L20 80 Z');
@@ -1084,9 +1102,10 @@ describe('the assistant panel with a model configured', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const call: Call = {
-          url: String(input),
+          url:
+            input instanceof URL ? input.toString() : typeof input === 'string' ? input : input.url,
           method: init?.method ?? 'GET',
-          body: init?.body ? JSON.parse(String(init.body)) : null,
+          body: typeof init?.body === 'string' ? (JSON.parse(init.body) as unknown) : null,
         };
         calls.push(call);
         const answer = handler(call);

@@ -39,9 +39,16 @@ export type AssistantEnvironment = {
   selection(): readonly string[];
   /** Applies one command through the session; `false` means the session refused it. */
   commit(command: SceneCommand, options?: { readonly coalesceKey?: string }): Promise<boolean>;
-  /** Produces a real file and reports what the browser actually wrote. */
+  /**
+   * Produces a real file and reports what the browser actually wrote.
+   *
+   * The document is passed in because an export step must write the *current* document: the run may
+   * have adjusted it two steps ago, and a callback that closed over the pre-run document would
+   * export the state before the request.
+   */
   download(
     kind: 'svg' | 'png' | 'jpeg' | 'webp',
+    document: ForgeDocument,
   ): Promise<Result<{ readonly fileName: string; readonly bytes: number }>>;
 };
 
@@ -208,7 +215,7 @@ export async function executePlan(
     if (applied) changed += 1;
 
     if (outcome.value.download) {
-      const produced = await environment.download(outcome.value.download);
+      const produced = await environment.download(outcome.value.download, environment.current());
       if (!produced.ok) return fail(produced.error.message);
       if (produced.value.bytes <= 0) return fail('The exporter produced an empty file.');
       files.push({
