@@ -6,6 +6,19 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { STORAGE_KEY } from './fixtures';
 
 /**
+ * Photo Studio is the one spec that asks for software WebGL2 by name.
+ *
+ * The GPU path has to be exercised on a machine with no GPU, which means ANGLE over SwiftShader;
+ * asking for it here rather than in the shared configuration keeps every other spec on the
+ * browser's normal compositing path (see playwright.config.ts).
+ */
+test.use({
+  launchOptions: {
+    args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+  },
+});
+
+/**
  * Photo Studio, in a real browser.
  *
  * The claims that matter here cannot be checked in jsdom: an image really decodes, the pixel

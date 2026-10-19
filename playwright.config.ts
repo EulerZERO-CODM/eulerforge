@@ -43,15 +43,17 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     ...devices['Desktop Chrome'],
-    // The full Chromium build rather than the headless shell: Photo Studio's GPU path needs WebGL2,
-    // and the shell is not guaranteed to ship the SwiftShader libraries ANGLE needs.
+    // The full Chromium build rather than the headless shell: real video decoding needs it, and
+    // Photo Studio's WebGL2 path does too.
+    //
+    // The GL implementation is deliberately *not* forced here. Playwright already passes
+    // `--enable-unsafe-swiftshader`, so a machine without a GPU gets software WebGL2 by itself — and
+    // leaving the choice to the browser keeps the page on its normal compositing path. Forcing
+    // `--use-gl=angle --use-angle=swiftshader` for the whole suite (as Phase 4 did) sends every
+    // repaint through software Vulkan: the benchmark's own control measured idle frames at 16.7 ms
+    // and drag frames at 66 ms on a runner where the same code had been at 16.7 ms throughout
+    // Phase 2. The one spec whose subject *is* the software GPU path opts in for itself.
     channel: 'chromium',
-    launchOptions: {
-      // Software WebGL (SwiftShader). Without it a headless browser exposes no WebGL2 at all, so the
-      // GPU renderer could only ever be tested on a developer machine with a GPU — and an untested
-      // shader is a claim, not a feature. These flags make the GPU path run in CI on the CPU.
-      args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
-    },
     // A wide window keeps the whole stage and the inspector rail on screen, so the pointer maths in
     // the specs never has to scroll the artboard into view.
     viewport: { width: 1440, height: 960 },
@@ -59,13 +61,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: {
-        ...devices['Desktop Chrome'],
-        channel: 'chromium',
-        launchOptions: {
-          args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
-        },
-      },
+      use: { ...devices['Desktop Chrome'], channel: 'chromium' },
     },
   ],
   webServer: {
