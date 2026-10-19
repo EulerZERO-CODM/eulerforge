@@ -54,6 +54,39 @@ export type ObservedEntry = {
   readonly duration: number;
 };
 
+/**
+ * One long animation frame, attributed by the browser.
+ *
+ * Chrome's Long Animation Frames API reports, for every frame that took 50ms or more, how long the
+ * frame lasted, how much of it blocked the main thread, how much was style and layout, and **which
+ * scripts ran** — with their function name and source URL. That is the difference between "the drag
+ * is slow" and "this function is why", measured in the environment that is slow rather than inferred
+ * from a table of totals.
+ */
+export type LongFrame = {
+  readonly duration: number;
+  readonly blocking: number;
+  readonly styleAndLayout: number;
+  readonly renderStart: number;
+  readonly scripts: readonly {
+    readonly name: string;
+    readonly source: string;
+    readonly duration: number;
+    readonly invoker: string;
+  }[];
+};
+
+/** Per-script total inside long frames, for the report. */
+export type ScriptCost = {
+  readonly name: string;
+  readonly source: string;
+  readonly ms: number;
+  readonly count: number;
+};
+
+/** The mutable accumulator behind `ScriptCost`, kept internal so the published type stays read-only. */
+type ScriptTotal = { name: string; source: string; ms: number; count: number };
+
 type PageApi = {
   begin: (name: string, kinds: readonly string[]) => void;
   /** Whether the sample for this interaction has landed yet. */
@@ -61,6 +94,9 @@ type PageApi = {
   take: (name: string) => readonly InteractionSample[];
   startFrames: () => void;
   stopFrames: () => FrameStats;
+  takeLongFrames: () => readonly LongFrame[];
+  /** Pointer moves seen since the last drain, plus when they arrived. */
+  takePointerMoves: () => readonly number[];
   /** Drains every observation collected so far: long tasks and slow input events. */
   takeObserved: () => readonly ObservedEntry[];
   reset: () => void;
@@ -89,6 +125,8 @@ export async function installPerfRecorder(page: Page): Promise<void> {
     let frameTimes: number[] = [];
     let recordingFrames = false;
     let loop = 0;
+    const longFrames: LongFrame[] = [];
+    const pointerMoves: number[] = [];
 
     /* The events that can start a measurement. `pointermove` is deliberately not among them: a drag
        is measured by its frame gaps, not by a single move event. */
@@ -138,6 +176,54 @@ export async function installPerfRecorder(page: Page): Promise<void> {
     };
     observe('longtask');
     observe('event');
+
+    /* Long animation frames name the work. A frame that missed its budget is exactly what this
+       benchmark is about, and the entry carries the scripts that ran inside it, so a slow CI run
+       answers "what took the time" instead of inviting a guess. Unsupported entry types fall through
+       to no attribution rather than failing the benchmark. */
+    try {
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          const frame = entry as unknown as {
+            duration: number;
+            renderStart: number;
+            styleAndLayoutStart: number;
+            blockingDuration?: number;
+            scripts?: readonly {
+              name?: string;
+              sourceURL?: string;
+              duration?: number;
+              invoker?: string;
+            }[];
+          };
+          longFrames.push({
+            duration: frame.duration,
+            blocking: frame.blockingDuration ?? 0,
+            styleAndLayout:
+              frame.styleAndLayoutStart > 0 ? frame.renderStart - frame.styleAndLayoutStart : 0,
+            renderStart: frame.renderStart,
+            scripts: (frame.scripts ?? []).map((script) => ({
+              name: script.name ?? '(anonymous)',
+              source: script.sourceURL ?? '',
+              duration: script.duration ?? 0,
+              invoker: script.invoker ?? '',
+            })),
+          });
+        }
+      }).observe({ type: 'long-animation-frame' });
+    } catch {
+      // Older browsers do not report it; the other measurements still stand on their own.
+    }
+
+    // Every pointer move is timestamped, so a slow drag can be separated into "events arrived
+    // slowly" and "the renderer painted slowly" instead of being blamed on the wrong one.
+    window.addEventListener(
+      'pointermove',
+      (event) => {
+        pointerMoves.push(event.timeStamp);
+      },
+      true,
+    );
 
     const tick = (timestamp: number): void => {
       if (!recordingFrames) return;
@@ -192,9 +278,17 @@ export async function installPerfRecorder(page: Page): Promise<void> {
       takeObserved() {
         return observed.splice(0, observed.length);
       },
+      takeLongFrames() {
+        return longFrames.splice(0, longFrames.length);
+      },
+      takePointerMoves() {
+        return pointerMoves.splice(0, pointerMoves.length);
+      },
       reset() {
         samples.length = 0;
         observed.length = 0;
+        longFrames.length = 0;
+        pointerMoves.length = 0;
         frameTimes = [];
         pending = null;
       },
@@ -482,4 +576,70 @@ export class PerfReport {
       // The report is evidence, not the result: if the disk refuses, the assertion still fails.
     }
   }
+}
+
+/** Drains the long animation frames collected since the last drain. */
+export async function takeLongFrames(page: Page): Promise<readonly LongFrame[]> {
+  return page.evaluate(() => window.__forgePerf.takeLongFrames());
+}
+
+/** Drains the timestamps of pointer moves the page has seen since the last drain. */
+export async function takePointerMoves(page: Page): Promise<readonly number[]> {
+  return page.evaluate(() => window.__forgePerf.takePointerMoves());
+}
+
+/**
+ * The scripts that ran inside long frames, by total time.
+ *
+ * This is the part of the report that says *what* was slow. Names are kept even when the browser
+ * reports none, and the source is shortened to its file name so a stack of bundled chunks stays
+ * readable in a check-run annotation.
+ */
+export function describeScriptCosts(frames: readonly LongFrame[], limit = 6): string {
+  const totals = new Map<string, ScriptTotal>();
+  for (const frame of frames) {
+    for (const script of frame.scripts) {
+      const key = `${script.name}@${script.source}`;
+      const entry = totals.get(key) ?? {
+        name: script.name,
+        source: script.source.split('/').pop() ?? script.source,
+        ms: 0,
+        count: 0,
+      };
+      entry.ms += script.duration;
+      entry.count += 1;
+      totals.set(key, entry);
+    }
+  }
+  if (totals.size === 0) return 'none attributed';
+  return [...totals.values()]
+    .sort((a, b) => b.ms - a.ms)
+    .slice(0, limit)
+    .map(
+      (entry) =>
+        `${entry.name} (${entry.source === '' ? 'no source' : entry.source}) ${entry.ms.toFixed(1)} ms over ${String(entry.count)} frame(s)`,
+    )
+    .join(', ');
+}
+
+/**
+ * How the pointer events a drag produced were paced in the page.
+ *
+ * A drag can be slow because the renderer cannot paint, or because the events themselves arrive
+ * slowly — a starved test driver on a two-core runner does the second. Reporting the count and the
+ * interval between the first and last move separates the two instead of blaming the renderer for the
+ * driver.
+ */
+export function describePointerPacing(moves: readonly number[]): string {
+  if (moves.length < 2) return `(${String(moves.length)} event(s), too few to pace)`;
+  const first = moves[0] ?? 0;
+  const last = moves[moves.length - 1] ?? first;
+  const span = last - first;
+  const intervals: number[] = [];
+  for (let index = 1; index < moves.length; index += 1) {
+    intervals.push((moves[index] ?? 0) - (moves[index - 1] ?? 0));
+  }
+  intervals.sort((a, b) => a - b);
+  const median = intervals[Math.floor(intervals.length / 2)] ?? 0;
+  return `over ${(span / 1000).toFixed(2)} s (median interval ${median.toFixed(1)} ms)`;
 }
