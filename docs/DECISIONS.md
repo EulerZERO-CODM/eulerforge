@@ -847,3 +847,50 @@ available in every browser this project must run in — notably not in the CI br
 with the live preview at the same timestamp. The cost is a real limit — no proxy pipeline, so a very
 large file scrubs as fast as the browser can seek it, and a capture takes as long as the edit. Both
 limits are stated in the studio, the ledger and the roadmap rather than hidden.
+
+## ADR-0027 — An optional, single-process server behind the repository boundary
+
+**Status:** accepted (Phase 7).
+
+**Context.** Phase 7 asks for a remote document repository, authentication, account settings, a
+paginated catalogue and tests for authorization boundaries — while the product rule says local-first
+must keep working without an account, and the repository must never imply a deployed service. Three
+options were open: a hosted database (Supabase, Postgres, an ORM), a separate API service, or route
+handlers in the app with a small store.
+
+**Decision.** Route handlers inside the existing Next.js build, over a dependency-free JSON file
+store, with:
+- the platform's own document schema validating every write;
+- optimistic concurrency on the document's `revision`, with a `409` carrying the server's revision
+  and timestamp;
+- scrypt password hashes and opaque session tokens stored only as SHA-256 digests, delivered in
+  HttpOnly `SameSite=Lax` cookies;
+- ownership scoping in the store, so another account's document is `404` rather than `403`;
+- a deletion cascade (account → sessions, documents, index entries, share links) tested as one
+  operation;
+- an in-process write queue and atomic file replacement.
+
+The UI is a settings panel that plans a sync before performing one. The plan is a pure function over
+the local documents, the server's summaries and the last agreement this browser recorded, and it
+treats "present on both sides with no history" as a conflict rather than picking a winner.
+
+**Why not a database.** A database is the right next step, not the right first step: it would add a
+service dependency, credentials in the environment and a schema toolchain to a repository whose
+acceptance criteria are `npm ci && npm run verify && npm run test:e2e` on a clean machine. The store
+is deliberately small and replaceable — the route handlers use only its methods — and ADR-0027's
+successor (a database adapter) does not require touching them.
+
+**Why not a separate API service.** One optional feature does not justify a second build, a second
+dependency tree and a second deploy target, and sharing the document schema is what makes "the
+server never stores what the app cannot open" true by construction.
+
+**Consequences, stated plainly.**
+- **One process per data directory.** Concurrent writers from two Node instances would race; the
+  in-process queue protects only one process. This is in `docs/SERVER.md` next to the deployment
+  steps, not in a footnote.
+- **Rate limiting does not survive a restart** and does not coordinate across instances.
+- **No email verification, password reset, OAuth or MFA**, and no billing — the last is a product
+  decision, not a gap.
+- **Conflict resolution is a choice, not a merge.** Two independently edited documents offer "keep
+  this browser's copy" or "keep the server's copy"; there is no automatic three-way merge, and
+  saying otherwise would be the most dangerous kind of dishonesty in this feature.

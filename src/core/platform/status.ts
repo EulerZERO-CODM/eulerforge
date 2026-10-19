@@ -212,11 +212,17 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
   {
     id: 'shell.cloud-persistence',
     area: 'shell',
-    label: 'Cloud persistence and sync',
-    description: 'Projects available across devices, with accounts and conflict handling.',
-    status: 'planned',
-    verification: [],
-    gap: 'Requires authentication, a database and a sync protocol — none of which exist. The repository interface is designed so this is additive.',
+    label: 'Optional server sync',
+    description:
+      'Everything stays device-local by default. For users who run the optional server, the settings panel plans a sync first — upload, download or conflict, each with a reason — and a document changed on both sides is a decision, never an automatic overwrite. The plan is a pure function over local documents, server summaries and the last agreement this browser recorded.',
+    status: 'partial',
+    verification: [
+      'src/core/account/sync.ts',
+      'src/core/account/sync.test.ts',
+      'src/components/account/account-panel.test.tsx',
+      'src/server/routes.test.ts (revision conflicts, cross-account isolation)',
+    ],
+    gap: 'One process with a JSON file store, no collaboration or presence, and no automatic background sync: a user asks for the plan and runs it. A multi-node deployment would need a real database and a shared lock — neither exists here.',
   },
   {
     id: 'learn.hub',
@@ -259,11 +265,15 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
   {
     id: 'assets.remote-catalogue',
     area: 'assets',
-    label: 'Remote asset catalogue',
-    description: 'A hosted, searchable catalogue with real licensed assets.',
-    status: 'planned',
-    verification: [],
-    gap: 'No backend, no licensing agreements and no CDN integration. The `AssetCatalog` interface is the integration point.',
+    label: 'Paginated catalogue API',
+    description:
+      'A paginated, filterable catalogue endpoint with licence and provenance on every record, served from the repository-authored sample records. It is a real API over sample content, not a library of third-party assets.',
+    status: 'partial',
+    verification: [
+      'src/app/api/catalogue/route.ts',
+      'src/server/routes.test.ts (paging, filters, licence and provenance)',
+    ],
+    gap: 'The records are the bundled sample catalogue. There are no licensing agreements, no hosted originals and no CDN: the endpoint makes the existing catalogue reachable, it does not become a stock library.',
   },
   {
     id: 'assets.usable-files',
@@ -568,11 +578,17 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
   {
     id: 'platform.auth-billing',
     area: 'platform',
-    label: 'Accounts, billing and collaboration',
-    description: 'Sign-in, plans, sharing and team features.',
-    status: 'planned',
-    verification: [],
-    gap: 'Deliberately absent. Settings shows these as unavailable rather than showing fake controls.',
+    label: 'Accounts, sessions and share links',
+    description:
+      'Registration and sign-in with scrypt-hashed passwords and opaque session tokens in HttpOnly cookies, profile rename, password change that revokes other sessions, account deletion that cascades to documents and share links, and revocable read-only share links. There is no billing, by explicit product decision.',
+    status: 'partial',
+    verification: [
+      'src/server/passwords.ts',
+      'src/server/sessions.ts',
+      'src/server/routes.test.ts',
+      'src/components/account/account-panel.test.tsx',
+    ],
+    gap: 'No email verification, password reset, OAuth, multi-factor authentication or team roles; rate limiting is in-process, so it does not survive a restart or span instances. Billing is not implemented and is not planned.',
   },
 ] as const;
 

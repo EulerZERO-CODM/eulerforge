@@ -166,7 +166,9 @@ Rules that keep this maintainable:
   refuses to become.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — layers, data flow, extension conventions.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — implemented / planned / exploratory, with exit criteria.
-- [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision records (ADR-0001 … ADR-0026).
+- [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision records (ADR-0001 … ADR-0027).
+- [`docs/SERVER.md`](docs/SERVER.md) — the optional account/sync server: endpoints, data layout,
+  migrations, local setup, tests and deployment limits.
 - [`AGENTS.md`](AGENTS.md) — conventions for humans and coding agents working in this repository.
 
 ## Status and limitations
@@ -177,10 +179,16 @@ Illustration (SVG and icon-set ZIP). Everything is stored in one browser profile
 exporting a project file is the only backup; video media bytes also stay in that browser's IndexedDB,
 so moving a video project to another machine asks for the files again.
 
+There is also an **optional, self-hosted server** (Phase 7): accounts with scrypt-hashed passwords,
+revision-checked document sync with explicit conflict decisions, revocable read-only share links and
+a paginated catalogue endpoint. It is off unless you run it, nothing in the app requires it, and its
+storage is a single-process JSON file store documented in [`docs/SERVER.md`](docs/SERVER.md) — not a
+deployment claim.
+
 What is not implemented, and is labelled as such in the interface: multiple artboards per document,
 per-run text styling, custom fonts, reusable styles, templates and brand kits, PDF output, MP4
 encoding, video proxies and transitions, photo range selections and blend modes, motion masks and
-imported artboards, 3D, and accounts, cloud sync or collaboration. Pointer capture, the browser's own canvas output and
+imported artboards, 3D, real-time collaboration, and any billing or payments. Pointer capture, the browser's own canvas output and
 file downloads are covered by `e2e/**`, a Playwright suite that drives the production build in a real
 Chromium in CI; `docs/ROADMAP.md` lists what it still does not reach.
 

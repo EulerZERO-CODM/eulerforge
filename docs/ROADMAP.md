@@ -225,8 +225,29 @@ The browser suite is Chromium only.
 
 ### Phase 7 — Persistence, accounts and collaboration
 
-Remote document repository, authentication and account settings, remote asset catalogue. Each is
-gated on the same rule: the local-first behaviour must remain fully functional without an account.
+In progress. The remote boundary exists and is tested, as an **optional, self-hosted server** behind
+the existing repository interface (ADR-0027). `docs/SERVER.md` documents the endpoints, the data
+directory, the schema version, the tests and the deployment steps.
+
+- **Documents.** Save, list, read and delete over HTTP, with the platform's own schema validating
+  every write and optimistic concurrency on `revision`. A stale write is a `409` carrying the
+  server's revision and timestamp; the client's sync plan turns that into a decision rather than an
+  overwrite.
+- **Accounts.** Registration, sign-in and sign-out; scrypt password hashes (parameters stored with
+  the hash); opaque session tokens kept only as SHA-256 digests, delivered in HttpOnly `SameSite=Lax`
+  cookies; profile rename; a password change that revokes every other session; account deletion
+  that removes the account, its sessions, its documents and every share link pointing at one.
+- **Sharing.** Revocable, expiring, read-only share links. The token is returned once; `/shared/:token`
+  is a read-only page that offers the project file as a download.
+- **Catalogue.** A paginated catalogue endpoint with licence and provenance on every record, over the
+  repository-authored sample records — a real API, not a stock library.
+- **Isolation.** Another account's document, share or session is `not-found`, and the authorization
+  boundaries have their own tests, including cross-account reads, writes and deletions.
+
+Still planned, and labelled so in the ledger and the studio pages: real-time collaboration and
+presence; a database adapter for more than one process; email verification, password reset, OAuth and
+multi-factor authentication; team roles. Rate limiting is in-process and does not survive a restart.
+There is **no billing or payment system**, by explicit product decision, and none is planned.
 
 ## Exploratory — not committed
 

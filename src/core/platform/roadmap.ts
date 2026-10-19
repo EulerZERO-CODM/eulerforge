@@ -649,31 +649,46 @@ export const ROADMAP: readonly RoadmapPhase[] = [
     id: 'phase-7',
     name: 'Phase 7 — Persistence, accounts and collaboration',
     summary:
-      'Optional cloud storage, sign-in, sharing and team features behind the existing repository boundary.',
-    status: 'planned',
+      'An optional, self-hosted server behind the existing repository boundary: accounts, sessions, revision-checked document sync, read-only share links and a paginated catalogue API. The app stays local-first without it.',
+    status: 'in-progress',
     items: [
       {
         id: 'p7.persistence',
         title: 'Remote document repository',
         description:
-          'A server-backed implementation of the document repository with optimistic concurrency on `revision`.',
-        status: 'planned',
+          'A server-backed repository behind the existing boundary: documents are validated with the platform schema, saved with optimistic concurrency on `revision`, and a stale write is refused with the server revision so the interface can show both copies.',
+        status: 'done',
         dependsOn: ['p1.core', 'p1.shell'],
         completionCriteria: [
           'Conflict detection is tested with two clients',
           'Local-only mode still works with no account',
+        ],
+        evidence: [
+          'src/server/store.ts',
+          'src/server/routes.test.ts',
+          'src/core/account/sync.ts',
+          'src/core/account/sync.test.ts',
         ],
         capabilityIds: ['shell.cloud-persistence'],
       },
       {
         id: 'p7.accounts',
         title: 'Authentication and account settings',
-        description: 'Sign-in, profile and session handling.',
-        status: 'planned',
+        description:
+          'Sign-in with scrypt-hashed passwords and opaque, hashed session tokens in HttpOnly cookies; profile rename; password change that revokes other sessions; and account deletion that removes the account, its sessions, its documents and its share links.',
+        status: 'done',
         dependsOn: ['p7.persistence'],
         completionCriteria: [
           'No secret reaches the client bundle',
           'Account deletion removes server data',
+        ],
+        evidence: [
+          'src/server/passwords.ts',
+          'src/server/sessions.ts',
+          'src/app/api/auth/login/route.ts',
+          'src/app/api/account/route.ts',
+          'src/server/routes.test.ts',
+          'src/components/account/account-panel.tsx',
         ],
         capabilityIds: ['platform.auth-billing'],
       },
@@ -681,14 +696,28 @@ export const ROADMAP: readonly RoadmapPhase[] = [
         id: 'p7.remote-catalogue',
         title: 'Remote asset catalogue',
         description:
-          'Hosted, paginated catalogue with real licensed assets and provenance records.',
-        status: 'planned',
+          'A paginated catalogue endpoint over the repository-authored sample records, with licence and provenance on every record and explicit paging totals. It is a sample catalogue over HTTP, not a hosted third-party library.',
+        status: 'done',
         dependsOn: ['p7.persistence'],
         completionCriteria: [
           'Catalogue paging works against a server',
           'Every record exposes licence and provenance before use',
         ],
+        evidence: ['src/app/api/catalogue/route.ts', 'src/server/routes.test.ts'],
         capabilityIds: ['assets.remote-catalogue'],
+      },
+      {
+        id: 'p7.collaboration',
+        title: 'Real-time collaboration',
+        description:
+          'Presence, live cursors and concurrent editing of one document by several people.',
+        status: 'planned',
+        dependsOn: ['p7.accounts'],
+        completionCriteria: [
+          'Two clients can edit one document without losing either edit',
+          'Presence is scoped to a document and ends when a session ends',
+        ],
+        capabilityIds: ['shell.cloud-persistence'],
       },
     ],
     exitCriteria: [

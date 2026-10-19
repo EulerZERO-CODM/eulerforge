@@ -265,6 +265,37 @@ save: media metadata, clip windows and the composition's length and frame rate. 
 project stays a small JSON object, and why reopening it on another machine honestly reports the
 missing files instead of pretending to have them.
 
+### The optional server boundary
+
+Local-first is not a phase this app is waiting to leave; it is the default, and the server is a
+second repository behind the same boundary (ADR-0027).
+
+```
+src/app/api/**/route.ts        the HTTP surface (real Request → real Response)
+        ↓
+src/server/runtime.ts          one ForgeStore per data directory
+        ↓
+src/server/store.ts            accounts, sessions, documents, share links; JSON files, one queue
+        ↓
+forgeDocumentSchema            the platform's own schema: the server cannot store what the app cannot open
+
+src/components/account/account-panel.tsx
+        ↓ lib/browser/remote-client.ts   (fetch; every response is untrusted and parsed)
+        ↓ core/account/sync.ts           (pure: upload / download / in-sync / conflict, with reasons)
+        ↓ DocumentsStore.update          (a downloaded document goes through the same local path)
+```
+
+Four rules hold the boundary:
+
+1. **The server is optional and absent by default.** With no server running, `fetchSession` reports
+   `unavailable` and the panel says so; every studio keeps working against local storage.
+2. **Nothing secret reaches the client.** The session is an HttpOnly cookie; the only token the
+   browser ever sees is a share-link token, shown once.
+3. **Every response is untrusted.** `remote-client` parses shapes rather than casting them, and a
+   downloaded document is migrated and validated before it is stored locally.
+4. **Ownership is enforced in the store, not the UI.** Another account's document, share or session
+   resolves to `not-found`; the API does not confirm that an id exists.
+
 ## Data flow of a real edit
 
 ```
