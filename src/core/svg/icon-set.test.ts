@@ -283,3 +283,70 @@ describe('icon sets', () => {
     if (!invalid.ok) expect(invalid.error.message).toContain('Bowtie');
   });
 });
+
+describe('icon sets carry paint', () => {
+  function paintedIcon(name: string): Layer {
+    const parsed = parsePathData(SQUARE);
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    const created = createLayer(
+      {
+        type: 'path',
+        frame: { x: 0, y: 0, width: 24, height: 24 },
+        vector: {
+          path: parsed.value.path,
+          style: {
+            fill: null,
+            fillPaint: {
+              kind: 'pattern',
+              motif: 'dots',
+              foreground: '#112233',
+              background: '#ffffff',
+              scale: 0.2,
+              rotation: 0,
+            },
+          },
+        },
+      },
+      { name, generateId: nextId },
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    return created.value;
+  }
+
+  it('writes the definition into each icon file and the shared sprite', () => {
+    const result = buildIconSet([paintedIcon('Dotted'), paintedIcon('Dotted two')], {
+      setName: 'Painted icons',
+      box: GRID,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    for (const fileName of ['dotted.svg', 'dotted-two.svg']) {
+      const file = new TextDecoder().decode(readZipEntry(result.value.archive, fileName)!);
+      expect(file).toContain('<pattern');
+      expect(file).toContain('data-forge-pattern=');
+      expect(file).toContain('fill="url(#paint-1)"');
+    }
+
+    const sprite = new TextDecoder().decode(readZipEntry(result.value.archive, 'icons.svg')!);
+    expect(sprite).toContain('<defs>');
+    expect(sprite).toContain('id="paint-1"');
+    expect(sprite).toContain('id="paint-2"');
+    const referenced = [...sprite.matchAll(/url\(#([^)]+)\)/g)].map((match) => match[1]);
+    const defined = [...sprite.matchAll(/ id="([^"]+)"/g)].map((match) => match[1]);
+    for (const reference of referenced) expect(defined).toContain(reference);
+  });
+
+  it('round-trips a painted icon back through the importer', () => {
+    const result = buildIconSet([paintedIcon('Dotted')], { setName: 'Painted', box: GRID });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const file = new TextDecoder().decode(readZipEntry(result.value.archive, 'dotted.svg')!);
+    const read = parseSvg(file);
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    const paint = read.value.artwork.shapes.find((shape) => shape.style.fillPaint !== null)?.style
+      .fillPaint;
+    expect(paint).toMatchObject({ kind: 'pattern', motif: 'dots' });
+  });
+});

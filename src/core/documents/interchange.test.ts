@@ -230,3 +230,74 @@ describe('reporting helpers', () => {
     expect(style.strokeWidth).toBe(4);
   });
 });
+
+describe('paint survives interchange', () => {
+  const gradient = {
+    kind: 'linear-gradient' as const,
+    from: { x: 0, y: 0 },
+    to: { x: 1, y: 1 },
+    stops: [
+      { offset: 0, color: '#ff0000' },
+      { offset: 1, color: '#0000ff' },
+    ],
+  };
+
+  const pattern = {
+    kind: 'pattern' as const,
+    motif: 'checks' as const,
+    foreground: '#112233',
+    background: null,
+    scale: 0.2,
+    rotation: 30,
+  };
+
+  function paintedLayer(): Layer {
+    const parsed = parsePathData('M2 2 L18 2 L18 18 L2 18 Z');
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    return make(
+      {
+        type: 'path',
+        frame: { x: 2, y: 2, width: 16, height: 16 },
+        vector: { path: parsed.value.path, style: { fill: null, fillPaint: gradient } },
+      },
+      'Painted mark',
+    );
+  }
+
+  it('sends a gradient-painted path to a design canvas unchanged', () => {
+    const source = paintedLayer();
+    if (source.type !== 'path') throw new Error('fixture');
+    const result = layersToDesign([source]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const copied = result.value.layers[0];
+    if (copied?.type !== 'path') throw new Error('expected a path layer');
+    expect(copied.vector.style.fillPaint).toEqual(gradient);
+    expect(copied.vector.style.fill).toBeNull();
+  });
+
+  it('brings a pattern-painted path back into the vector studio unchanged', () => {
+    const parsed = parsePathData('M2 2 L18 2 L18 18 L2 18 Z');
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    const source = make(
+      {
+        type: 'path',
+        frame: { x: 2, y: 2, width: 16, height: 16 },
+        vector: { path: parsed.value.path, style: { fill: null, fillPaint: pattern } },
+      },
+      'Pattern mark',
+    );
+    const result = layersToVector([source]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const converted = result.value.layers[0];
+    if (converted?.type !== 'path') throw new Error('expected a path layer');
+    expect(converted.vector.style.fillPaint).toEqual(pattern);
+  });
+
+  it('says what paint does and does not cross, instead of claiming neither model has it', () => {
+    const limitation = INTERCHANGE_LIMITATIONS.join(' ');
+    expect(limitation).toMatch(/gradient and pattern fills/i);
+    expect(limitation).not.toMatch(/not part of either document model/i);
+  });
+});

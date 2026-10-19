@@ -225,6 +225,42 @@ describe('icons and sprites', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('carries paint definitions into the sprite so its references resolve', () => {
+    const paintStyle = {
+      fill: null,
+      fillPaint: {
+        kind: 'linear-gradient' as const,
+        from: { x: 0, y: 0 },
+        to: { x: 1, y: 0 },
+        stops: [
+          { offset: 0, color: '#ff0000' },
+          { offset: 1, color: '#0000ff' },
+        ],
+      },
+    };
+    const first = createArtwork({ width: 24, height: 24 }, [
+      createShape('Gradient one', pathOf('M0 0 L24 0 L24 24 L0 24 Z').path, paintStyle),
+    ]);
+    const second = createArtwork({ width: 24, height: 24 }, [
+      createShape('Gradient two', pathOf('M0 0 L24 0 L24 24 L0 24 Z').path, paintStyle),
+    ]);
+    const result = serializeIconSprite([
+      { name: 'One', artwork: first },
+      { name: 'Two', artwork: second },
+    ]);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Every reference has a definition, and two icons do not share one id.
+    expect(result.value).toContain('<defs>');
+    expect(result.value).toContain('id="paint-1"');
+    expect(result.value).toContain('id="paint-2"');
+    expect(result.value).toContain('fill="url(#paint-1)"');
+    expect(result.value).toContain('fill="url(#paint-2)"');
+    const referenced = [...result.value.matchAll(/url\(#([^)]+)\)/g)].map((match) => match[1]);
+    const defined = [...result.value.matchAll(/ id="([^"]+)"/g)].map((match) => match[1]);
+    for (const reference of referenced) expect(defined).toContain(reference);
+  });
+
   it('refuses a sprite when one icon is invalid', () => {
     const result = serializeIconSprite([
       {

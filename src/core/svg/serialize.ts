@@ -360,6 +360,20 @@ export function serializeIconSprite(
   const used = new Map<string, number>();
   const symbols: string[] = [];
 
+  /* Paint definitions are collected once for the whole sprite, with a single positional id sequence,
+     so two icons painted with the same gradient still reference two ids that exist. Writing the
+     `<path fill="url(#paint-1)">` without its definition would produce a sprite whose icons render
+     black — a file that opens and is wrong, which is worse than one that fails. */
+  const definitions: string[] = [];
+  let paintCount = 0;
+  const allocate = (paint: PaintSpec | null | undefined, box: Box): string | null => {
+    if (!paint || paint.kind === 'solid') return null;
+    paintCount += 1;
+    const id = `paint-${String(paintCount)}`;
+    definitions.push(paintDefinition(id, paint, box, { digits, pretty: false }, ''));
+    return id;
+  };
+
   for (const entry of entries) {
     const validated = validateArtwork(entry.artwork);
     if (!validated.ok) return err(validated.error);
@@ -371,15 +385,24 @@ export function serializeIconSprite(
 
     const { minX, minY, maxX, maxY } = entry.artwork.viewBox;
     const body = entry.artwork.shapes
-      .filter((shape) => shape.path.contours.length > 0)
-      .map((shape) => shapeElement(shape, { digits, pretty: false, includeNames: false }, ''))
+      .filter((shape) => shape.path.contours.length > 0 && stylePaintsSomething(shape.style))
+      .map((shape) => {
+        const bounds = boundsOfPath(shape.path) ?? entry.artwork.viewBox;
+        const fill = allocate(shape.style.fillPaint, bounds);
+        const stroke = allocate(shape.style.strokePaint, bounds);
+        return shapeElement(shape, { digits, pretty: false, includeNames: false }, '', {
+          fill,
+          stroke,
+        });
+      })
       .join('');
     symbols.push(
       `<symbol id="${escapeXmlAttribute(id)}" viewBox="${formatSvgNumber(minX, digits)} ${formatSvgNumber(minY, digits)} ${formatSvgNumber(maxX - minX, digits)} ${formatSvgNumber(maxY - minY, digits)}"><title>${escapeXmlText(entry.name)}</title>${body}</symbol>`,
     );
   }
 
+  const defs = definitions.length > 0 ? `<defs>${definitions.join('')}</defs>` : '';
   return ok(
-    `<svg xmlns="http://www.w3.org/2000/svg" style="display:none">${symbols.join('')}</svg>`,
+    `<svg xmlns="http://www.w3.org/2000/svg" style="display:none">${defs}${symbols.join('')}</svg>`,
   );
 }

@@ -646,6 +646,14 @@ test.describe('Illustration Studio', () => {
   test('carries artwork from Illustration to Design and back', async ({ page }) => {
     const vectorId = await createVectorDocument(page, 'Interchange source');
     await drawShape(page, 'rectangle', { x: 32, y: 32 }, { x: 160, y: 160 });
+    const drawn = (await pathLayers(page))[0];
+    if (!drawn) throw new Error('the rectangle should be in the document');
+    await selectLayer(page, drawn.id);
+    // Paint is part of what crosses the boundary, so the interchange is tested with paint on it.
+    await page.getByTestId('fill-paint-kind').selectOption('linear-gradient');
+    await expect
+      .poll(async () => (await pathLayers(page))[0]?.vector?.style.fillPaint?.kind)
+      .toBe('linear-gradient');
 
     // Out of the vector document into a design canvas.
     const outbound = page.locator('section', { has: page.getByTestId('interchange-create') });
@@ -657,6 +665,7 @@ test.describe('Illustration Studio', () => {
     expect(designDocument?.documentTypeId).toBe('design.canvas');
     expect(designDocument?.scene.layers[0]?.type).toBe('path');
     expect(designDocument?.scene.layers[0]?.vector?.path.contours[0]?.nodes).toHaveLength(4);
+    expect(designDocument?.scene.layers[0]?.vector?.style.fillPaint?.kind).toBe('linear-gradient');
     void outbound;
 
     // Open the converted document through the link the panel offers, then convert it back.
@@ -680,6 +689,7 @@ test.describe('Illustration Studio', () => {
     const returnedLayer = returned?.scene.layers[0];
     expect(returnedLayer?.type).toBe('path');
     expect(returnedLayer?.vector?.path.contours[0]?.nodes).toHaveLength(4);
+    expect(returnedLayer?.vector?.style.fillPaint?.kind).toBe('linear-gradient');
   });
 
   test('exports SVG from a Design document through the export panel', async ({ page }) => {
