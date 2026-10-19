@@ -3,9 +3,14 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 
-import { MAX_MASK_POINTS, type PhotoPoint, type PhotoPayload } from '../../core/documents/payload';
+import {
+  MAX_MASK_POINTS,
+  maskHasCoverage,
+  type PhotoPoint,
+  type PhotoPayload,
+} from '../../core/documents/payload';
 import { addMaskStrokeCommand, addRetouchStrokeCommand } from '../../core/photo/commands';
-import { rasteriseMask } from '../../lib/browser/photo-engine';
+import { rasteriseMask, sourcePixelsOf } from '../../lib/browser/photo-engine';
 import { cn } from '../../lib/cn';
 import { Button } from '../ui/button';
 import { InlineNote } from '../ui/states';
@@ -108,7 +113,8 @@ export function PhotoStage({
   }, [size]);
 
   // Static mask overlay: re-rasterising the strokes is the expensive part, so it happens when the
-  // mask changes, not on every pointer move.
+  // mask changes, not on every pointer move. Range selections need the source pixels for the same
+  // reason the renderer does: they describe the photograph, not the adjusted preview.
   useEffect(() => {
     const canvas = maskRef.current;
     if (!canvas || !size) return;
@@ -117,8 +123,12 @@ export function PhotoStage({
     const context = canvas.getContext('2d');
     if (!context) return;
     context.clearRect(0, 0, size.width, size.height);
-    if (!maskVisible || !payload.mask || payload.mask.strokes.length === 0) return;
-    const strength = rasteriseMask(payload.mask, size.width, size.height);
+    const mask = payload.mask;
+    if (!maskVisible || !maskHasCoverage(mask) || !mask) return;
+    const paintOnly = (mask.ranges ?? []).length === 0;
+    const source = paintOnly ? null : sourcePixelsOf(size.source, size.width, size.height);
+    if (!paintOnly && !source) return;
+    const strength = rasteriseMask(mask, size.width, size.height, source);
     const image = context.createImageData(size.width, size.height);
     for (let index = 0; index < strength.length; index += 1) {
       const value = strength[index] ?? 0;
@@ -450,6 +460,7 @@ export function PhotoStage({
         />
         <canvas
           ref={maskRef}
+          data-testid="photo-mask-overlay"
           aria-hidden
           className="pointer-events-none absolute inset-0 block h-full w-full"
         />

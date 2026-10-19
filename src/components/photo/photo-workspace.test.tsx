@@ -433,6 +433,124 @@ describe('Photo Studio', () => {
     });
   });
 
+  it('adds a luminance range selection through the panel and stores its window', async () => {
+    const user = userEvent.setup();
+    const { session } = await mount(services, { ...defaultPhotoPayload(), source: SOURCE });
+
+    await user.click(screen.getByTestId('photo-range-add-luminance'));
+
+    await waitFor(() => {
+      expect(payloadOf(session).mask?.ranges).toHaveLength(1);
+    });
+    const range = payloadOf(session).mask?.ranges?.[0];
+    expect(range).toMatchObject({ kind: 'luminance', min: 0.2, max: 0.8, feather: 0.2 });
+    expect(screen.getByTestId('photo-range-row-0')).toHaveTextContent('Luminance 20–80%, edge 20%');
+    expect(session.getState().history.at(-1)?.label).toBe('Select by luminance');
+  });
+
+  it('clamps the window while dragging and stores a colour match with its tolerance', async () => {
+    const user = userEvent.setup();
+    const { session } = await mount(services, { ...defaultPhotoPayload(), source: SOURCE });
+
+    // Dragging "From" past "To" must not create a backwards window: it stops at the upper bound.
+    fireEvent.change(screen.getByTestId('photo-range-min'), { target: { value: '95' } });
+    fireEvent.change(screen.getByTestId('photo-range-luminance-feather'), {
+      target: { value: '0' },
+    });
+    await user.click(screen.getByTestId('photo-range-add-luminance'));
+    await waitFor(() => {
+      expect(payloadOf(session).mask?.ranges).toHaveLength(1);
+    });
+    expect(payloadOf(session).mask?.ranges?.[0]).toMatchObject({
+      kind: 'luminance',
+      min: 0.8,
+      max: 0.8,
+      feather: 0,
+    });
+
+    fireEvent.change(screen.getByTestId('photo-range-colour'), {
+      target: { value: '#40A0FF' },
+    });
+    fireEvent.change(screen.getByTestId('photo-range-tolerance'), { target: { value: '35' } });
+    await user.click(screen.getByTestId('photo-range-add-colour'));
+    await waitFor(() => {
+      expect(payloadOf(session).mask?.ranges).toHaveLength(2);
+    });
+    expect(payloadOf(session).mask?.ranges?.[1]).toMatchObject({
+      kind: 'colour',
+      colour: '#40a0ff',
+      tolerance: 0.35,
+      feather: 0.2,
+    });
+    expect(screen.getByTestId('photo-range-row-1')).toHaveTextContent(
+      'Colour #40A0FF ±35%, edge 20%',
+    );
+  });
+
+  it('removes one range, clears the rest, and keeps every step undoable', async () => {
+    const user = userEvent.setup();
+    const { session } = await mount(services, { ...defaultPhotoPayload(), source: SOURCE });
+    await user.click(screen.getByTestId('photo-range-add-luminance'));
+    await user.click(screen.getByTestId('photo-range-add-colour'));
+    await waitFor(() => {
+      expect(payloadOf(session).mask?.ranges).toHaveLength(2);
+    });
+
+    await user.click(screen.getByTestId('photo-range-remove-0'));
+    await waitFor(() => {
+      expect(payloadOf(session).mask?.ranges).toHaveLength(1);
+    });
+    expect(payloadOf(session).mask?.ranges?.[0]?.kind).toBe('colour');
+    expect(session.getState().history.at(-1)?.label).toBe('Remove range selection');
+
+    await session.undo();
+    expect(payloadOf(session).mask?.ranges).toHaveLength(2);
+
+    await user.click(screen.getByTestId('photo-range-clear'));
+    await waitFor(() => {
+      expect(payloadOf(session).mask?.ranges).toEqual([]);
+    });
+    expect(session.getState().history.at(-1)?.label).toBe('Clear range selections');
+    expect(screen.getByTestId('photo-range-clear')).toBeDisabled();
+  });
+
+  it('applies inversion and clearing to ranges as well as strokes', async () => {
+    const user = userEvent.setup();
+    const { session } = await mount(services, { ...defaultPhotoPayload(), source: SOURCE });
+    await user.click(screen.getByTestId('photo-range-add-luminance'));
+    await waitFor(() => {
+      expect(payloadOf(session).mask?.ranges).toHaveLength(1);
+    });
+
+    // A range is coverage, so the mask controls stop being disabled when there are no strokes.
+    const invert = screen.getByRole('switch', { name: /Invert mask/ });
+    expect(invert).toBeEnabled();
+    await user.click(invert);
+    await waitFor(() => {
+      expect(payloadOf(session).mask?.inverted).toBe(true);
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Clear mask' }));
+    await waitFor(() => {
+      expect(payloadOf(session).mask).toMatchObject({ strokes: [], ranges: [], inverted: true });
+    });
+    expect(screen.getByTestId('photo-mask-count')).toHaveTextContent(
+      '0 / 200 strokes · 0 / 8 ranges',
+    );
+  });
+
+  it('explains that ranges need a photograph instead of offering dead controls', async () => {
+    const user = userEvent.setup();
+    const { session } = await mount(services, defaultPhotoPayload());
+    expect(screen.getByTestId('photo-ranges-empty')).toHaveTextContent(
+      /Import a photograph to select pixels/,
+    );
+    expect(screen.queryByTestId('photo-range-add-luminance')).toBeNull();
+    expect(session.getState().history).toHaveLength(0);
+    // The tool buttons stay usable so a photograph can be imported without leaving the workspace.
+    await user.click(screen.getByRole('button', { name: 'Inspect' }));
+  });
+
   it('compares against the original without writing anything', async () => {
     const user = userEvent.setup();
     const { session } = await mount(services, { ...defaultPhotoPayload(), source: SOURCE });

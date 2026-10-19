@@ -52,6 +52,14 @@ type StoredPhotoPayload = {
   readonly mask: {
     readonly strokes: readonly { readonly points: readonly { x: number; y: number }[] }[];
     readonly inverted: boolean;
+    readonly ranges?: readonly {
+      readonly kind: 'luminance' | 'colour';
+      readonly min?: number;
+      readonly max?: number;
+      readonly colour?: string;
+      readonly tolerance?: number;
+      readonly feather: number;
+    }[];
   } | null;
   readonly retouch: readonly { readonly mode: string }[];
   readonly engine: 'auto' | 'webgl2' | 'canvas2d';
@@ -379,6 +387,130 @@ test.describe('Photo Studio', () => {
       { x: 280, y: 120 },
       RIGHT.map((v) => Math.round(v * EXPOSURE_FACTOR)),
     );
+  });
+
+  test('selects pixels by luminance and colour, overlays them and exports the selection', async ({
+    page,
+  }) => {
+    await createPhotoDocument(page, 'Range-selected portrait');
+    await importFixture(page);
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
+    await expect.poll(async () => (await photoPayload(page)).adjustments.length).toBe(1);
+
+    const liftedLeft = LEFT.map((value) => Math.round(value * EXPOSURE_FACTOR));
+    const liftedRight = RIGHT.map((value) => Math.round(value * EXPOSURE_FACTOR));
+
+    // The fixture is a flat 24 % left half and a 55 % right half. A window ending at 40 % selects
+    // the dark side without touching the bright one — the selection is measured from the source, so
+    // it cannot be pulled around by the exposure adjustment that is about to be masked.
+    await page.getByTestId('photo-range-max').fill('40');
+    await page.getByTestId('photo-range-luminance-feather').fill('0');
+    await page.getByTestId('photo-range-add-luminance').click();
+    await expect.poll(async () => (await photoPayload(page)).mask?.ranges?.length ?? 0).toBe(1);
+    expect((await photoPayload(page)).mask?.ranges?.[0]).toMatchObject({
+      kind: 'luminance',
+      min: 0.2,
+      max: 0.4,
+      feather: 0,
+    });
+    await expect(page.getByTestId('photo-range-row-0')).toContainText('Luminance 20–40%, edge 0%');
+    await expect(page.getByTestId('photo-mask-count')).toContainText(
+      '0 / 200 strokes · 1 / 8 ranges',
+    );
+
+    await expectPreviewPixel(page, { x: 40, y: 120 }, liftedLeft);
+    await expectPreviewPixel(page, { x: 280, y: 120 }, RIGHT);
+
+    // The overlay is on by default and drawn from the same strength map, so a range is visible even
+    // though no stroke exists. Sampling the alpha channel distinguishes selected from unselected.
+    await expect
+      .poll(() =>
+        page.getByTestId('photo-mask-overlay').evaluate((canvas) => {
+          const context = (canvas as HTMLCanvasElement).getContext('2d');
+          if (!context) return -1;
+          return context.getImageData(40, 120, 1, 1).data[3];
+        }),
+      )
+      .toBeGreaterThan(0);
+    await expect
+      .poll(() =>
+        page.getByTestId('photo-mask-overlay').evaluate((canvas) => {
+          const context = (canvas as HTMLCanvasElement).getContext('2d');
+          if (!context) return -1;
+          return context.getImageData(280, 120, 1, 1).data[3];
+        }),
+      )
+      .toBe(0);
+
+    // Hiding the overlay is display-only: it changes no pixels and no document state.
+    await page.getByRole('button', { name: 'Mask overlay' }).click();
+    await expect
+      .poll(() =>
+        page.getByTestId('photo-mask-overlay').evaluate((canvas) => {
+          const context = (canvas as HTMLCanvasElement).getContext('2d');
+          if (!context) return -1;
+          return context.getImageData(40, 120, 1, 1).data[3];
+        }),
+      )
+      .toBe(0);
+    await page.getByRole('button', { name: 'Mask overlay' }).click();
+
+    const selected = await exportAndDecode(page, 'PNG');
+    expect(selected.width).toBe(WIDTH);
+    expect(selected.pixel(40, 120)[0]).toBeCloseTo(liftedLeft[0] ?? 0, -1);
+    expect(selected.pixel(280, 120)[0]).toBeCloseTo(RIGHT[0], -1);
+
+    // Inversion is applied to the union: the bright half is edited instead, and the range survives.
+    await page.getByRole('switch', { name: /Invert mask/ }).click();
+    await expect.poll(async () => (await photoPayload(page)).mask?.inverted).toBe(true);
+    await expectPreviewPixel(page, { x: 40, y: 120 }, LEFT);
+    await expectPreviewPixel(page, { x: 280, y: 120 }, liftedRight);
+    await page.getByRole('switch', { name: /Invert mask/ }).click();
+    await expect.poll(async () => (await photoPayload(page)).mask?.inverted).toBe(false);
+
+    // Reopening the project keeps the stored range, because it is document state and not a
+    // transient selection.
+    await page.goto('/projects');
+    await page.getByRole('link', { name: 'Range-selected portrait', exact: true }).click();
+    await page.waitForURL(/\/workspace\/[^/]+$/);
+    await expect
+      .poll(async () =>
+        previewCanvas(page).evaluate((canvas) => (canvas as HTMLCanvasElement).width),
+      )
+      .toBe(WIDTH);
+    await expect(page.getByTestId('photo-range-row-0')).toContainText('Luminance 20–40%, edge 0%');
+    await expectPreviewPixel(page, { x: 40, y: 120 }, liftedLeft);
+    await expectPreviewPixel(page, { x: 280, y: 120 }, RIGHT);
+
+    // Clearing the mask drops the range and returns both halves to the stack.
+    await page.getByRole('button', { name: 'Clear mask' }).click();
+    await expect.poll(async () => (await photoPayload(page)).mask?.ranges).toEqual([]);
+    await expectPreviewPixel(page, { x: 40, y: 120 }, liftedLeft);
+    await expectPreviewPixel(page, { x: 280, y: 120 }, liftedRight);
+
+    // Colour matching: the right half is #8c8c8c within the working copy's WebP tolerance.
+    await page.getByTestId('photo-range-colour').fill('#8c8c8c');
+    await page.getByTestId('photo-range-tolerance').fill('5');
+    await page.getByTestId('photo-range-colour-feather').fill('0');
+    await page.getByTestId('photo-range-add-colour').click();
+    await expect.poll(async () => (await photoPayload(page)).mask?.ranges?.length ?? 0).toBe(1);
+    expect((await photoPayload(page)).mask?.ranges?.[0]).toMatchObject({
+      kind: 'colour',
+      colour: '#8c8c8c',
+      tolerance: 0.05,
+      feather: 0,
+    });
+    await expect(page.getByTestId('photo-range-row-0')).toContainText(
+      'Colour #8C8C8C ±5%, edge 0%',
+    );
+    await expectPreviewPixel(page, { x: 40, y: 120 }, LEFT);
+    await expectPreviewPixel(page, { x: 280, y: 120 }, liftedRight);
+
+    // Removing the row through its own button returns the frame to the whole-image stack.
+    await page.getByTestId('photo-range-remove-0').click();
+    await expect.poll(async () => (await photoPayload(page)).mask?.ranges).toEqual([]);
+    await expectPreviewPixel(page, { x: 40, y: 120 }, liftedLeft);
+    expect((await photoPayload(page)).mask?.strokes).toEqual([]);
   });
 
   test('heals a real blemish edge in the exported file', async ({ page }) => {

@@ -22,7 +22,12 @@ import type {
   PhotoRetouchStroke,
   PhotoSource,
 } from '../../core/documents/payload';
-import { MAX_PHOTO_HREF_LENGTH, MAX_PHOTO_WORKING_EDGE } from '../../core/documents/payload';
+import {
+  MAX_PHOTO_HREF_LENGTH,
+  MAX_PHOTO_WORKING_EDGE,
+  maskHasCoverage,
+} from '../../core/documents/payload';
+import { applyRangeSelections } from '../../core/photo/range';
 import type { PhotoExportMimeType } from '../../core/photo/export';
 import { applyPhotoPipeline } from '../../core/photo/pipeline';
 import { err, forgeError, ok, type Result } from '../../core/result';
@@ -152,18 +157,54 @@ function strokeCanvas(
 }
 
 /**
- * Rasterises the mask to one strength byte per pixel.
+ * RGBA bytes of the source photograph at the requested mask size.
  *
- * Painting adds, erasing subtracts, and the order is the stored order — exactly what the mask
- * panel shows. `inverted` is resolved here so both renderers receive a finished strength map.
+ * Range selections are measured from the photograph, not from the adjusted preview, so this draws
+ * the decoded image into an offscreen canvas once per render size. Returns `null` when the browser
+ * refuses a 2D context, which the caller reports rather than silently dropping the selection.
  */
-export function rasteriseMask(mask: PhotoMask, width: number, height: number): Uint8ClampedArray {
+export function sourcePixelsOf(
+  image: PhotoImageSource,
+  width: number,
+  height: number,
+): Uint8ClampedArray | null {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext('2d', { willReadFrequently: true });
-  const output = new Uint8ClampedArray(width * height);
-  if (!context) return output;
+  if (!context) return null;
+  try {
+    context.drawImage(image, 0, 0, width, height);
+    return context.getImageData(0, 0, width, height).data;
+  } catch {
+    // A canvas that cannot draw this image is reported as "no source" rather than thrown: the
+    // caller decides whether the selection is essential (it is, in the renderer) or decoration
+    // (it is not, in the overlay).
+    return null;
+  }
+}
+
+/**
+ * Rasterises the mask to one strength byte per pixel.
+ *
+ * Painting adds, erasing subtracts, and the order is the stored order — exactly what the mask
+ * panel shows. Source-pixel ranges are then unioned into the painted coverage, and `inverted` is
+ * applied once to that union: the order in which two ways of selecting overlap cannot change what
+ * "the selected area" means. A range needs `source`; omitting it is a programming error and throws
+ * rather than quietly returning an unselected mask.
+ */
+export function rasteriseMask(
+  mask: PhotoMask,
+  width: number,
+  height: number,
+  source?: Uint8ClampedArray | null,
+): Uint8ClampedArray {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  const painted = new Uint8ClampedArray(width * height);
+  if (!context) return painted;
 
   for (const stroke of mask.strokes) {
     const layer = strokeCanvas(
@@ -180,11 +221,26 @@ export function rasteriseMask(mask: PhotoMask, width: number, height: number): U
   context.globalCompositeOperation = 'source-over';
 
   const pixels = context.getImageData(0, 0, width, height).data;
-  for (let index = 0; index < output.length; index += 1) {
-    const alpha = pixels[index * 4 + 3] ?? 0;
-    output[index] = mask.inverted ? FULL - alpha : alpha;
+  for (let index = 0; index < painted.length; index += 1) {
+    painted[index] = pixels[index * 4 + 3] ?? 0;
   }
-  return output;
+
+  const ranges = mask.ranges ?? [];
+  let strength: Uint8ClampedArray = painted;
+  if (ranges.length > 0) {
+    if (!source) {
+      throw new Error(
+        'A range selection needs the source pixels; pass the photograph’s RGBA data to rasteriseMask.',
+      );
+    }
+    strength = applyRangeSelections(painted, ranges, source, width, height);
+  }
+
+  if (!mask.inverted) return strength;
+  for (let index = 0; index < strength.length; index += 1) {
+    strength[index] = FULL - (strength[index] ?? 0);
+  }
+  return strength;
 }
 
 /**
@@ -250,10 +306,9 @@ function renderWithCanvas2d(request: PhotoRenderRequest): HTMLCanvasElement {
   context.drawImage(request.image, 0, 0, request.width, request.height);
   const pixels = context.getImageData(0, 0, request.width, request.height);
   const adjustments = request.payload.adjustments;
-  const mask =
-    request.payload.mask && request.payload.mask.strokes.length > 0
-      ? rasteriseMask(request.payload.mask, request.width, request.height)
-      : null;
+  const mask = maskHasCoverage(request.payload.mask)
+    ? rasteriseMask(request.payload.mask as PhotoMask, request.width, request.height, pixels.data)
+    : null;
 
   const output = applyPhotoPipeline(
     { data: pixels.data, width: request.width, height: request.height },
@@ -616,8 +671,17 @@ function renderWithWebgl2(
   }
 
   const mask = request.payload.mask;
-  if (mask && mask.strokes.length > 0) {
-    const strength = rasteriseMask(mask, request.width, request.height);
+  if (mask && maskHasCoverage(mask)) {
+    // Range selections are measured from the photograph, which the GPU has already uploaded; the
+    // pixels are read back only when a range actually exists.
+    const rangeSource =
+      (mask.ranges?.length ?? 0) > 0
+        ? sourcePixelsOf(request.image, request.width, request.height)
+        : null;
+    if ((mask.ranges?.length ?? 0) > 0 && !rangeSource) {
+      return { error: 'the browser refused a source canvas for the range selection' };
+    }
+    const strength = rasteriseMask(mask, request.width, request.height, rangeSource);
     const maskCanvas = document.createElement('canvas');
     maskCanvas.width = request.width;
     maskCanvas.height = request.height;

@@ -196,7 +196,7 @@ describe('migrateDocument — legacy records to the current schema', () => {
   });
 });
 
-describe('v4 → v5: paint arrives without rewriting older documents', () => {
+describe('older documents reach the current schema without rewriting their content', () => {
   function v4PathDocument() {
     const created = createDocument(
       {
@@ -249,12 +249,12 @@ describe('v4 → v5: paint arrives without rewriting older documents', () => {
     return JSON.parse(JSON.stringify(created.value)) as Record<string, unknown>;
   }
 
-  it('stamps version 5 and leaves the flat fill meaning the same thing', () => {
+  it('stamps the current version and leaves the flat fill meaning the same thing', () => {
     const v4 = { ...v4PathDocument(), schemaVersion: 4 };
     const migrated = migrateDocument(v4);
     expect(migrated.ok).toBe(true);
     if (!migrated.ok) return;
-    expect(migrated.value.schemaVersion).toBe(5);
+    expect(migrated.value.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     const layer = migrated.value.scene.layers[0];
     if (layer?.type !== 'path') throw new Error('expected a path layer');
     expect(layer.vector.style.fill).toBe('#22cc88');
@@ -286,9 +286,11 @@ describe('pendingMigrations', () => {
       '2->3',
       '3->4',
       '4->5',
+      '5->6',
     ]);
     expect(steps[0]?.description).toMatch(/vector path layers/i);
     expect(steps[1]?.description).toMatch(/studio payload/i);
     expect(steps[2]?.description).toMatch(/gradient or pattern paint/i);
+    expect(steps[3]?.description).toMatch(/range selections/i);
   });
 });

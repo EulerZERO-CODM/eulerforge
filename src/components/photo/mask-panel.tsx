@@ -1,16 +1,23 @@
 'use client';
 
 import { Eraser, RotateCcw, Trash2 } from 'lucide-react';
+import { useState } from 'react';
 
 import {
+  MAX_MASK_RANGES,
   MAX_MASK_STROKES,
   MAX_RETOUCH_STROKES,
+  maskHasCoverage,
   type PhotoPoint,
   type PhotoPayload,
+  type PhotoRangeSelection,
 } from '../../core/documents/payload';
 import {
+  addRangeSelectionCommand,
   clearMaskCommand,
+  clearRangeSelectionsCommand,
   clearRetouchCommand,
+  removeRangeSelectionCommand,
   setMaskInvertedCommand,
   undoMaskStrokeCommand,
   undoRetouchCommand,
@@ -20,6 +27,19 @@ import { Field, SwitchField } from '../ui/field';
 import { InlineNote } from '../ui/states';
 import type { WorkspaceApi } from '../workspace/workspace-api';
 import { PHOTO_TOOLS, PHOTO_TOOL_INFO, type PhotoTool } from './photo-tools';
+
+/** One-line summary of a stored range selection, used in the list and by the tests. */
+export function describeRangeSelection(range: PhotoRangeSelection): string {
+  const feather = Math.round(range.feather * 100);
+  if (range.kind === 'luminance') {
+    return `Luminance ${String(Math.round(range.min * 100))}–${String(
+      Math.round(range.max * 100),
+    )}%, edge ${String(feather)}%`;
+  }
+  return `Colour ${range.colour.toUpperCase()} ±${String(
+    Math.round(range.tolerance * 100),
+  )}%, edge ${String(feather)}%`;
+}
 
 /**
  * Mask, retouch and brush controls.
@@ -56,8 +76,22 @@ export function MaskPanel({
   readonly onMaskVisibleChange: (value: boolean) => void;
 }) {
   const strokes = payload.mask?.strokes.length ?? 0;
+  const ranges = payload.mask?.ranges ?? [];
+  const hasMask = maskHasCoverage(payload.mask);
   const retouch = payload.retouch.length;
   const info = PHOTO_TOOL_INFO[tool];
+
+  // Not part of the document: these configure the next range selection, exactly as brush size
+  // configures the next stroke. A stored range is immutable except for being removed — editing a
+  // threshold after the fact would make an undo step mean "change an arbitrary past selection".
+  const [luminanceMin, setLuminanceMin] = useState(20);
+  const [luminanceMax, setLuminanceMax] = useState(80);
+  const [luminanceFeather, setLuminanceFeather] = useState(20);
+  const [colour, setColour] = useState('#808080');
+  const [tolerance, setTolerance] = useState(15);
+  const [colourFeather, setColourFeather] = useState(20);
+  const full = ranges.length >= MAX_MASK_RANGES;
+  const noSource = payload.source === null;
 
   return (
     <section aria-labelledby="photo-mask-heading" className="space-y-3">
@@ -132,15 +166,15 @@ export function MaskPanel({
       <div className="border-line space-y-2.5 rounded-sm border p-3">
         <div className="flex items-baseline justify-between gap-2">
           <p className="text-fg text-sm font-medium">Mask</p>
-          <p className="forge-numeric text-fg-subtle text-2xs">
-            {strokes} / {MAX_MASK_STROKES} strokes
+          <p className="forge-numeric text-fg-subtle text-2xs" data-testid="photo-mask-count">
+            {strokes} / {MAX_MASK_STROKES} strokes · {ranges.length} / {MAX_MASK_RANGES} ranges
           </p>
         </div>
         <SwitchField
           label="Invert mask"
           description="Apply the stack outside the painted area instead of inside."
           checked={payload.mask?.inverted ?? false}
-          disabled={strokes === 0}
+          disabled={!hasMask}
           onCheckedChange={(checked) => {
             void api.run(setMaskInvertedCommand(api.doc, checked));
           }}
@@ -167,7 +201,7 @@ export function MaskPanel({
             size="sm"
             variant="outline"
             iconLeft={<Trash2 aria-hidden />}
-            disabled={strokes === 0}
+            disabled={!hasMask}
             onClick={() => {
               void api.run(clearMaskCommand(api.doc));
             }}
@@ -175,11 +209,212 @@ export function MaskPanel({
             Clear mask
           </Button>
         </div>
-        {strokes === 0 ? (
+        {!hasMask ? (
           <p className="text-fg-subtle text-xs">
             No mask: the stack applies to the whole photograph.
           </p>
         ) : null}
+      </div>
+
+      <div className="border-line space-y-2.5 rounded-sm border p-3" data-testid="photo-ranges">
+        <div className="flex items-baseline justify-between gap-2">
+          <p className="text-fg text-sm font-medium">Select by range</p>
+          <p className="forge-numeric text-fg-subtle text-2xs">
+            {ranges.length} / {MAX_MASK_RANGES}
+          </p>
+        </div>
+        <p className="text-fg-subtle text-xs">
+          Measured from the imported photograph, not the adjusted preview, so the selection stays
+          put while you edit. Ranges and painted strokes combine; inverting applies to both.
+        </p>
+
+        {noSource ? (
+          <p className="text-fg-subtle text-xs" data-testid="photo-ranges-empty">
+            Import a photograph to select pixels by luminance or colour.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <fieldset className="space-y-2" data-testid="photo-range-luminance">
+              <legend className="text-fg-muted text-xs font-medium">Luminance window</legend>
+              <Field label="From" labelSuffix={`${luminanceMin}%`}>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={luminanceMin}
+                  aria-label="Luminance range start"
+                  data-testid="photo-range-min"
+                  className="accent-accent w-full"
+                  onChange={(event) => {
+                    const next = Number(event.target.value);
+                    setLuminanceMin(Math.min(next, luminanceMax));
+                  }}
+                />
+              </Field>
+              <Field label="To" labelSuffix={`${luminanceMax}%`}>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={luminanceMax}
+                  aria-label="Luminance range end"
+                  data-testid="photo-range-max"
+                  className="accent-accent w-full"
+                  onChange={(event) => {
+                    const next = Number(event.target.value);
+                    setLuminanceMax(Math.max(next, luminanceMin));
+                  }}
+                />
+              </Field>
+              <Field label="Edge softness" labelSuffix={`${luminanceFeather}%`}>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={luminanceFeather}
+                  aria-label="Luminance edge softness"
+                  data-testid="photo-range-luminance-feather"
+                  className="accent-accent w-full"
+                  onChange={(event) => {
+                    setLuminanceFeather(Number(event.target.value));
+                  }}
+                />
+              </Field>
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid="photo-range-add-luminance"
+                disabled={full}
+                onClick={() => {
+                  void api.run(
+                    addRangeSelectionCommand(api.doc, {
+                      kind: 'luminance',
+                      min: luminanceMin / 100,
+                      max: luminanceMax / 100,
+                      feather: luminanceFeather / 100,
+                    }),
+                  );
+                }}
+              >
+                Select by luminance
+              </Button>
+            </fieldset>
+
+            <fieldset className="space-y-2" data-testid="photo-range-colour-fields">
+              <legend className="text-fg-muted text-xs font-medium">Colour match</legend>
+              <Field
+                label="Target colour"
+                hint="Pick any colour; the photograph is compared to it."
+              >
+                <input
+                  type="color"
+                  value={colour}
+                  aria-label="Selection colour"
+                  data-testid="photo-range-colour"
+                  className="border-line h-8 w-full cursor-pointer rounded-sm border bg-transparent"
+                  onChange={(event) => {
+                    setColour(event.target.value.toLowerCase());
+                  }}
+                />
+              </Field>
+              <Field label="Tolerance" labelSuffix={`±${tolerance}%`}>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={tolerance}
+                  aria-label="Colour tolerance"
+                  data-testid="photo-range-tolerance"
+                  className="accent-accent w-full"
+                  onChange={(event) => {
+                    setTolerance(Number(event.target.value));
+                  }}
+                />
+              </Field>
+              <Field label="Edge softness" labelSuffix={`${colourFeather}%`}>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={colourFeather}
+                  aria-label="Colour edge softness"
+                  data-testid="photo-range-colour-feather"
+                  className="accent-accent w-full"
+                  onChange={(event) => {
+                    setColourFeather(Number(event.target.value));
+                  }}
+                />
+              </Field>
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid="photo-range-add-colour"
+                disabled={full}
+                onClick={() => {
+                  void api.run(
+                    addRangeSelectionCommand(api.doc, {
+                      kind: 'colour',
+                      colour,
+                      tolerance: tolerance / 100,
+                      feather: colourFeather / 100,
+                    }),
+                  );
+                }}
+              >
+                Select by colour
+              </Button>
+            </fieldset>
+
+            {full ? (
+              <p className="text-fg-subtle text-xs">
+                {MAX_MASK_RANGES} ranges is the limit for one mask. Remove one to select again.
+              </p>
+            ) : null}
+          </div>
+        )}
+
+        {ranges.length > 0 ? (
+          <ul aria-label="Range selections" className="space-y-1.5">
+            {ranges.map((range, index) => (
+              <li
+                key={range.id}
+                className="border-line flex items-center justify-between gap-2 rounded-sm border px-2 py-1.5"
+                data-testid={`photo-range-row-${String(index)}`}
+              >
+                <span className="text-fg-muted text-xs">{describeRangeSelection(range)}</span>
+                <Button
+                  size="sm"
+                  variant="quiet"
+                  aria-label={`Remove range selection ${String(index + 1)}`}
+                  data-testid={`photo-range-remove-${String(index)}`}
+                  onClick={() => {
+                    void api.run(removeRangeSelectionCommand(api.doc, range.id));
+                  }}
+                >
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        <Button
+          size="sm"
+          variant="outline"
+          iconLeft={<Trash2 aria-hidden />}
+          data-testid="photo-range-clear"
+          disabled={ranges.length === 0}
+          onClick={() => {
+            void api.run(clearRangeSelectionsCommand(api.doc));
+          }}
+        >
+          Clear range selections
+        </Button>
       </div>
 
       <div className="border-line space-y-2.5 rounded-sm border p-3">

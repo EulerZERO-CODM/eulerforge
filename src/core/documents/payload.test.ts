@@ -153,6 +153,87 @@ describe('payload validation', () => {
     expect(forgeDocumentSchema.safeParse(invalid).success).toBe(false);
   });
 
+  it('accepts a mask whose selections are source-pixel ranges', () => {
+    const payload = defaultPhotoPayload();
+    const withRanges = {
+      ...document,
+      studioPayload: {
+        ...payload,
+        mask: {
+          strokes: [],
+          inverted: false,
+          ranges: [
+            { id: 'range-1', kind: 'luminance', min: 0.5, max: 1, feather: 0.2 },
+            { id: 'range-2', kind: 'colour', colour: '#aabbcc', tolerance: 0.15, feather: 0 },
+          ],
+        },
+      },
+    };
+    const parsed = forgeDocumentSchema.safeParse(withRanges);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('accepts a mask written before ranges existed and reads it as painted-only', () => {
+    const payload = defaultPhotoPayload();
+    const legacy = {
+      ...document,
+      studioPayload: {
+        ...payload,
+        mask: { strokes: [], inverted: true },
+      },
+    };
+    const parsed = forgeDocumentSchema.safeParse(legacy);
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    const mask = parsed.data.studioPayload;
+    if (mask?.kind !== 'photo') throw new Error('expected a photo payload');
+    expect(mask.mask?.ranges).toBeUndefined();
+  });
+
+  it('rejects range selections that cannot describe a region', () => {
+    const payload = defaultPhotoPayload();
+    const invalidColour = {
+      ...document,
+      studioPayload: {
+        ...payload,
+        mask: {
+          strokes: [],
+          inverted: false,
+          ranges: [
+            { id: 'range-1', kind: 'colour', colour: 'hsl(1,2,3)', tolerance: 0.1, feather: 0 },
+          ],
+        },
+      },
+    };
+    expect(forgeDocumentSchema.safeParse(invalidColour).success).toBe(false);
+
+    const backwards = {
+      ...document,
+      studioPayload: {
+        ...payload,
+        mask: {
+          strokes: [],
+          inverted: false,
+          ranges: [{ id: 'range-1', kind: 'luminance', min: 0.9, max: 0.1, feather: 0 }],
+        },
+      },
+    };
+    expect(forgeDocumentSchema.safeParse(backwards).success).toBe(false);
+
+    const tooFeathered = {
+      ...document,
+      studioPayload: {
+        ...payload,
+        mask: {
+          strokes: [],
+          inverted: false,
+          ranges: [{ id: 'range-1', kind: 'luminance', min: 0, max: 1, feather: 2 }],
+        },
+      },
+    };
+    expect(forgeDocumentSchema.safeParse(tooFeathered).success).toBe(false);
+  });
+
   it('rejects a video clip that points at a source shorter than its in-point', () => {
     const invalid = {
       ...document,

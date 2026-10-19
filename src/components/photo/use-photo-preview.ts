@@ -16,6 +16,7 @@ import {
   renderPhoto,
   type DecodedPhoto,
   type PhotoEngineId,
+  type PhotoImageSource,
 } from '../../lib/browser/photo-engine';
 import type { Result } from '../../core/result';
 
@@ -83,6 +84,11 @@ export type PhotoRenderState =
       readonly durationMs: number;
       readonly width: number;
       readonly height: number;
+      /**
+       * The decoded photograph at full resolution. The mask overlay evaluates range selections
+       * against this, exactly as the renderer does.
+       */
+      readonly source: PhotoImageSource;
     }
   | { readonly status: 'error'; readonly message: string; readonly detail: string | null };
 
@@ -106,6 +112,7 @@ type RenderResult = {
   readonly durationMs: number;
   readonly width: number;
   readonly height: number;
+  readonly source: PhotoImageSource;
 };
 
 type RenderFailure = {
@@ -181,6 +188,7 @@ export function usePhotoCanvas({
         durationMs: rendered.value.durationMs,
         width: size.width,
         height: size.height,
+        source: decoded.value.image,
       });
     })();
   }, [enabled, href, key, maxEdge, payload, showOriginal]);
@@ -199,6 +207,7 @@ export function usePhotoCanvas({
       durationMs: result.durationMs,
       width: result.width,
       height: result.height,
+      source: result.source,
     };
   }
   // A previous frame for the same image stays visible while the next one renders; a different

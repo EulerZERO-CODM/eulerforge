@@ -211,11 +211,53 @@ export type PhotoMaskStroke = {
   readonly fill: boolean;
 };
 
+export const PHOTO_RANGE_KINDS = ['luminance', 'colour'] as const;
+export type PhotoRangeKind = (typeof PHOTO_RANGE_KINDS)[number];
+
+/**
+ * A selection defined by the *source* pixels rather than by painting.
+ *
+ * Both kinds are evaluated against the unadjusted photograph, so changing an exposure slider cannot
+ * move the selection out from under the user. `feather` widens the falloff as a fraction of the
+ * range itself: 0 is a hard edge, 1 is as soft as the range allows.
+ */
+export type PhotoLuminanceRange = {
+  readonly id: string;
+  readonly kind: 'luminance';
+  /** Lower and upper bound on relative luminance, 0–1. */
+  readonly min: number;
+  readonly max: number;
+  readonly feather: number;
+};
+
+export type PhotoColourRange = {
+  readonly id: string;
+  readonly kind: 'colour';
+  /** Target colour, `#rrggbb`. */
+  readonly colour: string;
+  /** Distance from the target a pixel may be, 0–1 in normalised RGB. */
+  readonly tolerance: number;
+  readonly feather: number;
+};
+
+export type PhotoRangeSelection = PhotoLuminanceRange | PhotoColourRange;
+
 export type PhotoMask = {
   readonly strokes: readonly PhotoMaskStroke[];
-  /** When true the adjustment stack applies *outside* the painted area. */
+  /**
+   * Source-pixel selections. Optional because documents written before range selections existed
+   * carry no such key; absent means "no ranges", exactly like an empty list.
+   */
+  readonly ranges?: readonly PhotoRangeSelection[] | undefined;
+  /** When true the adjustment stack applies *outside* the selected area. */
   readonly inverted: boolean;
 };
+
+/** True when a mask covers anything at all — painted strokes or source-pixel ranges. */
+export function maskHasCoverage(mask: PhotoMask | null | undefined): boolean {
+  if (!mask) return false;
+  return mask.strokes.length > 0 || (mask.ranges?.length ?? 0) > 0;
+}
 
 export const RETOUCH_MODES = ['clone', 'heal'] as const;
 export type RetouchMode = (typeof RETOUCH_MODES)[number];
@@ -254,6 +296,7 @@ export type PhotoPayload = {
 export const MAX_PHOTO_ADJUSTMENTS = 32;
 export const MAX_MASK_STROKES = 200;
 export const MAX_MASK_POINTS = 2048;
+export const MAX_MASK_RANGES = 8;
 export const MAX_RETOUCH_STROKES = 100;
 /** Long edge of the embedded working copy. Larger imports are downscaled and reported. */
 export const MAX_PHOTO_WORKING_EDGE = 2048;

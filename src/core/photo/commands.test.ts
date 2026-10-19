@@ -12,6 +12,9 @@ import type { ForgeDocument } from '../documents/types';
 import { brand } from '../types/brand';
 import {
   addMaskStrokeCommand,
+  addRangeSelectionCommand,
+  clearRangeSelectionsCommand,
+  removeRangeSelectionCommand,
   addPhotoAdjustmentCommand,
   addRetouchStrokeCommand,
   clearMaskCommand,
@@ -27,7 +30,13 @@ import {
   undoMaskStrokeCommand,
   undoRetouchCommand,
 } from './commands';
-import type { PhotoAdjustment, PhotoPayload, PhotoSource } from '../documents/payload';
+import {
+  MAX_MASK_RANGES,
+  maskHasCoverage,
+  type PhotoAdjustment,
+  type PhotoPayload,
+  type PhotoSource,
+} from '../documents/payload';
 
 function photoDocument(): ForgeDocument {
   const created = createDocument(
@@ -309,5 +318,172 @@ describe('renderer choice', () => {
 
     const same = setPhotoEngineCommand(adjusted(document, gpu.value.patch), 'webgl2');
     expect(same.ok).toBe(false);
+  });
+});
+
+describe('range selections', () => {
+  function sourced(): ForgeDocument {
+    const document = photoDocument();
+    const command = setPhotoSourceCommand(document, SOURCE);
+    if (!command.ok) throw new Error(command.error.message);
+    return adjusted(document, command.value.patch);
+  }
+
+  it('adds a luminance range as one labelled, undoable change', () => {
+    const document = sourced();
+    const command = addRangeSelectionCommand(document, {
+      kind: 'luminance',
+      min: 0.6,
+      max: 1,
+      feather: 0.2,
+    });
+    expect(command.ok).toBe(true);
+    if (!command.ok) return;
+    expect(command.value.label).toBe('Select by luminance');
+    const next = adjusted(document, command.value.patch);
+    const mask = payloadOf(next).mask;
+    expect(mask?.ranges).toHaveLength(1);
+    expect(mask?.ranges?.[0]).toMatchObject({
+      kind: 'luminance',
+      min: 0.6,
+      max: 1,
+      feather: 0.2,
+    });
+    // The mask now has coverage even though nothing has been painted.
+    expect(maskHasCoverage(mask)).toBe(true);
+    expect(mask?.inverted).toBe(false);
+  });
+
+  it('adds a colour range, lower-casing the colour and clamping the tolerance', () => {
+    const document = sourced();
+    const command = addRangeSelectionCommand(document, {
+      kind: 'colour',
+      colour: '#AABBCC',
+      tolerance: 1.4,
+      feather: -2,
+    });
+    expect(command.ok).toBe(true);
+    if (!command.ok) return;
+    const range = payloadOf(adjusted(document, command.value.patch)).mask?.ranges?.[0];
+    expect(range).toMatchObject({ kind: 'colour', colour: '#aabbcc', tolerance: 1, feather: 0 });
+  });
+
+  it('refuses a range before a photograph is imported', () => {
+    const command = addRangeSelectionCommand(photoDocument(), {
+      kind: 'luminance',
+      min: 0,
+      max: 1,
+      feather: 0,
+    });
+    expect(command.ok).toBe(false);
+    if (!command.ok) expect(command.error.message).toContain('Import a photograph');
+  });
+
+  it('refuses a luminance window that ends before it starts, and a non-hex colour', () => {
+    const document = sourced();
+    const backwards = addRangeSelectionCommand(document, {
+      kind: 'luminance',
+      min: 0.8,
+      max: 0.2,
+      feather: 0,
+    });
+    expect(backwards.ok).toBe(false);
+    const badColour = addRangeSelectionCommand(document, {
+      kind: 'colour',
+      colour: 'tomato',
+      tolerance: 0.1,
+      feather: 0,
+    });
+    expect(badColour.ok).toBe(false);
+  });
+
+  it('limits the number of ranges a mask can hold', () => {
+    let document = sourced();
+    for (let index = 0; index < MAX_MASK_RANGES; index += 1) {
+      const command = addRangeSelectionCommand(document, {
+        kind: 'luminance',
+        min: index / 20,
+        max: index / 20 + 0.05,
+        feather: 0,
+      });
+      if (!command.ok) throw new Error(command.error.message);
+      document = adjusted(document, command.value.patch);
+    }
+    const extra = addRangeSelectionCommand(document, {
+      kind: 'luminance',
+      min: 0.9,
+      max: 1,
+      feather: 0,
+    });
+    expect(extra.ok).toBe(false);
+    if (!extra.ok) expect(extra.error.message).toContain('maximum number of ranges');
+  });
+
+  it('removes one range and clears them all, each as its own action', () => {
+    const document = sourced();
+    const first = addRangeSelectionCommand(document, {
+      kind: 'luminance',
+      min: 0,
+      max: 0.4,
+      feather: 0,
+    });
+    if (!first.ok) throw new Error(first.error.message);
+    const one = adjusted(document, first.value.patch);
+    const second = addRangeSelectionCommand(one, {
+      kind: 'colour',
+      colour: '#112233',
+      tolerance: 0.2,
+      feather: 0.1,
+    });
+    if (!second.ok) throw new Error(second.error.message);
+    const two = adjusted(one, second.value.patch);
+    const rangeId = payloadOf(two).mask?.ranges?.[0]?.id;
+    if (!rangeId) throw new Error('expected a range');
+
+    const removed = removeRangeSelectionCommand(two, rangeId);
+    expect(removed.ok).toBe(true);
+    if (!removed.ok) return;
+    expect(removed.value.label).toBe('Remove range selection');
+    expect(payloadOf(adjusted(two, removed.value.patch)).mask?.ranges).toHaveLength(1);
+
+    const cleared = clearRangeSelectionsCommand(two);
+    expect(cleared.ok).toBe(true);
+    if (!cleared.ok) return;
+    expect(cleared.value.label).toBe('Clear range selections');
+    expect(payloadOf(adjusted(two, cleared.value.patch)).mask?.ranges).toHaveLength(0);
+  });
+
+  it('clears painted strokes and ranges together, and says the mask is empty afterwards', () => {
+    const document = sourced();
+    const stroke = addMaskStrokeCommand(document, {
+      points: [{ x: 0.5, y: 0.5 }],
+      radius: 0.1,
+      hardness: 1,
+      erase: false,
+      fill: false,
+    });
+    if (!stroke.ok) throw new Error(stroke.error.message);
+    const painted = adjusted(document, stroke.value.patch);
+    const range = addRangeSelectionCommand(painted, {
+      kind: 'luminance',
+      min: 0.5,
+      max: 1,
+      feather: 0,
+    });
+    if (!range.ok) throw new Error(range.error.message);
+    const both = adjusted(painted, range.value.patch);
+
+    const cleared = clearMaskCommand(both);
+    expect(cleared.ok).toBe(true);
+    if (!cleared.ok) return;
+    const mask = payloadOf(adjusted(both, cleared.value.patch)).mask;
+    expect(mask?.strokes).toEqual([]);
+    expect(mask?.ranges).toEqual([]);
+    expect(clearMaskCommand(adjusted(both, cleared.value.patch)).ok).toBe(false);
+  });
+
+  it('removing a range that is not in the mask is refused rather than silently ignored', () => {
+    const command = removeRangeSelectionCommand(sourced(), 'range-missing');
+    expect(command.ok).toBe(false);
   });
 });

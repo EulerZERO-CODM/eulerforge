@@ -10,6 +10,7 @@ import { z } from 'zod';
 
 import {
   MAX_MASK_POINTS,
+  MAX_MASK_RANGES,
   MAX_MASK_STROKES,
   MAX_MOTION_DURATION,
   MAX_MOTION_FPS,
@@ -93,8 +94,32 @@ const maskStrokeSchema = z.object({
   fill: z.boolean(),
 });
 
+const photoRangeSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      id: z.string().min(1).max(80),
+      kind: z.literal('luminance'),
+      min: finite('min').min(0).max(1),
+      max: finite('max').min(0).max(1),
+      feather: finite('feather').min(0).max(1),
+    })
+    .refine((range) => range.min <= range.max, {
+      message: 'the luminance range must start at or below its end',
+      path: ['max'],
+    }),
+  z.object({
+    id: z.string().min(1).max(80),
+    kind: z.literal('colour'),
+    colour: hexColorSchema,
+    tolerance: finite('tolerance').min(0).max(1),
+    feather: finite('feather').min(0).max(1),
+  }),
+]);
+
 const photoMaskSchema = z.object({
   strokes: z.array(maskStrokeSchema).max(MAX_MASK_STROKES).readonly(),
+  // Optional so v5 documents written before range selections existed still validate.
+  ranges: z.array(photoRangeSchema).max(MAX_MASK_RANGES).readonly().optional(),
   inverted: z.boolean(),
 });
 

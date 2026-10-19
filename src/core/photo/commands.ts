@@ -8,11 +8,13 @@
 
 import type { ForgeDocument } from '../documents/types';
 import {
+  MAX_MASK_RANGES,
   MAX_MASK_STROKES,
   MAX_PHOTO_ADJUSTMENTS,
   MAX_RETOUCH_STROKES,
   PHOTO_ADJUSTMENT_INFO,
   createPayloadItemId,
+  maskHasCoverage,
   type PhotoPoint,
   type PhotoAdjustment,
   type PhotoAdjustmentKind,
@@ -20,6 +22,7 @@ import {
   type PhotoMask,
   type PhotoMaskStroke,
   type PhotoPayload,
+  type PhotoRangeSelection,
   type PhotoRetouchStroke,
   type PhotoSource,
   type RetouchMode,
@@ -282,10 +285,140 @@ export function clearMaskCommand(document: ForgeDocument): Result<SceneCommand> 
   const payload = photoPayload(document);
   if (!payload.ok) return payload;
   const mask = payload.value.mask;
-  if (!mask || mask.strokes.length === 0) {
+  if (!mask || !maskHasCoverage(mask)) {
     return err(forgeError('validation-failed', 'The mask is already empty.'));
   }
-  return withPayload(document, { ...payload.value, mask: { ...mask, strokes: [] } }, 'Clear mask');
+  return withPayload(
+    document,
+    { ...payload.value, mask: { ...mask, strokes: [], ranges: [] } },
+    'Clear mask',
+  );
+}
+
+/* --------------------------------------------------------------------------------------------- */
+/* Range selections                                                                               */
+/* --------------------------------------------------------------------------------------------- */
+
+export type RangeSelectionInput =
+  | {
+      readonly kind: 'luminance';
+      readonly min: number;
+      readonly max: number;
+      readonly feather: number;
+    }
+  | {
+      readonly kind: 'colour';
+      readonly colour: string;
+      readonly tolerance: number;
+      readonly feather: number;
+    };
+
+const HEX_COLOUR = /^#[0-9a-f]{6}$/i;
+
+/**
+ * Adds one source-pixel selection to the mask.
+ *
+ * The selection is stored, not rasterised: it is evaluated against the photograph every time it is
+ * needed, so it stays correct if the preview size changes and it can be removed without a bitmap to
+ * undo. Ranges and painted strokes combine as a union, and the mask's inversion applies to the union.
+ */
+export function addRangeSelectionCommand(
+  document: ForgeDocument,
+  input: RangeSelectionInput,
+): Result<SceneCommand> {
+  const payload = photoPayload(document);
+  if (!payload.ok) return payload;
+  if (payload.value.source === null) {
+    return err(
+      forgeError('validation-failed', 'Import a photograph before selecting part of it.', {
+        detail: 'A range selection is measured from the photograph’s own pixels.',
+        retryable: false,
+      }),
+    );
+  }
+  const mask = payload.value.mask ?? { strokes: [], inverted: false };
+  const ranges = mask.ranges ?? [];
+  if (ranges.length >= MAX_MASK_RANGES) {
+    return err(
+      forgeError('validation-failed', 'This mask already holds the maximum number of ranges.', {
+        detail: `At most ${String(MAX_MASK_RANGES)} range selections are kept per mask.`,
+        retryable: false,
+      }),
+    );
+  }
+
+  const feather = Math.min(1, Math.max(0, input.feather));
+  let range: PhotoRangeSelection;
+  if (input.kind === 'luminance') {
+    const min = Math.min(1, Math.max(0, input.min));
+    const max = Math.min(1, Math.max(0, input.max));
+    if (!(min <= max)) {
+      return err(
+        forgeError('validation-failed', 'The luminance range ends before it starts.', {
+          detail: 'Set the lower bound at or below the upper bound.',
+          retryable: false,
+        }),
+      );
+    }
+    range = { id: createPayloadItemId('range'), kind: 'luminance', min, max, feather };
+  } else {
+    if (!HEX_COLOUR.test(input.colour)) {
+      return err(
+        forgeError('validation-failed', 'A colour selection needs a six-digit hex colour.', {
+          retryable: false,
+        }),
+      );
+    }
+    range = {
+      id: createPayloadItemId('range'),
+      kind: 'colour',
+      colour: input.colour.toLowerCase(),
+      tolerance: Math.min(1, Math.max(0, input.tolerance)),
+      feather,
+    };
+  }
+
+  return withPayload(
+    document,
+    { ...payload.value, mask: { ...mask, ranges: [...ranges, range] } },
+    range.kind === 'luminance' ? 'Select by luminance' : 'Select by colour',
+  );
+}
+
+export function removeRangeSelectionCommand(
+  document: ForgeDocument,
+  id: string,
+): Result<SceneCommand> {
+  const payload = photoPayload(document);
+  if (!payload.ok) return payload;
+  const mask = payload.value.mask;
+  const ranges = mask?.ranges ?? [];
+  if (!ranges.some((range) => range.id === id)) {
+    return err(forgeError('validation-failed', 'That range selection is not in this mask.'));
+  }
+  return withPayload(
+    document,
+    {
+      ...payload.value,
+      mask: { ...(mask as PhotoMask), ranges: ranges.filter((range) => range.id !== id) },
+    },
+    'Remove range selection',
+  );
+}
+
+export function clearRangeSelectionsCommand(document: ForgeDocument): Result<SceneCommand> {
+  const payload = photoPayload(document);
+  if (!payload.ok) return payload;
+  const mask = payload.value.mask;
+  const ranges = mask?.ranges ?? [];
+  if (ranges.length === 0) {
+    return err(forgeError('validation-failed', 'This mask has no range selections.'));
+  }
+  return withPayload(
+    document,
+    { ...payload.value, mask: { ...(mask as PhotoMask), ranges: [] } },
+    'Clear range selections',
+  );
 }
 
 export function setMaskInvertedCommand(
@@ -390,6 +523,6 @@ export function photoHasEdits(payload: PhotoPayload): boolean {
   return (
     payload.adjustments.some((adjustment) => adjustment.enabled && adjustment.value !== 0) ||
     payload.retouch.length > 0 ||
-    (payload.mask?.strokes.length ?? 0) > 0
+    maskHasCoverage(payload.mask)
   );
 }

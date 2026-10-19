@@ -16,7 +16,7 @@ import type { ForgeDocument } from './types';
 import { defaultStudioPayload } from './payload';
 import { SCREEN_DPI } from './units';
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 export type Migration = {
   readonly from: number;
@@ -139,6 +139,21 @@ const migrateV4ToV5: Migration = {
 };
 
 /**
+ * v5 → v6: a photo mask may carry source-pixel range selections.
+ *
+ * The key is optional, so a v5 mask keeps meaning exactly what it did: painted strokes only. The
+ * version is bumped for the usual reason (ADR-0005): a v6 writer can produce a document a v5 build
+ * would open with the ranges silently stripped.
+ */
+const migrateV5ToV6: Migration = {
+  from: 5,
+  to: 6,
+  description:
+    'Photo masks may carry luminance or colour range selections; existing masks are unchanged.',
+  migrate: (raw) => ({ ...raw, schemaVersion: 6 }),
+};
+
+/**
  * v3 → v4: documents gained a studio payload for Photo, Motion and Video.
  *
  * Existing projects are design canvases and vector artboards, which carry no payload, so the honest
@@ -163,6 +178,7 @@ export const MIGRATIONS: readonly Migration[] = [
   migrateV2ToV3,
   migrateV3ToV4,
   migrateV4ToV5,
+  migrateV5ToV6,
 ];
 
 export function readSchemaVersion(raw: unknown): number | undefined {
