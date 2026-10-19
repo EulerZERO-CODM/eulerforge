@@ -578,6 +578,28 @@ export class PerfReport {
   }
 }
 
+/**
+ * Frame cadence while nothing happens: the benchmark's control group.
+ *
+ * Every drag number is a gap between animation frames. That gap can grow because the *editing* is
+ * slow, or because the machine simply cannot produce frames — a shared two-core runner with the
+ * server, the test driver and the browser process on the same cores can miss deadline after
+ * deadline with a page that is doing nothing at all. Measuring the idle cadence in the same page,
+ * at the same CPU throttle, immediately before the drags gives the drag numbers a denominator: a
+ * drag cannot be more responsive than the frame source feeding it, and a run whose idle cadence is
+ * already far from a display rate is reporting the environment, not the editor.
+ *
+ * It is reported, never gated. A slow idle cadence does not excuse a slow drag; it stops the report
+ * from blaming the editor for something it does not control.
+ */
+export async function measureIdleCadence(page: Page, durationMs: number): Promise<FrameStats> {
+  await page.evaluate(() => {
+    window.__forgePerf.startFrames();
+  });
+  await page.waitForTimeout(durationMs);
+  return page.evaluate(() => window.__forgePerf.stopFrames());
+}
+
 /** Drains the long animation frames collected since the last drain. */
 export async function takeLongFrames(page: Page): Promise<readonly LongFrame[]> {
   return page.evaluate(() => window.__forgePerf.takeLongFrames());

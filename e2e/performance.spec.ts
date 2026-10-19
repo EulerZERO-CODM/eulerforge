@@ -44,6 +44,7 @@ import {
   describeDistribution,
   installPerfRecorder,
   measureFrames,
+  measureIdleCadence,
   measureInteraction,
   percentile,
   resetPerfRecorder,
@@ -1257,6 +1258,17 @@ test.describe('a thirty-layer document in a real browser', () => {
 
     const broken = new Set<string>();
     try {
+      /* Controls, at the same throttle the gate uses. The idle cadence says how fast this machine
+         can produce frames with the workspace open and nobody touching it; the interaction control
+         says how long the browser takes to show a change that costs the application nothing (a
+         window resize, which does not touch the document). Without them a red run cannot separate
+         the editor's cost from the environment's, and with them it does not have to guess. */
+      await throttleCpu(page, THROTTLE_RATE);
+      const idle = await measureIdleCadence(page, 1_000);
+      report.note(
+        `Control — idle frame cadence at the gate's ${String(THROTTLE_RATE)}x throttle, workspace open, no interaction: ${String(idle.frames)} frames in 1 s, p50 ${idle.p50.toFixed(1)} ms, p95 ${idle.p95.toFixed(1)} ms, worst ${idle.max.toFixed(1)} ms, ${String(idle.over50)} gaps over 50 ms. A drag cannot paint faster than this frame source.`,
+      );
+      await throttleCpu(page, 1);
       await runPhase(page, 'throttled', report, broken);
       await runPhase(page, 'unthrottled', report, broken);
     } finally {
