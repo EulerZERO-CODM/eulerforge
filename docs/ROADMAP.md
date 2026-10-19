@@ -181,12 +181,14 @@ agree within 2/255 per channel, and a browser that refuses WebGL2 falls back and
 Photo Studio imports PNG, JPEG and WebP into a working copy capped at 2048 px and embedded in the
 project, keeps the source pixels untouched behind an ordered twelve-entry adjustment stack (bypass,
 reorder, remove, all undoable), paints brush/lasso/erase masks with a hardness feather and inversion,
-retouches with clone and heal, autosaves, reopens, and exports real PNG, JPEG or WebP bytes from the
-full stored copy. The browser spec downloads the PNG, re-imports it and asserts its pixels.
+retouches with clone and heal, and selects pixels by luminance or colour — up to eight ranges per
+mask, measured from the unadjusted source and unioned with painted strokes before inversion
+(`src/core/photo/range.ts`, ADR-0029). Autosave, reopen and export are covered by the browser spec,
+which downloads the PNG, re-imports it and asserts its pixels.
 
-Still missing, and therefore still labelled partial or planned: range selections (by luminance,
-colour or subject), multiple image layers, blend modes, curves, EXIF orientation, ICC/gamma-aware
-output, tiling, and the roadmap's 12 MP / 16 ms measurement — the working copy cap means a 12 MP
+Still missing, and therefore still labelled partial or planned: subject selection and subtractive
+ranges, multiple image layers, blend modes, curves, EXIF orientation, ICC/gamma-aware output, tiling,
+and the roadmap's 12 MP / 16 ms measurement — the working copy cap means a 12 MP
 document never reaches the renderer, and CI renders through SwiftShader rather than reference GPU
 hardware. Preview renders are capped at 1280 px so interaction stays responsive; export re-renders
 once at the stored size.

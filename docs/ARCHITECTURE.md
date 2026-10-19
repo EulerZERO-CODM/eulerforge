@@ -215,9 +215,16 @@ file input or drop (components/photo/photo-import-panel.tsx)
 components/photo/*  →  core/photo/commands.ts  →  WorkspaceApi.run → the same DocumentSession
         ↓
 core/photo/pipeline.ts (applyPhotoPipeline) is the definition of every adjustment
+core/photo/range.ts evaluates stored luminance/colour ranges against the source bytes  (ADR-0029)
         ↓ GPU: one fragment pass per adjustment      CPU: the same function, per pixel
 lib/browser/photo-engine.ts renderPhoto → canvas   → export re-renders at the stored size
 ```
+
+The mask is rasterised to one strength byte per pixel before either renderer sees it: painted
+strokes and range selections are unioned, then `inverted` is applied once, and these consumers
+cannot tell which half of the mask came from which source. Ranges store parameters rather than a
+bitmap, so they re-evaluate deterministically at preview and export sizes and are part of document
+history like any other edit.
 
 Three boundaries hold here too. The payload is document state and is validated by the same Zod
 schema as the rest of the document, so a photo project is saved, migrated, reopened and exported

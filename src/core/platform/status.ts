@@ -397,14 +397,16 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     area: 'studios',
     label: 'Masking and retouching',
     description:
-      'Brush, lasso and erase mask strokes with per-stroke radius and hardness, inversion and clearing, plus a clone stamp with a sampled source offset and a heal brush that blends towards a blurred local copy. Strokes are normalised and serialisable, so the mask survives save and reload.',
+      'Brush, lasso and erase mask strokes with per-stroke radius and hardness, plus up to eight luminance or colour range selections measured from the source pixels. Strokes and ranges union into one strength map before inversion, with clearing and clearing-everything available, plus a clone stamp with a sampled source offset and a heal brush that blends towards a blurred local copy. Everything is normalised and serialisable, so the mask survives save and reload.',
     status: 'partial',
     verification: [
       'src/core/photo/commands.test.ts',
+      'src/core/photo/range.test.ts',
+      'src/core/photo/range.perf.test.ts',
       'src/components/photo/photo-workspace.test.tsx',
-      'e2e/photo.spec.ts (a masked stack only changes the painted area, inversion covers the rest, heal leaves the edges untouched)',
+      'e2e/photo.spec.ts (a painted or range-selected stack only changes the selected area, inversion covers the rest, heal leaves the edges untouched)',
     ],
-    gap: 'Range selections (select by luminance, colour or subject) are not implemented; the mask is painted. Mask strokes are single-channel strength only, so there is no feather-by-region or subject refinement. The clone source offset is a fixed -10% of the frame unless re-sampled with Alt-click.',
+    gap: 'Subject/foreground selection is not implemented: ranges select by luminance or colour only. Ranges are additive (no subtractive range or per-range inversion), they are evaluated on the CPU even when the stack runs on the GPU, and a feathered edge is an 8-bit strength map whose banding has not been inspected on reference display hardware. The clone source offset is a fixed -10% of the frame unless re-sampled with Alt-click.',
   },
   {
     id: 'photo.export',

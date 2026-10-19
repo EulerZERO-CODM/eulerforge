@@ -158,7 +158,7 @@ export const PHOTO_STUDIO: StudioDefinition = {
       label: 'Selections and masks',
       status: 'available',
       detail:
-        'Brush, lasso and erase strokes with a hardness edge and mask inversion, drawn with the pointer or from the keyboard.',
+        'Brush, lasso and erase strokes with a hardness edge and mask inversion, drawn with the pointer or from the keyboard, plus up to eight luminance or colour range selections measured from the source pixels.',
     },
     {
       id: 'retouch.heal',

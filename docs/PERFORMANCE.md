@@ -541,3 +541,21 @@ The GPU comparison is a correctness check, not a timing check: `e2e/photo.spec.t
 twelve-swatch chart through both renderers and requires the pixels to agree within 2/255. CI's
 Chromium runs WebGL2 through SwiftShader (software), so any timing taken there would describe the
 sandbox rather than a GPU.
+
+### 9.1 Range-selection evaluation
+
+Luminance and colour range selections are evaluated on the CPU, even when the adjustment stack runs
+on the GPU, because they read the source pixels. The cost is linear in pixels × ranges, so the budget
+is stated per range and at the document's eight-range limit, over the same 1280 × 853 preview size.
+
+- Benchmark: `src/core/photo/range.perf.test.ts` (Vitest, Node)
+- Workload: a deterministic source buffer, a half-painted mask and one feathered luminance range;
+  then eight mixed ranges. One warm-up pass, then three measured passes.
+- Thresholds, fixed before the first run: one range **≤ 150 ms median / 400 ms worst**; eight ranges
+  **≤ 900 ms median / 2000 ms worst**; and eight ranges must cost less than 20× one range, which
+  catches preparing a range per pixel instead of once per render.
+- Measured in this sandbox: **≈9–16 ms median** for one range and **≈43–54 ms** for eight ranges. The
+  test prints both numbers, so a CI log carries the measurement next to the assertion.
+
+`rasteriseMask` draws painted strokes on a canvas first and then unions the ranges in; range
+preparation (parsing a hex colour, computing a falloff width) happens once per render, not per pixel.

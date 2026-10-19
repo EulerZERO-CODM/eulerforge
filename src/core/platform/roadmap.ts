@@ -403,7 +403,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
     id: 'phase-4',
     name: 'Phase 4 — Raster engine and Photo Studio',
     summary:
-      'GPU raster processing with a reference CPU renderer, a non-destructive adjustment stack, painted masks and retouching, and the Photo Studio workspace. Shipped; range selections, tiling and the unmeasured 12 MP target keep the phase open.',
+      'GPU raster processing with a reference CPU renderer, a non-destructive adjustment stack, painted masks and retouching, and the Photo Studio workspace. Shipped; subject selection, tiling and the unmeasured 12 MP target keep the phase open.',
     status: 'in-progress',
     items: [
       {
@@ -447,7 +447,8 @@ export const ROADMAP: readonly RoadmapPhase[] = [
       {
         id: 'p4.selection-mask',
         title: 'Selections, masks and retouching',
-        description: 'Brush, lasso and range selections; feathered masks; clone and heal tools.',
+        description:
+          'Brush, lasso, erase and luminance/colour range selections; feathered masks; clone and heal tools.',
         status: 'partial',
         dependsOn: ['p4.adjustments'],
         completionCriteria: [
@@ -456,10 +457,12 @@ export const ROADMAP: readonly RoadmapPhase[] = [
         ],
         evidence: [
           'src/core/photo/commands.test.ts',
+          'src/core/photo/range.test.ts',
+          'src/core/photo/range.perf.test.ts',
           'src/components/photo/photo-workspace.test.tsx',
           'e2e/photo.spec.ts',
         ],
-        gap: 'Brush, lasso and erase masks with a hardness feather survive reload, and clone/heal retouch works, but range selections (by luminance, colour or subject) are not implemented. Banding at 100% zoom was not inspected on real display hardware; the mask is an 8-bit strength map, so a feathered edge has at most 256 levels.',
+        gap: 'Brush, lasso and erase masks with a hardness feather survive reload, and luminance/colour range selections union with them before inversion, so "selections survive reload" is met. Banding at 100% zoom was not inspected on real display hardware; the mask is an 8-bit strength map, so a feathered edge has at most 256 levels. Subject selection and subtractive ranges are not implemented.',
         capabilityIds: ['photo.masks'],
       },
       {

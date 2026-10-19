@@ -951,3 +951,56 @@ path document loads unchanged apart from its version stamp.
   name a single colour for any consumer that genuinely needs one, and it is documented and tested as
   a stand-in — the renderers never use it, because drawing a gradient as its midpoint would be a lie
   about the file.
+
+## ADR-0029 — Range selections are stored as parameters and evaluated from the source pixels
+
+**Context.** Photo masks had only painted strokes: a brush, a lasso and an eraser. The remaining
+obvious way to describe a region is the one every raster editor offers — "select everything this
+bright" or "select everything this colour" — and the roadmap listed it as the gap that kept
+`p4.selection-mask` partial.
+
+**Decision.** A mask may carry up to eight *range selections* alongside its strokes. A range stores
+its parameters, never a bitmap:
+
+- luminance: `min` and `max` in 0–1 of relative luminance (Rec. 709 weights over sRGB bytes);
+- colour: a `#rrggbb` target and a `tolerance` in 0–1, measured as the root-mean-square distance in
+  normalised RGB;
+- both: a `feather` in 0–1 that widens the edge with a smoothstep, so a feathered range has a
+  continuous falloff rather than a 1-pixel step.
+
+Ranges and strokes combine with `max` into the same one-byte-per-pixel strength map that
+`rasteriseMask` already produced, and `inverted` is applied once to that union. The renderers are
+untouched: the Canvas 2D path, the WebGL mask pass and the CPU pipeline all consume the finished
+byte map exactly as before. Range evaluation lives in `src/core/photo/range.ts` (framework-free) and
+is called from `src/lib/browser/photo-engine.ts`, which owns the only DOM work — drawing the decoded
+photograph into an offscreen canvas to read its bytes.
+
+**Why parameters rather than a bitmap.** A stored bitmap would have to be re-derived whenever the
+preview size, the working copy or the selection's definition changed, would need its own history
+entries, and would make "remove this range" impossible to express without another mask layer. Stored
+parameters are resolution-independent, survive save/reload by construction, cost a few hundred bytes,
+and can be re-evaluated deterministically — `src/core/photo/range.test.ts` pins the arithmetic, and
+`src/core/photo/range.perf.test.ts` pins the cost (one range over 1.09 MP: ~9 ms median here; eight
+ranges: ~43 ms).
+
+**Measured from the source, never the preview.** A range is evaluated against the *unadjusted*
+source bytes, so dragging an exposure slider cannot make the selection crawl, and the preview and
+the export select the same pixels even though they render at different sizes. This mirrors the
+existing rule for the mask as a whole: the stack applies where the mask says, and the mask describes
+the photograph.
+
+**Honest limits.**
+- There is no subject/foreground detection. "Select by subject" would be a different promise (a model
+  or a segmentation algorithm), and it is not claimed.
+- Ranges are evaluated on the CPU even when the stack runs on the GPU; the readback happens only when
+  a range exists, but on a large export it is a real cost, hence the documented eight-range limit.
+- A feathered edge is an 8-bit strength map, so at most 256 levels; banding has not been inspected on
+  reference display hardware.
+- The selection is a union of *additive* ranges; there is no subtractive range or per-range inversion.
+  Inverting the whole mask remains the way to reverse the union.
+
+**Why the schema version bumps to 6.** ADR-0005 requires a bump for every additive schema change,
+because a v5 build reading a v6 document would strip `ranges` while reporting a clean load. The
+v5 → v6 migration rewrites nothing: a mask with no `ranges` keeps meaning exactly what it did, and
+`src/core/documents/migrations.test.ts` and `payload.test.ts` both prove that a v5 mask loads and is
+read as painted-only.
