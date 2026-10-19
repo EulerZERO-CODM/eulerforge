@@ -79,6 +79,12 @@ async function createVideoDocument(page: Page, title = 'Browser timeline'): Prom
  *
  * The picture changes over time — a moving bar over a shifting hue — so a frame at 0.2 s and a frame
  * at 0.8 s are visibly different, which is what makes "the preview shows the right moment" testable.
+ *
+ * Frames are pushed explicitly through a manual capture stream rather than sampled on
+ * `requestAnimationFrame`. An automated page may throttle animation frames, and a take that never
+ * draws is a valid but frameless WebM: the studio then has nothing to decode and the failure looks
+ * like a preview bug. A fixed loop with one `requestFrame()` per picture makes the fixture's content
+ * independent of the runner's frame scheduling while still exercising a real MediaRecorder.
  */
 async function recordFixtureWebm(page: Page): Promise<Buffer> {
   const base64 = await page.evaluate(async () => {
@@ -87,7 +93,10 @@ async function recordFixtureWebm(page: Page): Promise<Buffer> {
     canvas.height = 90;
     const context = canvas.getContext('2d');
     if (!context) throw new Error('no 2d context');
-    const stream = canvas.captureStream(15);
+    // A frame rate of 0 means "only the frames requested explicitly are captured".
+    const stream = canvas.captureStream(0);
+    const track = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined;
+    if (!track) throw new Error('the canvas did not expose a capture track');
     const chunks: Blob[] = [];
     const recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp8' });
     recorder.ondataavailable = (event) => {
@@ -99,24 +108,27 @@ async function recordFixtureWebm(page: Page): Promise<Buffer> {
       };
     });
     recorder.start(100);
-    const started = performance.now();
-    await new Promise<void>((resolve) => {
-      const tick = (): void => {
-        const elapsed = (performance.now() - started) / 1000;
-        context.fillStyle = '#101820';
-        context.fillRect(0, 0, 160, 90);
-        context.fillStyle = `hsl(${String((elapsed * 320) % 360)} 85% 55%)`;
-        context.fillRect(0, 0, 60, 90);
-        context.fillStyle = '#ffffff';
-        context.fillRect(8 + ((elapsed * 120) % 120), 30, 22, 22);
-        if (elapsed < 1.1) requestAnimationFrame(tick);
-        else resolve();
-      };
-      tick();
-    });
+    const draw = (elapsed: number): void => {
+      context.fillStyle = '#101820';
+      context.fillRect(0, 0, 160, 90);
+      context.fillStyle = `hsl(${String((elapsed * 320) % 360)} 85% 55%)`;
+      context.fillRect(0, 0, 60, 90);
+      context.fillStyle = '#ffffff';
+      context.fillRect(8 + ((elapsed * 120) % 120), 30, 22, 22);
+    };
+    // 40 pictures at a nominal 30 fps: past the 1 s the title test seeks to, and well past the 0.8 s
+    // the scrub test reads and the 0.6 s the export test renders, with wall-clock timestamps spaced
+    // by the short wait below.
+    for (let index = 0; index <= 39; index += 1) {
+      draw(index / 30);
+      track.requestFrame();
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 30);
+      });
+    }
     recorder.stop();
     await stopped;
-    for (const track of stream.getTracks()) track.stop();
+    for (const streamTrack of stream.getTracks()) streamTrack.stop();
     const blob = new Blob(chunks, { type: 'video/webm' });
     const bytes = new Uint8Array(await blob.arrayBuffer());
     let binary = '';
@@ -270,7 +282,13 @@ test.describe('Video Studio in a real browser', () => {
     await importClip(page);
 
     await expect(page.getByTestId('video-import-report')).toContainText('clip.webm');
-    await expect(page.getByTestId('video-import-report')).toContainText('1.0');
+    // The take is recorded in real time, so its exact length moves with the runner. What the report
+    // must show is the length the browser decoded from the file — a plausible positive number for
+    // the roughly one-second take, not a hard-coded caption.
+    const report = await page.getByTestId('video-import-report').textContent();
+    const reportedDuration = Number(/· ([\d.]+) s ·/.exec(report ?? '')?.[1]);
+    expect(reportedDuration).toBeGreaterThan(1.05);
+    expect(reportedDuration).toBeLessThan(1.4);
     const withMedia = await videoDocument(page);
     expect(withMedia.studioPayload?.media.map((media) => media.name)).toEqual(['clip.webm']);
     expect(withMedia.studioPayload?.media[0]?.duration).toBeGreaterThan(0.5);

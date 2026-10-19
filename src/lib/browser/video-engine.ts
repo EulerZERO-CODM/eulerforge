@@ -38,7 +38,15 @@ export type MediaElementLike = HTMLVideoElement | HTMLAudioElement;
 export type MediaLoader = (mediaId: string) => Promise<Result<Blob | null>>;
 
 const SEEK_TIMEOUT_MS = 8_000;
-const METADATA_TIMEOUT_MS = 15_000;
+/**
+ * How long an element may take to reach `HAVE_CURRENT_DATA`.
+ *
+ * Waiting for `loadedmetadata` alone is not enough to paint: metadata gives dimensions and duration
+ * but no decoded frame, so a seek issued right after it has nothing to show and, when the element is
+ * already at the requested time, does not even start one. On a busy machine that turned a slow first
+ * decode into a permanently black preview. `loadeddata` is the first state that can be drawn.
+ */
+const READY_TIMEOUT_MS = 15_000;
 
 function waitFor(
   target: EventTarget,
@@ -81,7 +89,7 @@ export class VideoMediaPool {
     return this.elements.get(mediaId) ?? null;
   }
 
-  /** Creates the element for a media file if it does not exist yet, and waits for metadata. */
+  /** Creates the element for a media file if it does not exist yet, and waits for a drawable frame. */
   ensure(media: VideoMedia): Promise<Result<MediaElementLike>> {
     const existing = this.elements.get(media.id);
     if (existing) return Promise.resolve(ok(existing));
@@ -106,12 +114,12 @@ export class VideoMediaPool {
       element.muted = false;
       element.setAttribute('playsinline', '');
       element.src = url;
-      const ready = await waitFor(element, ['loadedmetadata', 'canplay'], METADATA_TIMEOUT_MS);
+      const ready = await waitFor(element, ['loadeddata', 'canplay'], READY_TIMEOUT_MS);
       if (!ready) {
         URL.revokeObjectURL(url);
         return err(
           forgeError('unsupported', `“${media.name}” could not be decoded again.`, {
-            detail: 'The browser refused this file on a second load. Re-import it.',
+            detail: 'The browser refused to draw a frame from this file. Re-import it.',
             retryable: false,
           }),
         );
@@ -134,6 +142,15 @@ export class VideoMediaPool {
     if (!element) return false;
     const target = Math.max(0, time);
     if (Math.abs(element.currentTime - target) < 0.001 && element.readyState >= 2) return true;
+
+    // An element that only has metadata cannot paint and, when it is already at the requested time
+    // (the common case is 0), assigning `currentTime` is not a seek at all: no `seeked` event is
+    // fired, so waiting for one burned the whole timeout. Wait for data first instead.
+    if (element.readyState < 2) {
+      const ready = await waitFor(element, ['loadeddata', 'canplay'], SEEK_TIMEOUT_MS);
+      if (!ready) return false;
+      if (Math.abs(element.currentTime - target) < 0.001) return true;
+    }
 
     const seeked = waitFor(element, ['seeked'], SEEK_TIMEOUT_MS);
     try {
