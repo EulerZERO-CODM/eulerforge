@@ -48,6 +48,44 @@ const SEEK_TIMEOUT_MS = 8_000;
  */
 const READY_TIMEOUT_MS = 15_000;
 
+/**
+ * How long a seek may wait for the browser to present the frame it landed on.
+ *
+ * The wait is an improvement, never a failure: if no frame callback arrives (Firefox has no
+ * `requestVideoFrameCallback`) the seek still completes and the canvas is painted with whatever the
+ * browser holds, which is what happened before this wait existed.
+ */
+const PRESENT_TIMEOUT_MS = 2_000;
+
+type FrameCallbackElement = MediaElementLike & {
+  requestVideoFrameCallback?: (callback: () => void) => number;
+};
+
+/**
+ * Waits until the decoder has presented the frame the seek landed on.
+ *
+ * `seeked` means the seek algorithm finished, not that the new picture has reached the compositor:
+ * `drawImage` immediately afterwards can still copy the previous frame. On an idle machine that
+ * window is almost never missed; on a loaded one it is, and an exported frame then disagrees with
+ * the preview at the same timestamp. The frame callback fires when a frame is actually presented,
+ * so waiting for it makes the exported PNG the frame the preview shows.
+ */
+function waitForPresentedFrame(element: MediaElementLike): Promise<void> {
+  const video = element as FrameCallbackElement;
+  if (typeof video.requestVideoFrameCallback !== 'function') return Promise.resolve();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, PRESENT_TIMEOUT_MS);
+    video.requestVideoFrameCallback?.(finish);
+  });
+}
+
 function waitFor(
   target: EventTarget,
   events: readonly string[],
@@ -159,7 +197,9 @@ export class VideoMediaPool {
       return false;
     }
     const reached = await seeked;
-    return reached && element.readyState >= 2;
+    if (!reached || element.readyState < 2) return false;
+    await waitForPresentedFrame(element);
+    return true;
   }
 
   /** Seconds of the element that are buffered ahead of the playhead, for the resource readout. */
