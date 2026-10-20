@@ -75,21 +75,35 @@ export type Authenticated = {
 };
 
 /**
- * Resolves the session cookie to an account, or `null`.
+ * What a request's credentials amount to.
  *
- * A malformed cookie never reaches the store: it is not a token shape, so it cannot be a session. A
- * missing or expired session is also `null` — callers answer 401.
+ * "Nobody is signed in" and "this deployment cannot do accounts at all" are different answers, and
+ * collapsing them into `null` made a serverless deployment tell a visitor to *sign in* to an
+ * endpoint that can never accept a sign-in. Callers answer 401 for `anonymous` and 503 for
+ * `unavailable`.
  */
-export async function requireAccount(request: Request): Promise<Authenticated | null> {
-  const token = readCookie(request, SESSION_COOKIE);
-  if (token === null || !looksLikeToken(token)) return null;
+export type AccountLookup =
+  | { readonly kind: 'session'; readonly session: Authenticated }
+  | { readonly kind: 'anonymous' }
+  | { readonly kind: 'unavailable'; readonly message: string };
+
+/**
+ * Resolves the session cookie to an account.
+ *
+ * A malformed cookie never reaches the store: it is not a token shape, so it cannot be a session.
+ * A missing or expired session is `anonymous`. A store that cannot be opened is `unavailable`, with
+ * the operator-facing sentence the caller returns unchanged.
+ */
+export async function requireAccount(request: Request): Promise<AccountLookup> {
   const storeResult = await getStore();
-  if (!storeResult.ok) return null;
+  if (!storeResult.ok) return { kind: 'unavailable', message: storeResult.error.message };
+  const token = readCookie(request, SESSION_COOKIE);
+  if (token === null || !looksLikeToken(token)) return { kind: 'anonymous' };
   const store = storeResult.value;
   const tokenHash = hashToken(token);
   const session = await store.resolveSession(tokenHash);
-  if (!session.ok || session.value === null) return null;
-  return { account: session.value, store, tokenHash };
+  if (!session.ok || session.value === null) return { kind: 'anonymous' };
+  return { kind: 'session', session: { account: session.value, store, tokenHash } };
 }
 
 export async function currentSession(request: Request): Promise<{

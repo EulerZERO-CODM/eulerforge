@@ -313,6 +313,10 @@ Four rules hold the boundary:
    downloaded document is migrated and validated before it is stored locally.
 4. **Ownership is enforced in the store, not the UI.** Another account's document, share or session
    resolves to `not-found`; the API does not confirm that an id exists.
+5. **"Nobody is signed in" and "accounts cannot work here" are different answers.** `requireAccount`
+   returns a session, `anonymous` or `unavailable`; the first two answer `401`, the third answers
+   `503` with the operator's sentence. A serverless deployment that refuses its store therefore never
+   tells a visitor to sign in to something that can never accept a sign-in.
 
 ### The assistant is a planner, an executor and a boundary
 

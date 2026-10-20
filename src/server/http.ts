@@ -223,6 +223,14 @@ export function crossOriginRequest(request: Request): boolean {
   }
 }
 
+/**
+ * The client address a rate limiter buckets on, for per-client throttling.
+ *
+ * A forwarded address is only as trustworthy as the proxy that set it. Behind a reverse proxy that
+ * overwrites `X-Forwarded-For` it identifies the client; on a server exposed directly it is whatever
+ * the client chose to send, so it must never be the *only* dimension a security control relies on —
+ * which is why sign-in also has an address-independent per-email bucket.
+ */
 export function clientKey(request: Request): string {
   const forwarded = request.headers.get('x-forwarded-for');
   if (forwarded !== null) {
@@ -277,8 +285,26 @@ export class RateLimiter {
   }
 }
 
-/** Ten failed attempts per ten minutes per client+email. */
+/**
+ * Ten failed attempts per ten minutes per client+email.
+ *
+ * `clientKey` comes from a forwarding header when one is present, and a client can write that header
+ * itself. This limiter is therefore the first line, not the last: it stops a loop from one address,
+ * including a loop that rotates the header's *port* or a proxy that rewrites it, but it cannot by
+ * itself stop a loop that invents a new address each time.
+ */
 export const loginLimiter = new RateLimiter(10, 10 * 60_000);
+
+/**
+ * Twenty failed attempts per ten minutes per **email address**, whichever client they come from.
+ *
+ * This bucket has no client dimension, so no header can buy another attempt against one account. It
+ * is deliberately wider than the per-client limit so ordinary behaviour is governed by that one.
+ * The price is the standard lockout trade-off: exhausting it refuses even the right password for the
+ * rest of the ten-minute window, so the window is short and the message says when to retry. Local
+ * editing needs no account and is unaffected.
+ */
+export const loginAccountLimiter = new RateLimiter(20, 10 * 60_000);
 /** Five registrations per hour per client. */
 export const registerLimiter = new RateLimiter(5, 60 * 60_000);
 

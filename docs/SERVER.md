@@ -109,13 +109,15 @@ The server is tested by calling the **real route handlers** with real `Request` 
 temporary data directory — not by mocking fetch:
 
 ```bash
-npx vitest run src/server        # 59 tests
+npx vitest run src/server        # 65 tests
 ```
 
 They cover: cookie attributes, password hashing never storing the plaintext, duplicate-email and
 validation messages, identical answers for a wrong password and an unknown email, session expiry and
 revocation, cross-origin refusal, rate limiting (failures only — ten *correct* sign-ins no longer lock
-a person out), a malformed cookie answering `401` instead of throwing, revision conflicts with the
+a person out, and a per-email bucket still bounds guessing when the client address rotates), an
+unavailable store answering `503` rather than telling a visitor to sign in, a malformed cookie
+answering `401` instead of throwing, revision conflicts with the
 server's revision in the `409`, schema validation before storage, a hand-edited document file
 answering `503` instead of being served, a realistic multi-megabyte photo document round-tripping
 within the document budget while the small endpoints keep their small one, **cross-account isolation
@@ -177,10 +179,19 @@ largest document the schema can describe, so a valid project is never refused by
 
 ## Threat model and limits
 
-- **Rate limiting is in-process.** Ten failed sign-ins per client+email per ten minutes, five
-  registrations per client per hour, and twenty assistant plans per client per ten minutes — the
-  planner is the one route that spends the operator's model quota. It stops a scripted loop against
-  one instance; it does not survive a restart and does not coordinate across instances.
+- **Rate limiting is in-process.** Ten failed sign-ins per client+email per ten minutes, **twenty
+  failed sign-ins per email across every client**, five registrations per client per hour, and twenty
+  assistant plans per client per ten minutes — the planner is the one route that spends the
+  operator's model quota. It stops a scripted loop against one instance; it does not survive a
+  restart and does not coordinate across instances.
+- **The client half of a rate-limit key comes from a header.** `X-Forwarded-For` (then `X-Real-IP`)
+  identifies the client behind a reverse proxy that overwrites it, but a client that reaches the
+  server directly can write whatever it likes. The per-email sign-in bucket exists for exactly that
+  reason: it has no client dimension, so no header buys another guess at one account. Its cost is the
+  standard lockout trade-off — exhausting it refuses even the right password until the ten-minute
+  window ends, and the `429` says how long to wait. Local editing needs no account and is unaffected.
+  If you deploy behind a proxy, make it set `X-Forwarded-For` rather than append to what the client
+  sent.
 - **The provider call is bounded.** A model that never answers is aborted after 25 seconds and
   reported as an unreachable provider; the route never forwards the provider's error body, which can
   echo the prompt, and never returns the key or endpoint.

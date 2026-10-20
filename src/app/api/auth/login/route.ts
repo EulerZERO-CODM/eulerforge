@@ -11,6 +11,7 @@ import {
   crossOriginRequest,
   failureResponse,
   jsonResponse,
+  loginAccountLimiter,
   loginLimiter,
   rateLimitedResponse,
   readJsonBody,
@@ -45,6 +46,10 @@ export async function POST(request: Request): Promise<Response> {
   const limitKey = `${clientKey(request)}|${email}`;
   const limit = loginLimiter.check(limitKey);
   if (!limit.allowed) return rateLimitedResponse(limit.retryAfterMs);
+  // Address-independent, so rotating `X-Forwarded-For` does not buy another guess at this account.
+  const accountKey = `sign-in|${email}`;
+  const accountLimit = loginAccountLimiter.check(accountKey);
+  if (!accountLimit.allowed) return rateLimitedResponse(accountLimit.retryAfterMs);
 
   if (email.length === 0 || password.length === 0) {
     return failureResponse(422, 'validation', 'Enter your email and password.');
@@ -66,6 +71,7 @@ export async function POST(request: Request): Promise<Response> {
   // The budget is for guessing, not for signing in: ten correct sign-ins in a row used to lock a
   // person out of their own account for the rest of the window.
   loginLimiter.clear(limitKey);
+  loginAccountLimiter.clear(accountKey);
 
   const issued = issueToken();
   const session = await store.createSession(account.id, {

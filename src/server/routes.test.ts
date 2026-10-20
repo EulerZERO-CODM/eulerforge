@@ -36,7 +36,7 @@ import { GET as sharesGET, POST as sharesPOST } from '../app/api/documents/[id]/
 import { DELETE as shareDELETE } from '../app/api/documents/[id]/shares/[shareId]/route';
 import { GET as sharedGET } from '../app/api/shared/[token]/route';
 import { GET as statusGET } from '../app/api/server/status/route';
-import { loginLimiter, registerLimiter } from '../server/http';
+import { loginAccountLimiter, loginLimiter, registerLimiter } from '../server/http';
 import { setServerDataDirForTests } from '../server/runtime';
 import { createDocument, DEFAULT_CANVAS, DEFAULT_GUIDES } from '../core/documents/factories';
 import { defaultPhotoPayload } from '../core/documents/payload';
@@ -52,6 +52,7 @@ beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'forge-server-'));
   setServerDataDirForTests(directory);
   loginLimiter.reset();
+  loginAccountLimiter.reset();
   registerLimiter.reset();
 });
 
@@ -323,6 +324,102 @@ describe('registration, sessions and sign-out', () => {
       }),
     );
     expect(wrong.status).toBe(401);
+  });
+
+  it('bounds guessing per account even when the client address rotates', async () => {
+    // `X-Forwarded-For` is written by the client when the app is not behind a proxy that overwrites
+    // it. The per-client limiters cannot see that; this per-email bucket can.
+    await register('ada@example.com', 'Ada', 'correct horse battery');
+    const attempt = (index: number): Promise<Response> =>
+      loginPOST(
+        request('/api/auth/login', {
+          method: 'POST',
+          body: { email: 'ada@example.com', password: 'wrong password' },
+          headers: { 'x-forwarded-for': `203.0.113.${String(index)}` },
+        }),
+      );
+    for (let index = 0; index < 20; index += 1) {
+      expect((await attempt(index)).status, `attempt ${String(index + 1)}`).toBe(401);
+    }
+    const blocked = await attempt(99);
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get('retry-after')).toMatch(/^\d+$/);
+
+    // The bucket is per account: a different address guessing at a different account is unaffected.
+    await register('grace@example.com', 'Grace', 'correct horse battery');
+    const other = await loginPOST(
+      request('/api/auth/login', {
+        method: 'POST',
+        body: { email: 'grace@example.com', password: 'wrong password' },
+        headers: { 'x-forwarded-for': '198.51.100.7' },
+      }),
+    );
+    expect(other.status).toBe(401);
+  });
+
+  it('lets the right password through once the guessing window has passed', async () => {
+    // The lockout is a window, not a permanent flag: a fresh clock restores access.
+    await register('ada@example.com', 'Ada', 'correct horse battery');
+    for (let index = 0; index < 21; index += 1) {
+      await loginPOST(
+        request('/api/auth/login', {
+          method: 'POST',
+          body: { email: 'ada@example.com', password: 'wrong password' },
+          headers: { 'x-forwarded-for': `203.0.113.${String(index)}` },
+        }),
+      );
+    }
+    const locked = await loginPOST(
+      request('/api/auth/login', {
+        method: 'POST',
+        body: { email: 'ada@example.com', password: 'correct horse battery' },
+        headers: { 'x-forwarded-for': '203.0.113.200' },
+      }),
+    );
+    expect(locked.status).toBe(429);
+    loginAccountLimiter.reset();
+    const afterWindow = await loginPOST(
+      request('/api/auth/login', {
+        method: 'POST',
+        body: { email: 'ada@example.com', password: 'correct horse battery' },
+        headers: { 'x-forwarded-for': '203.0.113.201' },
+      }),
+    );
+    expect(afterWindow.status).toBe(200);
+  });
+
+  it('answers 503, not 401, when the deployment cannot store accounts at all', async () => {
+    // On a serverless host the store is refused; telling a visitor to "sign in" would send them to a
+    // form that can never work.
+    const previousVercel = process.env.VERCEL;
+    const previousDataDir = process.env.FORGE_DATA_DIR;
+    process.env.VERCEL = '1';
+    delete process.env.FORGE_DATA_DIR;
+    setServerDataDirForTests(null);
+    try {
+      for (const response of [
+        await documentsGET(request('/api/documents')),
+        await documentGET(request('/api/documents/doc-1'), {
+          params: Promise.resolve({ id: 'doc-1' }),
+        }),
+        await sharesGET(request('/api/documents/doc-1/shares'), {
+          params: Promise.resolve({ id: 'doc-1' }),
+        }),
+      ]) {
+        expect(response.status).toBe(503);
+        const payload = (await response.json()) as { error: { kind: string; message: string } };
+        expect(payload.error.kind).toBe('unavailable');
+        expect(payload.error.message).toMatch(/not persistent/i);
+      }
+      // A signed-out request to an endpoint that *can* work still answers 401.
+      expect((await sessionGET(request('/api/auth/session'))).status).toBe(200);
+    } finally {
+      if (previousVercel === undefined) delete process.env.VERCEL;
+      else process.env.VERCEL = previousVercel;
+      if (previousDataDir === undefined) delete process.env.FORGE_DATA_DIR;
+      else process.env.FORGE_DATA_DIR = previousDataDir;
+      setServerDataDirForTests(directory);
+    }
   });
 
   it('answers a malformed cookie with 401 instead of throwing', async () => {

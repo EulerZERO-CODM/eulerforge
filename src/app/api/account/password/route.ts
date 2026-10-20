@@ -29,8 +29,14 @@ export async function POST(request: Request): Promise<Response> {
   const limit = loginLimiter.check(`password|${clientKey(request)}`);
   if (!limit.allowed) return rateLimitedResponse(limit.retryAfterMs);
 
-  const session = await requireAccount(request);
-  if (!session) return failureResponse(401, 'unauthenticated', 'Sign in to change your password.');
+  const lookup = await requireAccount(request);
+  if (lookup.kind === 'unavailable') {
+    return failureResponse(503, 'unavailable', lookup.message);
+  }
+  if (lookup.kind !== 'session') {
+    return failureResponse(401, 'unauthenticated', 'Sign in to change your password.');
+  }
+  const session = lookup.session;
 
   const body = await readJsonBody(request);
   if (!body.ok) return body.response;

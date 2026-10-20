@@ -11,8 +11,14 @@ import { requireAccount } from '../../../server/runtime';
 export const runtime = 'nodejs';
 
 export async function GET(request: Request): Promise<Response> {
-  const session = await requireAccount(request);
-  if (!session) return failureResponse(401, 'unauthenticated', 'Sign in to see your documents.');
+  const lookup = await requireAccount(request);
+  if (lookup.kind === 'unavailable') {
+    return failureResponse(503, 'unavailable', lookup.message);
+  }
+  if (lookup.kind !== 'session') {
+    return failureResponse(401, 'unauthenticated', 'Sign in to see your documents.');
+  }
+  const session = lookup.session;
   const listed = await session.store.listDocuments(session.account.id);
   if (!listed.ok) return failureResponse(503, listed.error.kind, listed.error.message);
   return jsonResponse({ documents: listed.value });

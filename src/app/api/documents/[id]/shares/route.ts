@@ -25,8 +25,14 @@ const MAX_TTL_DAYS = 365;
 type Context = { readonly params: Promise<{ readonly id: string }> };
 
 export async function GET(request: Request, context: Context): Promise<Response> {
-  const session = await requireAccount(request);
-  if (!session) return failureResponse(401, 'unauthenticated', 'Sign in to manage share links.');
+  const lookup = await requireAccount(request);
+  if (lookup.kind === 'unavailable') {
+    return failureResponse(503, 'unavailable', lookup.message);
+  }
+  if (lookup.kind !== 'session') {
+    return failureResponse(401, 'unauthenticated', 'Sign in to manage share links.');
+  }
+  const session = lookup.session;
   const { id } = await context.params;
   const shares = await session.store.listShares(session.account.id, id);
   if (!shares.ok) return storeErrorResponse(shares.error);
@@ -37,8 +43,14 @@ export async function POST(request: Request, context: Context): Promise<Response
   if (crossOriginRequest(request)) {
     return failureResponse(403, 'bad-request', 'Cross-origin requests are refused.');
   }
-  const session = await requireAccount(request);
-  if (!session) return failureResponse(401, 'unauthenticated', 'Sign in to share a document.');
+  const lookup = await requireAccount(request);
+  if (lookup.kind === 'unavailable') {
+    return failureResponse(503, 'unavailable', lookup.message);
+  }
+  if (lookup.kind !== 'session') {
+    return failureResponse(401, 'unauthenticated', 'Sign in to share a document.');
+  }
+  const session = lookup.session;
   const { id } = await context.params;
 
   const body = await readJsonBody(request);

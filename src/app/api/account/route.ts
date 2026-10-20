@@ -20,8 +20,14 @@ import { validateDisplayName } from '../../../server/store';
 export const runtime = 'nodejs';
 
 export async function GET(request: Request): Promise<Response> {
-  const session = await requireAccount(request);
-  if (!session) return failureResponse(401, 'unauthenticated', 'Sign in to see this account.');
+  const lookup = await requireAccount(request);
+  if (lookup.kind === 'unavailable') {
+    return failureResponse(503, 'unavailable', lookup.message);
+  }
+  if (lookup.kind !== 'session') {
+    return failureResponse(401, 'unauthenticated', 'Sign in to see this account.');
+  }
+  const session = lookup.session;
   const sessions = await session.store.sessionCount(session.account.id);
   return jsonResponse({
     account: session.account,
@@ -33,8 +39,14 @@ export async function PATCH(request: Request): Promise<Response> {
   if (crossOriginRequest(request)) {
     return failureResponse(403, 'bad-request', 'Cross-origin requests are refused.');
   }
-  const session = await requireAccount(request);
-  if (!session) return failureResponse(401, 'unauthenticated', 'Sign in to change this account.');
+  const lookup = await requireAccount(request);
+  if (lookup.kind === 'unavailable') {
+    return failureResponse(503, 'unavailable', lookup.message);
+  }
+  if (lookup.kind !== 'session') {
+    return failureResponse(401, 'unauthenticated', 'Sign in to change this account.');
+  }
+  const session = lookup.session;
 
   const body = await readJsonBody(request);
   if (!body.ok) return body.response;
@@ -56,8 +68,14 @@ export async function DELETE(request: Request): Promise<Response> {
   if (crossOriginRequest(request)) {
     return failureResponse(403, 'bad-request', 'Cross-origin requests are refused.');
   }
-  const session = await requireAccount(request);
-  if (!session) return failureResponse(401, 'unauthenticated', 'Sign in to delete this account.');
+  const lookup = await requireAccount(request);
+  if (lookup.kind === 'unavailable') {
+    return failureResponse(503, 'unavailable', lookup.message);
+  }
+  if (lookup.kind !== 'session') {
+    return failureResponse(401, 'unauthenticated', 'Sign in to delete this account.');
+  }
+  const session = lookup.session;
 
   const body = await readJsonBody(request);
   if (!body.ok) return body.response;

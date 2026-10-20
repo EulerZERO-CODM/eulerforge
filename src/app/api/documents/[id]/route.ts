@@ -23,8 +23,14 @@ export const runtime = 'nodejs';
 type Context = { readonly params: Promise<{ readonly id: string }> };
 
 export async function GET(request: Request, context: Context): Promise<Response> {
-  const session = await requireAccount(request);
-  if (!session) return failureResponse(401, 'unauthenticated', 'Sign in to open this document.');
+  const lookup = await requireAccount(request);
+  if (lookup.kind === 'unavailable') {
+    return failureResponse(503, 'unavailable', lookup.message);
+  }
+  if (lookup.kind !== 'session') {
+    return failureResponse(401, 'unauthenticated', 'Sign in to open this document.');
+  }
+  const session = lookup.session;
   const { id } = await context.params;
   const stored = await session.store.getDocument(session.account.id, id);
   if (!stored.ok) return storeErrorResponse(stored.error);
@@ -39,8 +45,14 @@ export async function PUT(request: Request, context: Context): Promise<Response>
   if (crossOriginRequest(request)) {
     return failureResponse(403, 'bad-request', 'Cross-origin requests are refused.');
   }
-  const session = await requireAccount(request);
-  if (!session) return failureResponse(401, 'unauthenticated', 'Sign in to save this document.');
+  const lookup = await requireAccount(request);
+  if (lookup.kind === 'unavailable') {
+    return failureResponse(503, 'unavailable', lookup.message);
+  }
+  if (lookup.kind !== 'session') {
+    return failureResponse(401, 'unauthenticated', 'Sign in to save this document.');
+  }
+  const session = lookup.session;
   const { id } = await context.params;
 
   // A document is the one request that is legitimately large: a photo project embeds its working
@@ -79,8 +91,14 @@ export async function DELETE(request: Request, context: Context): Promise<Respon
   if (crossOriginRequest(request)) {
     return failureResponse(403, 'bad-request', 'Cross-origin requests are refused.');
   }
-  const session = await requireAccount(request);
-  if (!session) return failureResponse(401, 'unauthenticated', 'Sign in to delete this document.');
+  const lookup = await requireAccount(request);
+  if (lookup.kind === 'unavailable') {
+    return failureResponse(503, 'unavailable', lookup.message);
+  }
+  if (lookup.kind !== 'session') {
+    return failureResponse(401, 'unauthenticated', 'Sign in to delete this document.');
+  }
+  const session = lookup.session;
   const { id } = await context.params;
   const removed = await session.store.deleteDocument(session.account.id, id);
   if (!removed.ok) return storeErrorResponse(removed.error);
