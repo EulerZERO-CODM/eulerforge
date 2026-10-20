@@ -178,12 +178,12 @@ anything else.
   reproduce *behaviour* (locators, preparation, history state) and the wrong place to compare timings with
   CI.
 
-  **Current limitation (2026-10-19).** This reproduction path is no longer available in this sandbox:
-  the `@sparticuz/chromium` binary extracts but cannot start because the image lacks `libnspr4`/
-  `libnss3`, and the Debian package indexes are unreachable, so the libraries cannot be installed.
-  Playwright's own download is still blocked. Browser measurements here therefore have no current
-  local evidence; the CI rows below remain the acceptance evidence, and this document does not quote
-  a sandbox number as if it were one.
+  **Update (2026-10-20).** The path works again. The `@sparticuz/chromium` binary needs `libnspr4` and
+  `libnss3`, the image has neither, and the Debian package indexes are unreachable — so NSPR and NSS
+  were compiled from source in the container and put on `LD_LIBRARY_PATH`. Chromium 153 then starts,
+  and the full browser suite runs (78 tests, `retries: 0`); that is a behaviour check, not a timing
+  measurement. The CI rows below remain the acceptance evidence, and this document does not quote a
+  sandbox number as if it were one.
 - **No mid-range laptop has run this benchmark.** The four-fold throttle stands in for that hardware; §4
   says what the proxy can and cannot mean.
 
