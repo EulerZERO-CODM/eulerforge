@@ -283,8 +283,10 @@ Two exports exist and neither overclaims: a **PNG frame sequence** with a manife
 and the title text, rendered by seeking every clip frame by frame and zipped by the project's own
 writer; and a **real-time WebM take** through `MediaRecorder` with the timeline's audio mixed in.
 The browser spec downloads both: it parses the archive, decodes the frame whose manifest time is
-0.4 s and compares it with the live preview canvas at 0.4 s, checks that a title's glyph coverage in
-an exported frame matches the preview, and checks the recording's EBML magic number and byte count.
+0.4 s and compares it with the live preview canvas at 0.4 s — as an 8 × 8 thumbnail, because two
+decoders seeking the same timestamp can land on adjacent frames when the source's own timestamps do
+not align with the export grid — checks that a title's glyph coverage in an exported frame matches the
+preview, and checks the recording's EBML magic number and byte count.
 There is no MP4 encoder and the panel says so.
 
 Still missing, and therefore still labelled planned: proxy generation, ripple and roll editing,

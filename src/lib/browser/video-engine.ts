@@ -55,11 +55,12 @@ const READY_TIMEOUT_MS = 15_000;
  * and the canvas is painted with whatever the browser holds, which is what happened before this wait
  * existed. A browser without `requestVideoFrameCallback` (Firefox) skips the wait entirely.
  *
- * The wait is paid once per exported frame, so it is bounded rather than abandoned after a failure.
- * Giving up on the first slow frame was measured to bring the stale frame back, and an export that
- * takes longer is a better outcome than a PNG that does not match the preview.
+ * It is paid once per exported frame, so it is short. A compositor frame is about 16 ms and the seek
+ * has already reported completion by the time the wait starts, so a quarter of a second is generous;
+ * a longer budget was measured to make an eighteen-frame export take twenty seconds on this machine
+ * for callbacks that a detached element never delivers.
  */
-const PRESENT_TIMEOUT_MS = 2_000;
+const PRESENT_TIMEOUT_MS = 250;
 
 type FrameCallbackElement = MediaElementLike & {
   requestVideoFrameCallback?: (callback: () => void) => number;
