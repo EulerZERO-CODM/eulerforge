@@ -51,9 +51,13 @@ const READY_TIMEOUT_MS = 15_000;
 /**
  * How long a seek may wait for the browser to present the frame it landed on.
  *
- * The wait is an improvement, never a failure: if no frame callback arrives (Firefox has no
- * `requestVideoFrameCallback`) the seek still completes and the canvas is painted with whatever the
- * browser holds, which is what happened before this wait existed.
+ * The wait is an improvement, never a failure: if no frame callback arrives the seek still completes
+ * and the canvas is painted with whatever the browser holds, which is what happened before this wait
+ * existed. A browser without `requestVideoFrameCallback` (Firefox) skips the wait entirely.
+ *
+ * The wait is paid once per exported frame, so it is bounded rather than abandoned after a failure.
+ * Giving up on the first slow frame was measured to bring the stale frame back, and an export that
+ * takes longer is a better outcome than a PNG that does not match the preview.
  */
 const PRESENT_TIMEOUT_MS = 2_000;
 

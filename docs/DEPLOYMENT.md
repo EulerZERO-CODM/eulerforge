@@ -67,6 +67,29 @@ writing accounts to a directory that will disappear. This is what a preview depl
 A multi-instance deployment would need a database adapter. None is implemented, and the JSON store
 must not be presented as one.
 
+## Browser verification
+
+The claims that only a real browser can settle — canvas pixels, pointer capture, real downloads, real
+decoding, WebGL2 fallback — are covered by the Playwright suite in `e2e/` (78 tests in 14 files), run
+against the production build by the `Browser (Chromium)` CI job.
+
+On the audit branch the suite was executed in the development container against this head's
+production build, with the repository's own `playwright.config.ts` — no local override, no changed
+timeouts, `retries: 0`:
+
+```
+npx playwright test       78 passed (8.7m)
+```
+
+The container cannot reach Playwright's browser CDN and has no system NSS, so the browser was a
+Chromium 153 build extracted from the `@sparticuz/chromium` package with NSPR and NSS compiled from
+source; nothing in the repository was changed to accommodate it beyond pointing Playwright's browser
+cache at that binary. The suite covers, among other things: project creation and reopening, layer
+selection and pointer and keyboard transforms, undo and redo, snapping, text wrapping, PNG/JPEG/SVG/zip
+export with the downloaded bytes decoded again, Photo Studio's WebGL2 and CPU parity, Video Studio's
+import, scrubbing, frame export and recording, the assistant's multi-step tasks, and the honest
+reporting of a browser that refuses storage.
+
 ## Vercel
 
 The project builds with the default Next.js preset; no `vercel.json` is needed. Suggested settings:

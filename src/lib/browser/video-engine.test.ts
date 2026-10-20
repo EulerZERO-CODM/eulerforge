@@ -189,6 +189,32 @@ describe('VideoMediaPool', () => {
     await expect(pending).resolves.toBe(true);
   });
 
+  it('does not hang when a frame callback never arrives', async () => {
+    const pool = makePool();
+    const ensured = pool.ensure(MEDIA);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const element = created[0];
+    if (!element) throw new Error('the pool created no element');
+    element.readyState = 2;
+    element.dispatchEvent(new Event('loadeddata'));
+    await ensured;
+
+    // A callback that is advertised and never called must cost one bounded wait, not a hang.
+    element.requestVideoFrameCallback = () => 1;
+    vi.useFakeTimers();
+    const pending = pool.seek(MEDIA.id, 0.4);
+    element.dispatchEvent(new Event('seeked'));
+    await vi.advanceTimersByTimeAsync(0);
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+    });
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(2_500);
+    await expect(pending).resolves.toBe(true);
+  });
+
   it('reports a missing element rather than pretending a seek happened', async () => {
     const pool = makePool();
     await expect(pool.seek('not-there', 1)).resolves.toBe(false);

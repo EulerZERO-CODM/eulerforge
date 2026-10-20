@@ -54,8 +54,10 @@ async function denyStorage(page: Page): Promise<void> {
       }
     }
   });
-  // TEMPORARY DIAGNOSTIC: the first error the page reports arrives while React is still hydrating,
-  // so the DOM at that moment is the tree React compared against the served markup.
+  // The first error the page reports arrives while React is still hydrating, and the DOM at that
+  // moment is the tree React compared against the served markup. Keeping that snapshot means a
+  // hydration failure can be reported as the exact element that differed, in a CI log, without a
+  // trace viewer. It is only read to build the message of a failing assertion.
   await page.addInitScript(() => {
     (window as unknown as { __forgeSnapshot?: string | null }).__forgeSnapshot = null;
     window.addEventListener(
