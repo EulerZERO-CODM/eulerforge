@@ -16,6 +16,7 @@ import {
 } from '../../../../server/http';
 import { readRevision, readValue } from '../../../../server/fields';
 import { requireAccount } from '../../../../server/runtime';
+import { MAX_DOCUMENT_BODY_BYTES } from '../../../../server/store';
 
 export const runtime = 'nodejs';
 
@@ -42,7 +43,10 @@ export async function PUT(request: Request, context: Context): Promise<Response>
   if (!session) return failureResponse(401, 'unauthenticated', 'Sign in to save this document.');
   const { id } = await context.params;
 
-  const body = await readJsonBody(request);
+  // A document is the one request that is legitimately large: a photo project embeds its working
+  // copy. The transport budget matches the store's own limit, so a real project is not refused
+  // with a 413 before the store can explain a size problem with its actual byte count.
+  const body = await readJsonBody(request, MAX_DOCUMENT_BODY_BYTES);
   if (!body.ok) return body.response;
   const baseRevision = readRevision(body.value, 'baseRevision');
   if (baseRevision === undefined) {

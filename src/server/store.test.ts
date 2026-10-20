@@ -8,7 +8,7 @@
  * "what happens when two writers meet" is a property that has to be tested rather than assumed.
  */
 
-import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -102,6 +102,53 @@ describe('the data directory', () => {
     // The files exist where the docs say, and no credential is stored in plaintext.
     const raw = await readFile(join(directory, 'accounts.json'), 'utf8');
     expect(raw).not.toContain('correct-horse');
+  });
+});
+
+describe('documents that are not what they claim to be', () => {
+  it('refuses a hand-edited document instead of serving it', async () => {
+    const ada = await accountOf('ada@example.com');
+    await save(ada, 'doc-1');
+    // Simulate a file edited outside the application: valid JSON, invalid document.
+    await writeFile(
+      join(directory, 'documents', 'doc-1.json'),
+      JSON.stringify({ id: 'doc-1', ownerId: ada, revision: 1, document: { nonsense: true } }),
+      'utf8',
+    );
+    const read = await store.getDocument(ada, 'doc-1');
+    expect(read.ok).toBe(false);
+    if (read.ok) return;
+    expect(read.error.kind).toBe('unavailable');
+    expect(read.error.message).toMatch(/cannot be read/i);
+    // The file is kept, not deleted: a person can still recover it from the data directory.
+    expect(await store.documentFiles()).toContain('doc-1.json');
+  });
+
+  it('refuses a document written by a newer build rather than guessing', async () => {
+    const ada = await accountOf('ada@example.com');
+    await save(ada, 'doc-2');
+    const path = join(directory, 'documents', 'doc-2.json');
+    const stored = JSON.parse(await readFile(path, 'utf8')) as {
+      document: Record<string, unknown>;
+    };
+    stored.document.schemaVersion = 99;
+    await writeFile(path, JSON.stringify(stored), 'utf8');
+
+    const read = await store.getDocument(ada, 'doc-2');
+    expect(read.ok).toBe(false);
+    if (read.ok) return;
+    expect(read.error.message).toMatch(/cannot be read/i);
+    if (read.error.kind !== 'unavailable') throw new Error('expected an unavailable error');
+    expect(read.error.detail).toMatch(/newer version/i);
+  });
+
+  it('keeps serving documents written by the current build', async () => {
+    const ada = await accountOf('ada@example.com');
+    await save(ada, 'doc-3');
+    const read = await store.getDocument(ada, 'doc-3');
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.value.document.title).toBe('Poster');
   });
 });
 

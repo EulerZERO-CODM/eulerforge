@@ -11,8 +11,9 @@
  * - A write is atomic at the file level: content goes to a temporary file and is renamed into place.
  * - A schema version lives in `meta.json`; migrations run once, in order, and a directory written by
  *   a *newer* build is refused rather than silently downgraded.
- * - Every document read is validated with the platform's own schema, so a corrupt or hand-edited
- *   file is reported instead of served.
+ * - Every document read passes the platform's own migration and validation gate, so a corrupt or
+ *   hand-edited file is refused instead of served, and a document written by an older build is
+ *   migrated forward rather than rejected.
  * - Every access to a document, share link or session is scoped to its owner. Another account's
  *   document is `not-found`, not `forbidden`, so the API does not confirm that an id exists.
  */
@@ -21,6 +22,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { migrateDocument } from '../core/documents/migrations';
 import { forgeDocumentSchema } from '../core/documents/schema';
 import type { ForgeDocument } from '../core/documents/types';
 import type { PasswordHash } from './passwords';
@@ -153,7 +155,20 @@ const COLLECTION_FILES: Readonly<Record<keyof Collections, string>> = {
 const EMAIL_PATTERN = /^[^\s@]{1,64}@[^\s@.]+(\.[^\s@.]+)+$/;
 export const MIN_PASSWORD_LENGTH = 10;
 export const MAX_PASSWORD_LENGTH = 200;
-export const MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
+/**
+ * The largest stored document, in bytes of its JSON serialisation.
+ *
+ * It sits above the largest document the *schema* can describe — a 2 048 px photo working copy may
+ * embed up to 12 MB of base64 — so the store's limit is never the reason a valid project cannot be
+ * saved, and a document that is refused is refused with its real size in the message.
+ */
+export const MAX_DOCUMENT_BYTES = 16 * 1024 * 1024;
+
+/**
+ * The request budget for `PUT /api/documents/:id`: the document plus its envelope and JSON syntax.
+ * A body above this is refused by the transport before it is parsed.
+ */
+export const MAX_DOCUMENT_BODY_BYTES = MAX_DOCUMENT_BYTES + 1024 * 1024;
 export const MAX_DISPLAY_NAME_LENGTH = 60;
 
 export function normaliseEmail(email: string): string {
@@ -234,7 +249,13 @@ export class ForgeStore {
     this.idFactory = options.idFactory ?? (() => randomUUID());
   }
 
-  /** Creates the directory, writes or upgrades metadata and reconciles the document index. */
+  /**
+   * Creates the directory, writes missing collections and refuses a newer schema.
+   *
+   * The document *index* is not rebuilt here: it is written immediately after the document it
+   * describes, and a crash between those two writes leaves an unlisted document file rather than a
+   * listed document that cannot be read. `documentFiles()` exposes such a file for repair.
+   */
   public async init(): Promise<StoreResult<void>> {
     try {
       await mkdir(join(this.dataDir, 'documents'), { recursive: true, mode: 0o700 });
@@ -487,7 +508,7 @@ export class ForgeStore {
         // Another account's document is indistinguishable from a missing one.
         return fail<StoredDocument>({ kind: 'not-found', message: 'No such document.' });
       }
-      return ok(stored);
+      return this.readable(stored);
     });
   }
 
@@ -680,7 +701,7 @@ export class ForgeStore {
       if (!stored || stored.ownerId !== share.ownerId) {
         return fail<StoredDocument>({ kind: 'not-found', message: 'That document is gone.' });
       }
-      return ok(stored);
+      return this.readable(stored);
     });
   }
 
@@ -690,6 +711,25 @@ export class ForgeStore {
 
   private now(): string {
     return this.clock().toISOString();
+  }
+
+  /**
+   * The read gate: stored JSON is untrusted too.
+   *
+   * A file can be hand-edited, truncated by a full disk, or written by an older build with an older
+   * document schema. Running it through `migrateDocument` — the same gate the browser uses — means
+   * the server never serves a document the app would refuse to open, and never hides an old one.
+   */
+  private readable(stored: StoredDocument): StoreResult<StoredDocument> {
+    const migrated = migrateDocument(stored.document);
+    if (!migrated.ok) {
+      return fail({
+        kind: 'unavailable',
+        message: 'The stored copy of this document cannot be read.',
+        detail: migrated.error.message,
+      });
+    }
+    return ok({ ...stored, document: migrated.value });
   }
 
   private documentPath(id: string): string {

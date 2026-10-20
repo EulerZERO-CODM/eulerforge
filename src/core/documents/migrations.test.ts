@@ -92,6 +92,32 @@ describe('migrateDocument', () => {
     }
   });
 
+  it('refuses an object that is not shaped like any project at all', () => {
+    // Treating every version-less object as a blank v0 project would replace a corrupted record
+    // with an empty one that looks saved.
+    const foreign = migrateDocument({ nonsense: true });
+    expect(foreign.ok).toBe(false);
+    if (!foreign.ok) {
+      expect(foreign.error.code).toBe('storage-corrupt');
+      expect(foreign.error.message).toMatch(/not a document/i);
+    }
+    expect(migrateDocument({}).ok).toBe(false);
+  });
+
+  it('refuses a record whose version field is present but unreadable', () => {
+    for (const schemaVersion of ['7', -1, 1.5, null]) {
+      const result = migrateDocument({ ...legacyRecord, schemaVersion });
+      expect(result.ok, JSON.stringify(schemaVersion)).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('storage-corrupt');
+    }
+  });
+
+  it('still rescues a version-less record that only has a title', () => {
+    const result = migrateDocument({ title: 'Only a title' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.title).toBe('Only a title');
+  });
+
   it('reports corrupt records rather than crashing the loader', () => {
     expect(migrateDocument('nope').ok).toBe(false);
     expect(migrateDocument([1, 2, 3]).ok).toBe(false);

@@ -9,6 +9,13 @@
 import { SESSION_COOKIE } from './sessions';
 import type { StoreError } from './store';
 
+/**
+ * The default request-body budget.
+ *
+ * Every JSON endpoint is small: a goal, a password, a share expiry. Documents are the exception —
+ * a real photo project embeds its working copy — so the document route passes its own, larger
+ * budget to `readJsonBody` instead of raising this one for the whole API.
+ */
 export const MAX_BODY_BYTES = 120 * 1024;
 
 export type ApiFailure = {
@@ -87,10 +94,13 @@ export type BodyResult =
   | { readonly ok: true; readonly value: unknown }
   | { readonly ok: false; readonly response: Response };
 
-/** Reads a JSON body, refusing anything that is too large or is not an object. */
-export async function readJsonBody(request: Request): Promise<BodyResult> {
+/** Reads a JSON body, refusing anything above `maxBytes` or that is not an object. */
+export async function readJsonBody(
+  request: Request,
+  maxBytes: number = MAX_BODY_BYTES,
+): Promise<BodyResult> {
   const declared = request.headers.get('content-length');
-  if (declared !== null && Number(declared) > MAX_BODY_BYTES) {
+  if (declared !== null && Number(declared) > maxBytes) {
     return {
       ok: false,
       response: failureResponse(
@@ -109,7 +119,7 @@ export async function readJsonBody(request: Request): Promise<BodyResult> {
       response: failureResponse(400, 'bad-request', 'The body could not be read.'),
     };
   }
-  if (text.length > MAX_BODY_BYTES) {
+  if (text.length > maxBytes) {
     return {
       ok: false,
       response: failureResponse(
@@ -144,7 +154,16 @@ export function readCookie(request: Request, name: string): string | null {
     const separator = part.indexOf('=');
     if (separator === -1) continue;
     if (part.slice(0, separator).trim() === name) {
-      return decodeURIComponent(part.slice(separator + 1).trim());
+      const raw = part.slice(separator + 1).trim();
+      // A cookie is client input. `decodeURIComponent` throws on a malformed escape (`%`, `%E0%A4`),
+      // and that exception used to escape the route as a 500. An undecodable value cannot be a
+      // session token — the alphabet has no `%` — so the raw value is returned and simply fails to
+      // look like a token.
+      try {
+        return decodeURIComponent(raw);
+      } catch {
+        return raw;
+      }
     }
   }
   return null;
@@ -246,6 +265,11 @@ export class RateLimiter {
     hits.push(current);
     this.buckets.set(key, { hits });
     return { allowed: true, retryAfterMs: 0 };
+  }
+
+  /** Forgets one key: a successful sign-in should not spend a failure budget. */
+  public clear(key: string): void {
+    this.buckets.delete(key);
   }
 
   public reset(): void {

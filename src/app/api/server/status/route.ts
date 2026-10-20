@@ -6,7 +6,11 @@
  * included, and no credential is ever generated or read from the environment.
  */
 
-import { MAX_DOCUMENT_BYTES, SERVER_SCHEMA_VERSION } from '../../../../server/store';
+import {
+  MAX_DOCUMENT_BODY_BYTES,
+  MAX_DOCUMENT_BYTES,
+  SERVER_SCHEMA_VERSION,
+} from '../../../../server/store';
 import { getStore } from '../../../../server/runtime';
 import { jsonResponse } from '../../../../server/http';
 import { MAX_BODY_BYTES } from '../../../../server/http';
@@ -34,6 +38,7 @@ export async function GET(): Promise<Response> {
     },
     limits: {
       documentBytes: MAX_DOCUMENT_BYTES,
+      documentRequestBytes: MAX_DOCUMENT_BODY_BYTES,
       requestBytes: MAX_BODY_BYTES,
     },
     note: 'Optional. The app is local-first: with this server unreachable, every studio, save, reopen and export continues to work against this browser’s storage. Storage is a JSON file store for one process, not a deployment claim.',

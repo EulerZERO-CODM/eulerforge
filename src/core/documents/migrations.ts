@@ -212,6 +212,22 @@ export function isSupportedSchemaVersion(version: number): boolean {
  * Migrates untrusted JSON to the current schema version and validates it.
  * @returns the validated document, or a `ForgeError` describing why it cannot be loaded.
  */
+/**
+ * Whether a version-less record has anything a pre-versioning project always had.
+ *
+ * Records written before versioning were flat: a title and a canvas size. Treating *any* object as
+ * version 0 would turn a corrupted or foreign record into a blank project that looks saved — a
+ * silent replacement of someone's work — so a legacy record has to look like one.
+ */
+function looksLikeLegacyDocument(record: Record<string, unknown>): boolean {
+  return (
+    typeof record.title === 'string' ||
+    typeof record.width === 'number' ||
+    typeof record.height === 'number' ||
+    typeof record.background === 'string'
+  );
+}
+
 export function migrateDocument(raw: unknown): Result<ForgeDocument> {
   const record = asRecord(raw);
   if (!record) {
@@ -220,7 +236,27 @@ export function migrateDocument(raw: unknown): Result<ForgeDocument> {
     );
   }
 
+  const declared = record.schemaVersion;
+  if (
+    declared !== undefined &&
+    !(typeof declared === 'number' && Number.isInteger(declared) && declared >= 0)
+  ) {
+    return err(
+      forgeError(
+        'storage-corrupt',
+        'A stored project record declares an unreadable schema version and was skipped.',
+      ),
+    );
+  }
+
   const version = readSchemaVersion(record) ?? 0;
+  if (version === 0 && !looksLikeLegacyDocument(record)) {
+    return err(
+      forgeError('storage-corrupt', 'A stored project record is not a document and was skipped.', {
+        detail: 'It has neither a schema version nor the fields a pre-versioning project had.',
+      }),
+    );
+  }
   if (!isSupportedSchemaVersion(version)) {
     return err(
       forgeError(

@@ -85,6 +85,12 @@ credential is read from the environment anywhere in `src/server/**`.
 ```
 
 Ids from the client are validated against `^[A-Za-z0-9._-]{1,120}$` before they become file names.
+
+Documents are validated twice: with the platform schema **before** they are written, and through
+`migrateDocument` **when they are read**, so a file edited by hand is refused with a sentence instead
+of being served, and a document written by an older build is migrated forward rather than rejected.
+The document index is written immediately after each document; a crash between the two leaves an
+unlisted document file (visible through `documentFiles()`), not a listed one that cannot be read.
 The directory is created `0700` and every JSON file is written `0600`, because `accounts.json` holds
 password hashes and `sessions.json` holds token digests; the files are replaced atomically, so a
 reader never sees a half-written account list.
@@ -103,16 +109,19 @@ The server is tested by calling the **real route handlers** with real `Request` 
 temporary data directory — not by mocking fetch:
 
 ```bash
-npx vitest run src/server        # 53 tests
+npx vitest run src/server        # 59 tests
 ```
 
 They cover: cookie attributes, password hashing never storing the plaintext, duplicate-email and
 validation messages, identical answers for a wrong password and an unknown email, session expiry and
-revocation, cross-origin refusal, rate limiting, revision conflicts with the server's revision in the
-`409`, schema validation before storage, **cross-account isolation in both directions** (another
-account's document is `404`, not `403`), share creation/listing/revocation and expiry, account
-deletion cascading to documents, shares and sessions, catalogue paging and filters, and the status
-endpoint not leaking the data directory.
+revocation, cross-origin refusal, rate limiting (failures only — ten *correct* sign-ins no longer lock
+a person out), a malformed cookie answering `401` instead of throwing, revision conflicts with the
+server's revision in the `409`, schema validation before storage, a hand-edited document file
+answering `503` instead of being served, a realistic multi-megabyte photo document round-tripping
+within the document budget while the small endpoints keep their small one, **cross-account isolation
+in both directions** (another account's document is `404`, not `403`), share creation/listing/
+revocation and expiry, account deletion cascading to documents, shares and sessions, catalogue paging
+and filters, and the status endpoint not leaking the data directory.
 
 The sync *plan* is tested separately (`src/core/account/sync.test.ts`) because it is a pure function:
 upload, download, in-sync, conflict-with-no-history, conflict-after-both-changed, and the fact that a
@@ -151,6 +160,20 @@ deployment. A database adapter remains unimplemented and unclaimed.
 Not implemented, and not claimed: multiple instances, a real database, email delivery (verification,
 password reset), OAuth, multi-factor authentication, team roles, real-time collaboration, presence,
 billing or payments. The learn/Learning hub, studios and exports do not need any of it.
+
+## Request and storage limits
+
+| What | Limit | Where it fails |
+| --- | --- | --- |
+| Accounts, sessions, shares, assistant planning | 120 KB per request | `413` before the body is parsed |
+| One document | 16 MB of JSON | `422` with the document's measured size |
+| One document, as an HTTP body | 17 MB (document + envelope) | `413` at the document route only |
+| One document list | summaries only | a list never serialises documents |
+
+The document budget is deliberately its own number. A photo project embeds its working copy as a data
+URL (up to 12 MB by schema), so a 120 KB transport limit on every route — the previous shape — refused
+**every** photo document with `413` before the store could see it. The store's own limit sits above the
+largest document the schema can describe, so a valid project is never refused by a storage number.
 
 ## Threat model and limits
 

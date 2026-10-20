@@ -9,7 +9,7 @@
  * that runs in `npm run start`.
  */
 
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -39,6 +39,7 @@ import { GET as statusGET } from '../app/api/server/status/route';
 import { loginLimiter, registerLimiter } from '../server/http';
 import { setServerDataDirForTests } from '../server/runtime';
 import { createDocument, DEFAULT_CANVAS, DEFAULT_GUIDES } from '../core/documents/factories';
+import { defaultPhotoPayload } from '../core/documents/payload';
 import { CURRENT_SCHEMA_VERSION } from '../core/documents/migrations';
 import { brand } from '../core/types/brand';
 import type { ForgeDocument } from '../core/documents/types';
@@ -118,6 +119,41 @@ type DocumentResponse = {
   revision: number;
   updatedAt: string;
 };
+
+/**
+ * A photo document whose embedded working copy is `base64Chars` characters long.
+ *
+ * Photo projects carry their pixels inside the document, which is why they are the case that proves
+ * the document route's request budget: a 2 048 px working copy is hundreds of kilobytes, and an
+ * earlier 120 KB transport limit refused every one of them.
+ */
+function photoDocumentWithCopy(id: string, base64Chars: number): ForgeDocument {
+  const created = createDocument({
+    title: 'Harbour',
+    studioId: 'photo',
+    documentTypeId: brand<'DocumentTypeId'>('photo.image'),
+    canvas: DEFAULT_CANVAS,
+    guides: DEFAULT_GUIDES,
+  });
+  if (!created.ok) throw new Error(`${created.error.message} ${created.error.detail ?? ''}`);
+  return {
+    ...created.value,
+    id: brand<'DocumentId'>(id),
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    studioPayload: {
+      ...defaultPhotoPayload(),
+      source: {
+        name: 'harbour.png',
+        href: `data:image/png;base64,${'A'.repeat(base64Chars)}`,
+        width: 1600,
+        height: 900,
+        mimeType: 'image/png',
+        originalWidth: 4000,
+        originalHeight: 3000,
+      },
+    },
+  };
+}
 
 describe('registration, sessions and sign-out', () => {
   it('creates an account, signs it in with an HttpOnly cookie, and reports it back', async () => {
@@ -265,6 +301,38 @@ describe('registration, sessions and sign-out', () => {
     );
     const proxiedCookie = proxied.headers.get('set-cookie') ?? '';
     expect(proxiedCookie, `status ${String(proxied.status)}`).toMatch(/; Secure/);
+  });
+
+  it('does not lock someone out for signing in correctly', async () => {
+    await register('ada@example.com', 'Ada', 'correct horse battery');
+    // Twelve correct sign-ins in a row: the limiter's budget is for guessing, not for using the app.
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const response = await loginPOST(
+        request('/api/auth/login', {
+          method: 'POST',
+          body: { email: 'ada@example.com', password: 'correct horse battery' },
+        }),
+      );
+      expect(response.status, `attempt ${String(attempt + 1)}`).toBe(200);
+    }
+    // A wrong password afterwards is still an ordinary 401, and the budget still exists.
+    const wrong = await loginPOST(
+      request('/api/auth/login', {
+        method: 'POST',
+        body: { email: 'ada@example.com', password: 'not the password' },
+      }),
+    );
+    expect(wrong.status).toBe(401);
+  });
+
+  it('answers a malformed cookie with 401 instead of throwing', async () => {
+    // `decodeURIComponent` throws on these; a cookie is client input and must not become a 500.
+    for (const cookie of ['forge_session=%', 'forge_session=%E0%A4%A', 'forge_session=%%%']) {
+      const response = await documentsGET(
+        new Request(`${ORIGIN}/api/documents`, { headers: { cookie } }),
+      );
+      expect(response.status, cookie).toBe(401);
+    }
   });
 
   it('throttles repeated failed sign-ins instead of allowing a guessing loop', async () => {
@@ -450,6 +518,36 @@ describe('the document repository over HTTP', () => {
     expect(parsed.error.issues.join(' ')).toMatch(/title/);
   });
 
+  it('answers 503 rather than serving a document file that was edited by hand', async () => {
+    const { cookie, account } = await register();
+    await documentPUT(
+      request('/api/documents/doc-hand', {
+        method: 'PUT',
+        body: { baseRevision: null, document: sampleDocument('doc-hand') },
+        cookie,
+      }),
+      { params: Promise.resolve({ id: 'doc-hand' }) },
+    );
+    await writeFile(
+      join(directory, 'documents', 'doc-hand.json'),
+      JSON.stringify({
+        id: 'doc-hand',
+        ownerId: account.id,
+        revision: 1,
+        document: { nonsense: true },
+      }),
+      'utf8',
+    );
+
+    const response = await documentGET(request('/api/documents/doc-hand', { cookie }), {
+      params: Promise.resolve({ id: 'doc-hand' }),
+    });
+    expect(response.status).toBe(503);
+    const payload = (await response.json()) as { error: { kind: string; message: string } };
+    expect(payload.error.kind).toBe('unavailable');
+    expect(payload.error.message).toMatch(/cannot be read/i);
+  });
+
   it('refuses a document whose id does not match the path', async () => {
     const { cookie } = await register();
     const response = await documentPUT(
@@ -511,21 +609,86 @@ describe('the document repository over HTTP', () => {
     expect(adaList.documents).toHaveLength(1);
   });
 
-  it('refuses a document larger than the limit with a sentence', async () => {
+  it('accepts a realistic photo document, working copy and all', async () => {
+    // A 2 048 px working copy is normally between a few hundred KB and a few MB. This was refused
+    // with 413 by a 120 KB transport budget on every route, which made photo sync impossible.
     const { cookie } = await register();
-    const big = 'x'.repeat(1024 * 1024);
-    // A valid document with a very large summary field is still valid, so this exercises the size
-    // check rather than the schema.
-    const document = { ...sampleDocument('doc-big'), summary: big.slice(0, 400) };
+    const document = photoDocumentWithCopy('doc-photo', 300_000);
+    const originalPayload = document.studioPayload;
+    if (originalPayload?.kind !== 'photo') throw new Error('expected a photo payload');
     const response = await documentPUT(
-      request('/api/documents/doc-big', {
+      request('/api/documents/doc-photo', {
         method: 'PUT',
-        body: { baseRevision: null, document: { ...document, palette: [] } },
+        body: { baseRevision: null, document },
         cookie,
       }),
-      { params: Promise.resolve({ id: 'doc-big' }) },
+      { params: Promise.resolve({ id: 'doc-photo' }) },
     );
-    expect([200, 422]).toContain(response.status);
+    expect(response.status).toBe(200);
+    const saved = await body<DocumentResponse>(response);
+    expect(saved.document.studioPayload?.kind).toBe('photo');
+    const reread = await body<DocumentResponse>(
+      await documentGET(request('/api/documents/doc-photo', { cookie }), {
+        params: Promise.resolve({ id: 'doc-photo' }),
+      }),
+    );
+    const payload = reread.document.studioPayload;
+    if (payload?.kind !== 'photo') throw new Error('expected a photo payload');
+    // The embedded copy survives the round trip byte for byte.
+    expect(payload.source?.href).toBe(originalPayload.source?.href);
+    expect(payload.source?.href.length).toBeGreaterThan(300_000);
+  });
+
+  it('accepts a multi-megabyte document and still lists it by its real size', async () => {
+    const { cookie } = await register();
+    const document = photoDocumentWithCopy('doc-mega', 3_000_000);
+    const response = await documentPUT(
+      request('/api/documents/doc-mega', {
+        method: 'PUT',
+        body: { baseRevision: null, document },
+        cookie,
+      }),
+      { params: Promise.resolve({ id: 'doc-mega' }) },
+    );
+    expect(response.status).toBe(200);
+    const listed = await body<{ documents: { id: string; bytes: number }[] }>(
+      await documentsGET(request('/api/documents', { cookie })),
+    );
+    const entry = listed.documents.find((item) => item.id === 'doc-mega');
+    expect(entry?.bytes).toBeGreaterThan(3_000_000);
+  });
+
+  it('refuses an oversized request body at the document route’s own budget', async () => {
+    const { cookie } = await register();
+    const document = { ...sampleDocument('doc-huge'), summary: 'x'.repeat(18 * 1024 * 1024) };
+    const response = await documentPUT(
+      request('/api/documents/doc-huge', {
+        method: 'PUT',
+        body: { baseRevision: null, document },
+        cookie,
+      }),
+      { params: Promise.resolve({ id: 'doc-huge' }) },
+    );
+    expect(response.status).toBe(413);
+    const payload = (await response.json()) as { error: { kind: string; message: string } };
+    expect(payload.error.kind).toBe('bad-request');
+    expect(payload.error.message).toMatch(/larger than this API accepts/i);
+  });
+
+  it('keeps the small default budget on the account endpoints', async () => {
+    // Raising documents must not turn every JSON endpoint into a megabyte sink.
+    const response = await registerPOST(
+      request('/api/auth/register', {
+        method: 'POST',
+        body: {
+          email: 'big@example.com',
+          displayName: 'Big',
+          password: 'correct horse battery',
+          padding: 'x'.repeat(200 * 1024),
+        },
+      }),
+    );
+    expect(response.status).toBe(413);
   });
 });
 

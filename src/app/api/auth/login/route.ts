@@ -42,7 +42,8 @@ export async function POST(request: Request): Promise<Response> {
 
   // The key includes the email so one client cannot lock every account out by guessing, and one
   // account cannot be hammered from many emails.
-  const limit = loginLimiter.check(`${clientKey(request)}|${email}`);
+  const limitKey = `${clientKey(request)}|${email}`;
+  const limit = loginLimiter.check(limitKey);
   if (!limit.allowed) return rateLimitedResponse(limit.retryAfterMs);
 
   if (email.length === 0 || password.length === 0) {
@@ -62,6 +63,9 @@ export async function POST(request: Request): Promise<Response> {
   if (!account || !acceptable) {
     return failureResponse(401, 'unauthenticated', 'That email and password do not match.');
   }
+  // The budget is for guessing, not for signing in: ten correct sign-ins in a row used to lock a
+  // person out of their own account for the rest of the window.
+  loginLimiter.clear(limitKey);
 
   const issued = issueToken();
   const session = await store.createSession(account.id, {
