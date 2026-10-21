@@ -61,7 +61,9 @@ export function ExerciseChecklist({
           </h2>
           <p className="text-fg-muted mt-0.5 text-sm">{exercise.goal}</p>
         </div>
-        <span className="text-2xs text-fg-subtle">~{exercise.estimatedMinutes} min</span>
+        <span className="text-2xs text-fg-subtle">
+          {exercise.estimatedMinutes === undefined ? null : `~${exercise.estimatedMinutes} min`}
+        </span>
       </div>
 
       <Progress value={done} max={exercise.steps.length} label="Exercise steps completed" />
@@ -85,12 +87,16 @@ export function ExerciseChecklist({
                   onChange={() => {
                     learning.toggleStep(lessonSlug, step.id);
                   }}
-                  className="sr-only"
+                  className="peer sr-only"
                 />
                 <span
                   aria-hidden
                   className={cn(
                     'mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-xs border',
+                    // The real input is visually hidden, so the visible box has to carry the focus
+                    // ring itself: a keyboard reader would otherwise tab through the steps with no
+                    // indication of where they are.
+                    'peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[color:var(--color-focus)]',
                     complete ? 'border-mint-400 bg-mint-600 text-ink-1000' : 'border-line-strong',
                   )}
                 >
@@ -110,7 +116,9 @@ export function ExerciseChecklist({
 
       {exercise.workspaceHref ? (
         <Button asChild variant="outline" size="sm">
-          <Link href={exercise.workspaceHref}>Go to the workspace</Link>
+          <Link href={exercise.workspaceHref}>
+            {exercise.workspaceLinkLabel ?? 'Go to the workspace'}
+          </Link>
         </Button>
       ) : null}
 

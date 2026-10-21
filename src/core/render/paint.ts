@@ -71,6 +71,35 @@ export type PainterContext = {
   measureText(text: string): { width: number };
 };
 
+/**
+ * An isolated drawing surface.
+ *
+ * Some operations need an alpha mask of their own. Tinting a graphic means colouring only the
+ * pixels the graphic actually covers, and a shared canvas cannot express that: the document
+ * background is already painted underneath the graphic, so a wash applied there covers the
+ * background as well. The graphic is therefore drawn on its own surface first, tinted there, and
+ * composited back.
+ */
+export type PaintSurface = {
+  /** The surface's own 2D context. */
+  readonly context: PainterContext;
+  readonly width: number;
+  readonly height: number;
+  /**
+   * Draws the finished surface onto another context.
+   *
+   * The painter only knows the surface through this function, so no adapter has to expose a DOM
+   * object to the core.
+   */
+  readonly draw: (
+    target: PainterContext,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ) => void;
+};
+
 export type PaintPlanOptions = {
   /**
    * Clears the target before painting. Offscreen export clears; the artboard keeps the surrounding
@@ -79,14 +108,26 @@ export type PaintPlanOptions = {
   readonly clear?: boolean;
   /** Limit painting to the canvas footprint; the export canvas is exactly that size. */
   readonly clearRect?: Rect;
+  /**
+   * Creates an isolated surface for the operations that need one.
+   *
+   * When it is absent, or returns `null`, a graphic that would have been tinted is drawn
+   * untinted: losing the tint is a smaller fault than replacing the artwork with a rectangle of
+   * colour.
+   */
+  readonly createSurface?: (width: number, height: number) => PaintSurface | null;
 };
 
-/** Paints a plan in order: op 0 first (bottom of the stack), the last op on top. */
+/**
+ * Paints a plan in order: op 0 first (bottom of the stack), the last op on top.
+ *
+ * @returns notes about anything that could not be drawn exactly as planned.
+ */
 export function paintPlan(
   context: PainterContext,
   plan: RenderPlan,
   options: PaintPlanOptions = {},
-): void {
+): readonly string[] {
   const clearRect = options.clearRect ?? {
     x: 0,
     y: 0,
@@ -101,10 +142,18 @@ export function paintPlan(
     context.restore();
   }
 
-  for (const op of plan.ops) paintOp(context, op);
+  const warnings: string[] = [];
+  for (const op of plan.ops) {
+    for (const warning of paintOp(context, op, options)) warnings.push(warning);
+  }
+  return warnings;
 }
 
-export function paintOp(context: PainterContext, op: DrawOp): void {
+export function paintOp(
+  context: PainterContext,
+  op: DrawOp,
+  options: PaintPlanOptions = {},
+): readonly string[] {
   switch (op.kind) {
     case 'background':
       context.save();
@@ -113,7 +162,7 @@ export function paintOp(context: PainterContext, op: DrawOp): void {
       context.fillStyle = op.color;
       context.fillRect(op.frame.x, op.frame.y, op.frame.width, op.frame.height);
       context.restore();
-      return;
+      return [];
     case 'rect':
       paintShape(context, op, () => {
         const frame = op.frame;
@@ -128,7 +177,7 @@ export function paintOp(context: PainterContext, op: DrawOp): void {
           context.closePath();
         }
       });
-      return;
+      return [];
     case 'ellipse':
       paintShape(context, op, () => {
         const frame = op.frame;
@@ -142,13 +191,12 @@ export function paintOp(context: PainterContext, op: DrawOp): void {
           Math.PI * 2,
         );
       });
-      return;
+      return [];
     case 'image':
-      paintImage(context, op);
-      return;
+      return paintImage(context, op, options);
     case 'text':
       paintText(context, op);
-      return;
+      return [];
   }
 }
 
@@ -186,13 +234,44 @@ function paintShape(context: PainterContext, op: RectOp | EllipseOp, path: () =>
  * the frame and crops the overflow; `stretch` deliberately distorts. The placement maths is pure
  * arithmetic on the op, so a recording context in a test and a real rasteriser in the browser
  * receive identical coordinates.
+ *
+ * A tint is applied on an isolated surface, never on the shared canvas: `source-atop` only means
+ * "colour the graphic's own pixels" while the graphic is the only thing on the surface. Applied on
+ * the shared canvas the document background would be underneath the graphic, the wash would cover
+ * it, and the artwork would be replaced by a rectangle of colour.
  */
-function paintImage(context: PainterContext, op: ImageOp): void {
+function paintImage(
+  context: PainterContext,
+  op: ImageOp,
+  options: PaintPlanOptions,
+): readonly string[] {
   const placement = imagePlacement(op);
   context.save();
   context.globalAlpha = op.opacity;
   context.globalCompositeOperation = 'source-over';
   context.imageSmoothingEnabled = true;
+
+  if (op.tint) {
+    const tinted = paintTintedImage(context, op, placement, options);
+    if (!tinted) {
+      // No isolated surface is available, so the graphic is drawn as it is. Losing the tint is a
+      // smaller fault than losing the artwork.
+      drawImageOp(context, op, placement);
+      context.restore();
+      return [
+        `“${op.layerName}” was not tinted: this environment cannot isolate a graphic to tint it.`,
+      ];
+    }
+    context.restore();
+    return [];
+  }
+
+  drawImageOp(context, op, placement);
+  context.restore();
+  return [];
+}
+
+function drawImageOp(context: PainterContext, op: ImageOp, placement: ImagePlacement): void {
   context.drawImage(
     op.image,
     placement.source.x,
@@ -204,27 +283,59 @@ function paintImage(context: PainterContext, op: ImageOp): void {
     placement.destination.width,
     placement.destination.height,
   );
-
-  if (op.tint) {
-    // `source-atop` restricts the wash to the graphic's opaque pixels, so a transparent graphic
-    // keeps its transparency instead of gaining a coloured rectangle behind it.
-    context.globalCompositeOperation = 'source-atop';
-    context.fillStyle = op.tint;
-    paintTint(context, placement, op);
-  }
-
-  context.restore();
 }
 
-function paintTint(context: PainterContext, placement: ImagePlacement, op: ImageOp): void {
-  const sourceCoverage = coverage(op, placement);
-  context.fillRect(sourceCoverage.x, sourceCoverage.y, sourceCoverage.width, sourceCoverage.height);
-}
+/**
+ * Draws the graphic on its own surface, washes it with the tint and composites it back.
+ *
+ * @returns false when no surface could be created, in which case nothing was drawn.
+ */
+function paintTintedImage(
+  context: PainterContext,
+  op: ImageOp,
+  placement: ImagePlacement,
+  options: PaintPlanOptions,
+): boolean {
+  const create = options.createSurface;
+  if (!create) return false;
 
-/** Where a tint lands: the part of the frame the graphic actually covers. */
-function coverage(op: ImageOp, placement: ImagePlacement): Rect {
-  if (op.fit === 'contain') return placement.destination;
-  return op.frame;
+  const width = Math.max(1, Math.round(placement.source.width));
+  const height = Math.max(1, Math.round(placement.source.height));
+  const surface = create(width, height);
+  if (!surface) return false;
+
+  const surfaceContext = surface.context;
+  surfaceContext.save();
+  surfaceContext.globalAlpha = 1;
+  surfaceContext.globalCompositeOperation = 'source-over';
+  surfaceContext.drawImage(
+    op.image,
+    placement.source.x,
+    placement.source.y,
+    placement.source.width,
+    placement.source.height,
+    0,
+    0,
+    width,
+    height,
+  );
+  // The surface holds the graphic and nothing else, so `source-atop` now means exactly what the
+  // tint is supposed to mean: the colour lands on the graphic's own opaque pixels, and the
+  // transparent parts of the graphic stay transparent.
+  surfaceContext.globalCompositeOperation = 'source-atop';
+  surfaceContext.fillStyle = op.tint ?? '#000000';
+  surfaceContext.fillRect(0, 0, width, height);
+  surfaceContext.restore();
+
+  context.globalCompositeOperation = 'source-over';
+  surface.draw(
+    context,
+    placement.destination.x,
+    placement.destination.y,
+    placement.destination.width,
+    placement.destination.height,
+  );
+  return true;
 }
 
 export type ImagePlacement = {

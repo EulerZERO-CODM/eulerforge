@@ -138,12 +138,18 @@ export function bleedBand(size: Size, bleedPx: number): Rect {
   };
 }
 
-/** Positions of evenly spaced grid lines strictly inside the canvas. */
-export function gridLinePositions(size: Size, stepPx: number): readonly number[] {
+/**
+ * Positions of evenly spaced grid lines strictly inside one axis of the canvas.
+ *
+ * The extent is per axis on purpose: a single list for both axes stopped at the *smaller* side, so
+ * a 1920 x 1080 canvas had no grid across its right-hand 840 pixels — a region where nothing could
+ * be aligned against the grid at all.
+ */
+export function gridLinePositions(extentPx: number, stepPx: number): readonly number[] {
   if (!Number.isFinite(stepPx) || stepPx <= 0) return [];
+  if (!Number.isFinite(extentPx) || extentPx <= 0) return [];
   const positions: number[] = [];
-  const limit = Math.min(size.width, size.height);
-  for (let position = stepPx; position < limit; position += stepPx) {
+  for (let position = stepPx; position < extentPx; position += stepPx) {
     positions.push(Math.round(position * 100) / 100);
     if (positions.length > 200) break; // guard against absurdly small steps
   }

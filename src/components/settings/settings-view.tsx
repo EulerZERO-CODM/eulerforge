@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 
 import { CANVAS_PRESETS } from '../../core/documents/presets';
 import { DEFAULT_GUIDES } from '../../core/documents/factories';
+import { CURRENT_SCHEMA_VERSION } from '../../core/documents/migrations';
 import { EXPORT_FORMATS } from '../../core/export/formats';
 import { LENGTH_UNITS, LENGTH_UNIT_LABELS } from '../../core/documents/units';
 import { PREFERENCE_FIELDS } from '../../core/preferences/types';
@@ -25,6 +26,11 @@ import { Field, Input, Select, SwitchField } from '../ui/field';
 import { DataList, Panel, SectionHeading } from '../ui/section';
 import { InlineNote } from '../ui/states';
 import { StatusDot } from '../ui/controls';
+
+/** Keeps a number inside the range the preferences schema accepts. */
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
 
 /**
  * Settings.
@@ -127,13 +133,20 @@ export function SettingsView() {
           <Field label="Default safe margin">
             <Input
               type="number"
+              min={0}
+              max={100}
               suffix="mm"
               value={prefs.defaultGuides.safeMarginMm}
               onChange={(event) => {
+                const next = Number(event.target.value);
+                if (!Number.isFinite(next)) return;
                 preferences.update({
                   defaultGuides: {
                     ...prefs.defaultGuides,
-                    safeMarginMm: Number(event.target.value),
+                    // Clamped, because the value has to satisfy the preferences schema: an
+                    // out-of-range number would otherwise be rejected by the repository and the
+                    // field would silently keep showing a value that was never saved.
+                    safeMarginMm: clamp(next, 0, 100),
                   },
                 });
               }}
@@ -142,11 +155,15 @@ export function SettingsView() {
           <Field label="Default bleed">
             <Input
               type="number"
+              min={0}
+              max={50}
               suffix="mm"
               value={prefs.defaultGuides.bleedMm}
               onChange={(event) => {
+                const next = Number(event.target.value);
+                if (!Number.isFinite(next)) return;
                 preferences.update({
-                  defaultGuides: { ...prefs.defaultGuides, bleedMm: Number(event.target.value) },
+                  defaultGuides: { ...prefs.defaultGuides, bleedMm: clamp(next, 0, 50) },
                 });
               }}
             />
@@ -154,11 +171,15 @@ export function SettingsView() {
           <Field label="Default grid spacing">
             <Input
               type="number"
+              min={1}
+              max={100}
               suffix="mm"
               value={prefs.defaultGuides.gridMm}
               onChange={(event) => {
+                const next = Number(event.target.value);
+                if (!Number.isFinite(next)) return;
                 preferences.update({
-                  defaultGuides: { ...prefs.defaultGuides, gridMm: Number(event.target.value) },
+                  defaultGuides: { ...prefs.defaultGuides, gridMm: clamp(next, 1, 100) },
                 });
               }}
             />
@@ -276,7 +297,7 @@ export function SettingsView() {
               value: String(health?.skipped ?? library.skipped.length),
             },
             { label: 'Approximate footprint', value: formatBytes(health?.bytes ?? 0) },
-            { label: 'Schema version', value: 'v1', mono: true },
+            { label: 'Schema version', value: `v${String(CURRENT_SCHEMA_VERSION)}`, mono: true },
           ]}
         />
 
@@ -403,8 +424,8 @@ export function SettingsView() {
         open={confirmClearOpen}
         onOpenChange={setConfirmClearOpen}
         title="Delete every locally stored project?"
-        description="This cannot be undone and there is no cloud backup."
-        confirmLabel="Delete everything"
+        description="This cannot be undone and there is no cloud backup. Records the app could not read are removed too, and your preferences and learning progress are reset separately below."
+        confirmLabel="Delete every project"
         onConfirm={() => {
           void documents.clearAll().then((result) => {
             if (!result.ok) {

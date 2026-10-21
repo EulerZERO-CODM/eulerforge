@@ -305,8 +305,11 @@ export function moveLayerToCommand(
   if (!layer) return err(forgeError('not-found', 'That layer is no longer in the document.'));
   const moved = moveLayerTo(document.scene, id, index);
   if (!moved.ok) return err(moved.error);
+  // The label has to name where the layer ended up, not where it was asked to go: the position is
+  // clamped to the stack, so a request for position 100 lands on the last slot.
+  const destination = moved.value.layers.findIndex((candidate) => candidate.id === layer.id);
   return ok({
-    label: `Move “${layer.name}” to position ${String(index + 1)}`,
+    label: `Move “${layer.name}” to position ${String(destination + 1)}`,
     patch: freezePatch({ scene: moved.value }),
   });
 }

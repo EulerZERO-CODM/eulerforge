@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowRight, BookOpen, Cpu, PenLine, TriangleAlert } from 'lucide-react';
 
+import { AssetStatusBadge } from '../../../components/assets/asset-status-badge';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { DataList, Panel, SectionHeading } from '../../../components/ui/section';
@@ -166,9 +167,7 @@ export default async function StudioPage({
                   >
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-fg text-base font-medium">{asset.name}</p>
-                      <Badge tone={asset.status === 'sample' ? 'neutral' : 'planned'}>
-                        {asset.status}
-                      </Badge>
+                      <AssetStatusBadge status={asset.status} />
                     </div>
                     <p className="text-fg-muted mt-1 text-sm">{asset.description}</p>
                     <p className="text-2xs text-fg-subtle mt-1.5">Licence: {asset.license.name}</p>

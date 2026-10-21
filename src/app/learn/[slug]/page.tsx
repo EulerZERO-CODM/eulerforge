@@ -80,6 +80,7 @@ export default async function LessonPage({
             slug={lesson.slug}
             sections={lesson.sections}
             objectives={lesson.objectives}
+            {...(lesson.exercise ? { exercise: lesson.exercise } : {})}
           />
         </article>
 

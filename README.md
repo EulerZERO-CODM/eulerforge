@@ -79,9 +79,12 @@ verifies it. A summary:
 **Implemented (and covered by tests)**
 
 - Document model with Zod validation at every trust boundary, immutable documents, schema versioning
-  with a v0 → v1 migration path, unit conversion (px/mm/in), canvas geometry and 13 canvas presets.
+  with a v0 → v1 → v2 migration path, unit conversion (px/mm/in), canvas geometry and 13 canvas
+  presets.
 - Local project storage in `localStorage` behind a promise-based repository boundary, with corrupt
-  record handling, quota errors, a skipped-record report and device-local learning progress.
+  record handling, quota errors, a skipped-record report and device-local learning progress. A
+  record the app cannot read is reported and **kept**, never deleted by the next save, and an
+  unreadable index does not stop the reader from working.
 - Honest storage durability: when a browser refuses local storage (private mode, blocked site data),
   the app keeps working through an in-memory fallback and says so — a shell banner, a save indicator
   that reads "in memory only" instead of "saved", a storage row in Settings, and a retry for writes
@@ -96,12 +99,13 @@ verifies it. A summary:
 - Undo/redo history, a command registry powering Cmd/Ctrl + K, and a typed platform event bus.
 - Studio registry: six disciplines as data, validated at startup, with availability flags that the
   navigation, discovery pages and roadmap all read from.
-- Learning layer: 12 concepts, 4 tool explanations and 10 published lessons, with guided exercises
+- Learning layer: 12 concepts, 6 tool explanations and 10 published lessons, with guided exercises
   that link to real screens.
 - Asset ecosystem: an extensible record model with licences and provenance, search, facets,
   pagination and clearly-labelled *sample* content only (no bundled third-party files).
-- Export readiness checks per format, and a working `.forge.json` project file export (and import
-  parser) for the document definition.
+- Export readiness checks per format, a working `.forge.json` project file export (and import
+  parser) for the document definition, and a real PNG/JPEG raster export rendered by the same
+  pipeline the artboard uses.
 - Design system: tokens (colour, type, spacing, radius, elevation) plus buttons, fields, dialogs,
   menus, tooltips, notifications, cards, and explicit empty/loading/error states. Contrast of every
   text pairing is measured from the real token file by a test.
@@ -109,9 +113,12 @@ verifies it. A summary:
 
 **Not implemented — stated as such in the UI**
 
-- Any editing tool (no brushes, shapes, layers, selections, filters, timeline or 3D viewport).
-- Rasterisation/rendering, so PNG, JPEG, WebP, SVG, PDF, MP4, WebM and glTF export are **blocked**
-  in the export panel with the reason shown, not silently broken.
+- The studios other than Design: Photo, Video, Motion, Illustration and 3D. Their definitions exist
+  with honest availability flags, and every one of them says it is not built rather than offering a
+  control that cannot work.
+- Every other export format: WebP, SVG, PDF, MP4, WebM and glTF are **blocked** in the export panel
+  with the reason shown, not silently broken. PNG, JPEG and the `.forge.json` project file are the
+  formats this build really writes.
 - Accounts, cloud sync, sharing, teams, billing and telemetry (all rejected at the schema level).
 - A remote asset catalogue adapter, and an AI tutor.
 

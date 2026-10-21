@@ -17,6 +17,7 @@ import {
 } from './validation';
 import { createRect } from './geometry';
 import { DEFAULT_CANVAS, DEFAULT_GUIDES } from './factories';
+import { MAX_DOCUMENT_TAGS, MAX_SUMMARY_LENGTH, MAX_TAG_LENGTH } from './types';
 import {
   documentFixture,
   ellipseLayer,
@@ -218,5 +219,30 @@ describe('validateLayer and validateScene', () => {
 
     const unsound = { ...sound, scene: sceneOf({ ...rectLayer('lyr-rect'), opacity: 5 }) };
     expect(isDocumentStructurallySound(unsound)).toBe(false);
+  });
+
+  it('refuses a document the schema would not read back', () => {
+    const sound = documentFixture({ scene: sceneOf(rectLayer('lyr-rect')) });
+    expect(isDocumentStructurallySound(sound)).toBe(true);
+
+    // A tag longer than the schema allows: the gate has to catch it here, or the application saves
+    // a document it is then going to refuse to read, and the project disappears from the library.
+    const longTag = {
+      ...sound,
+      metadata: { ...sound.metadata, tags: ['x'.repeat(MAX_TAG_LENGTH + 1)] },
+    };
+    expect(isDocumentStructurallySound(longTag)).toBe(false);
+
+    const tooManyTags = {
+      ...sound,
+      metadata: {
+        ...sound.metadata,
+        tags: Array.from({ length: MAX_DOCUMENT_TAGS + 1 }, (_, index) => `tag-${String(index)}`),
+      },
+    };
+    expect(isDocumentStructurallySound(tooManyTags)).toBe(false);
+
+    const longSummary = { ...sound, summary: 'x'.repeat(MAX_SUMMARY_LENGTH + 1) };
+    expect(isDocumentStructurallySound(longSummary)).toBe(false);
   });
 });

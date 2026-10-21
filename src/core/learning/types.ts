@@ -129,7 +129,11 @@ export type GuidedExercise = {
   readonly id: string;
   readonly title: string;
   readonly goal: string;
-  readonly estimatedMinutes: number;
+  /**
+   * How long the exercise takes. Omitted when the content does not state a duration: an invented
+   * number next to a stated one is a contradiction the reader can see (ADR-0010).
+   */
+  readonly estimatedMinutes?: number;
   readonly steps: readonly {
     readonly id: string;
     readonly label: string;
@@ -137,6 +141,11 @@ export type GuidedExercise = {
   }[];
   /** Where the learner performs the exercise; `null` when it is done on paper/elsewhere. */
   readonly workspaceHref: string | null;
+  /**
+   * Label for the destination link. It has to name the actual destination: a link that says
+   * "Go to the workspace" and opens the project library misdirects the reader.
+   */
+  readonly workspaceLinkLabel?: string;
 };
 
 export type Lesson = {

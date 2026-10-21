@@ -426,6 +426,48 @@ describe('exportRasterImage — real pixels', () => {
     expect(rgbaAt(decoded, 100, 100)[3]).toBe(255);
   });
 
+  it('tints the graphic without covering the background behind it', async () => {
+    // A graphic that is opaque on its left half and transparent on its right half.
+    const source = pixelCanvas(100, 100);
+    source.context.fillStyle = '#ffffff';
+    source.context.fillRect(0, 0, 50, 100);
+
+    const document = squareDocument({
+      scene: sceneOf(
+        imageLayer('lyr-tinted', {
+          x: 0,
+          y: 0,
+          width: 200,
+          height: 200,
+          href: '/forge-assets/tint-fixture.png',
+          fit: 'stretch',
+          tint: '#ff8800',
+        }),
+      ),
+    });
+    const resolveImage = await loadImageFixtures({
+      '/forge-assets/tint-fixture.png': source.canvas.toBuffer('image/png'),
+    });
+
+    const result = await exportRasterImage({
+      document,
+      format: 'png',
+      scale: 1,
+      createCanvas,
+      resolveImage,
+    });
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.warnings).toEqual([]);
+
+    const decoded = await decode(result.value.blob);
+    // The graphic's own pixels take the tint.
+    expect(rgbaAt(decoded, 50, 100)).toEqual([255, 136, 0, 255]);
+    // The graphic's transparent half is not painted over: the document background is still there.
+    // A tint applied on the shared canvas would cover the whole frame with the tint colour and
+    // replace the artwork with a rectangle.
+    expect(rgbaAt(decoded, 150, 100)).toEqual([0x10, 0x18, 0x20, 255]);
+  });
+
   it.skipIf(!hasFonts())('places text inside its frame at the requested scale', async () => {
     const document = squareDocument({
       scene: sceneOf(
@@ -522,6 +564,7 @@ describe('exportRasterImage — failure paths', () => {
         height,
         getContext: () => null,
         toBlob: () => undefined,
+        createSurface: () => null,
       };
       return { ...canvas, ...adapter };
     };

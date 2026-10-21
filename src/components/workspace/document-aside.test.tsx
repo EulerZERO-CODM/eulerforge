@@ -47,6 +47,7 @@ const images: SceneImages = {
   status: new Map(),
   loading: false,
   errors: [],
+  pending: [],
   retry: () => {
     /* nothing to retry in this fixture */
   },

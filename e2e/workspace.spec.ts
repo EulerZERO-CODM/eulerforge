@@ -12,6 +12,7 @@ import {
   FIXTURE_LABELS,
   historyLabels,
   layerNamed,
+  pointInDocument,
   renameSelectedLayer,
   selectLayerFromList,
   stored,
@@ -358,6 +359,43 @@ test.describe('artboard interaction', () => {
       'Lock “Rectangle”',
       ...FIXTURE_LABELS,
     ]);
+  });
+
+  test('draws the resize handles on the layers a gesture can actually move', async ({ page }) => {
+    // The text is locked and the rectangle is not: the rectangle reaches further down and to the
+    // right, so the box a gesture can change and the box the selection covers do not share an
+    // origin. That is the case in which a handle measured from the wrong box lands in the wrong
+    // place.
+    await selectLayerFromList(page, 'Text');
+    await page.getByRole('button', { name: 'Lock “Text”' }).click();
+    await storedWhen(
+      page,
+      (document) => layerNamed(document, 'Text').locked,
+      'the text should be locked',
+    );
+
+    await selectLayerFromList(page, 'Text');
+    await addLayerToSelection(page, 'Rectangle');
+    const rectangle = layerNamed(await stored(page), 'Rectangle').frame;
+
+    // Only the rectangle can be transformed, so the handles have to sit on *its* corners. They are
+    // drawn inside the selection overlay, which is around the whole selection, so the two boxes do
+    // not share an origin.
+    const handle = page.getByTestId('handle-se');
+    await expect(handle).toBeVisible();
+    const handleBox = await handle.boundingBox();
+    if (!handleBox) throw new Error('the resize handle has no box to measure');
+
+    const corner = await pointInDocument(page, {
+      x: rectangle.x + rectangle.width,
+      y: rectangle.y + rectangle.height,
+    });
+    // The handle is a 12px square centred on the corner it controls.
+    expect(
+      Math.abs(handleBox.x + handleBox.width / 2 - corner.x),
+      'the handle should sit on the corner of the layer it resizes',
+    ).toBeLessThan(3);
+    expect(Math.abs(handleBox.y + handleBox.height / 2 - corner.y)).toBeLessThan(3);
   });
 
   test('duplicates and reorders a multi-layer selection in single steps', async ({ page }) => {

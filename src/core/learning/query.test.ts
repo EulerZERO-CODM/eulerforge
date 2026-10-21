@@ -104,6 +104,15 @@ describe('listLessons', () => {
     expect(listLessons({ text: 'zzz-nothing' })).toEqual([]);
   });
 
+  it('finds a lesson by the name of a concept it teaches', () => {
+    // The glossary is shown beside the search box, so a term the reader can see has to be
+    // findable: without this, searching a visible term returns nothing.
+    const concept = CONCEPTS[0]!;
+    const lessons = listLessons({ text: concept.term });
+    expect(lessons.length).toBeGreaterThan(0);
+    expect(lessons.some((lesson) => lesson.conceptIds.includes(concept.id))).toBe(true);
+  });
+
   it('keeps platform-wide lessons when filtering by studio', () => {
     const design = listLessons({ studioId: 'design' });
     expect(design.length).toBeGreaterThan(0);

@@ -3,7 +3,7 @@
 import { ArrowLeft, ArrowRight, Check, CircleAlert, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { SAMPLE_ASSETS } from '../../core/assets/data';
 import { DEFAULT_GUIDES } from '../../core/documents/factories';
@@ -17,7 +17,8 @@ import {
   type GuideSettings,
 } from '../../core/documents/types';
 import { DEFAULT_DOCUMENT_TYPE_ID } from '../../core/documents/document-types';
-import { LENGTH_UNITS, LENGTH_UNIT_LABELS, formatLength } from '../../core/documents/units';
+import { MAX_DOCUMENT_TAGS, MAX_SUMMARY_LENGTH, MAX_TAG_LENGTH } from '../../core/documents/types';
+import { LENGTH_UNITS, LENGTH_UNIT_LABELS, fromPixels, toPixels } from '../../core/documents/units';
 import { validateCanvas, validateGuides, validateTitle } from '../../core/documents/validation';
 import { studioRegistry } from '../../core/studios';
 import { cn } from '../../lib/cn';
@@ -32,6 +33,16 @@ import { InlineNote } from '../ui/states';
 import { AvailabilityBadge } from '../studios/availability';
 import { StudioGlyph } from '../studios/studio-icon';
 import { DocumentPreview } from '../documents/document-preview';
+
+/**
+ * A length for display, rounded to a whole number in pixels and to one decimal in physical units.
+ *
+ * The canvas stores pixels; the interface shows the size in the unit the document was authored in,
+ * so the number it shows has to be rounded the way that unit reads.
+ */
+function roundLength(value: number): number {
+  return Math.round(value * 10) / 10;
+}
 
 type StepId = 'studio' | 'canvas' | 'details' | 'review';
 
@@ -67,8 +78,13 @@ export function CreationFlow() {
       : undefined;
 
   const [step, setStep] = useState<StepId>('studio');
+  // A `?studio=` that names a studio this build does not have must not take the page down: the
+  // flow falls back to the preferred studio instead.
+  const requestedStudio = searchParams.get('studio');
   const [studioId, setStudioId] = useState<string>(
-    searchParams.get('studio') ?? defaults.preferredStudioId,
+    requestedStudio !== null && studioRegistry.get(requestedStudio) !== undefined
+      ? requestedStudio
+      : defaults.preferredStudioId,
   );
   const [presetId, setPresetId] = useState<string | null>(initialPreset ? initialPreset.id : null);
   const [category, setCategory] = useState<CanvasPresetCategory>(
@@ -87,7 +103,8 @@ export function CreationFlow() {
       : {
           width: 1080,
           height: 1350,
-          unit: 'px',
+          // The unit the user works in by default; the size itself is stored in pixels.
+          unit: preferences.getState().preferences.defaultUnit,
           dpi: 96,
           background: '#0f1115',
           transparent: false,
@@ -108,6 +125,12 @@ export function CreationFlow() {
   const [paletteId, setPaletteId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  /** The heading of the step on screen, focused when the step changes. */
+  const stepHeadingRef = useRef<HTMLHeadingElement | null>(null);
+
+  useEffect(() => {
+    stepHeadingRef.current?.focus();
+  }, [step]);
 
   const studios = studioRegistry.list();
   const paletteAssets = useMemo(
@@ -143,15 +166,19 @@ export function CreationFlow() {
       palette: paletteColors,
       tags: tags
         .split(',')
-        .map((tag) => tag.trim())
+        .map((tag) => tag.trim().slice(0, MAX_TAG_LENGTH))
         .filter(Boolean)
-        .slice(0, 12),
+        .slice(0, MAX_DOCUMENT_TAGS),
     });
     setSubmitting(false);
 
     if (!result.ok) {
-      setSubmitError(result.error.message);
-      toasts.error('The project could not be created', result.error.message);
+      // The detail says *which* field is wrong; the message alone leaves the reader guessing.
+      const reason = result.error.detail
+        ? `${result.error.message} ${result.error.detail}`
+        : result.error.message;
+      setSubmitError(reason);
+      toasts.error('The project could not be created', reason);
       return;
     }
 
@@ -203,6 +230,15 @@ export function CreationFlow() {
           })}
         </ol>
 
+        {/*
+          The step change is announced, and the focus moves to the new step's heading: the panel is
+          replaced wholesale, so without this a keyboard or screen-reader user is left with no idea
+          that the screen changed at all.
+        */}
+        <p aria-live="polite" className="sr-only">
+          {`Step ${String(stepIndex + 1)} of ${String(STEPS.length)}: ${STEPS[stepIndex]?.label ?? ''}`}
+        </p>
+
         {layoutStarter ? (
           <InlineNote tone="info" title={`Layout starter: ${layoutStarter.label}`}>
             <p>
@@ -214,7 +250,12 @@ export function CreationFlow() {
 
         {step === 'studio' ? (
           <section aria-labelledby="step-studio" className="space-y-3">
-            <h2 id="step-studio" className="text-fg text-lg font-semibold">
+            <h2
+              id="step-studio"
+              ref={stepHeadingRef}
+              tabIndex={-1}
+              className="text-fg text-lg font-semibold"
+            >
               Choose a studio
             </h2>
             <p className="text-fg-muted text-sm">
@@ -270,7 +311,12 @@ export function CreationFlow() {
         {step === 'canvas' ? (
           <section aria-labelledby="step-canvas" className="space-y-4">
             <div>
-              <h2 id="step-canvas" className="text-fg text-lg font-semibold">
+              <h2
+                id="step-canvas"
+                ref={stepHeadingRef}
+                tabIndex={-1}
+                className="text-fg text-lg font-semibold"
+              >
                 Choose a size
               </h2>
               <p className="text-fg-muted mt-0.5 text-sm">
@@ -326,7 +372,9 @@ export function CreationFlow() {
                         {preset.description}
                       </span>
                       <span className="forge-numeric text-2xs text-fg-subtle mt-1.5 block">
-                        {preset.size.width} × {preset.size.height} {preset.unit} ·{' '}
+                        {roundLength(fromPixels(preset.size.width, preset.unit, preset.dpi))} ×{' '}
+                        {roundLength(fromPixels(preset.size.height, preset.unit, preset.dpi))}{' '}
+                        {preset.unit} · {preset.size.width} × {preset.size.height} px ·{' '}
                         {aspectRatioLabel(preset.size)} · {preset.dpi} dpi
                       </span>
                     </button>
@@ -339,26 +387,40 @@ export function CreationFlow() {
               <h3 className="text-2xs text-fg-subtle font-semibold tracking-wider uppercase">
                 Custom dimensions
               </h3>
+              <p className="text-fg-subtle mt-1 text-xs">
+                The size is entered in {LENGTH_UNIT_LABELS[canvas.unit].toLowerCase()} and stored as
+                pixels at the document&apos;s DPI, so a print size survives the round trip.
+              </p>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <Field label="Width" error={fieldError(canvasIssues, 'canvas')}>
                   <Input
                     type="number"
-                    value={canvas.width}
+                    value={roundLength(fromPixels(canvas.width, canvas.unit, canvas.dpi))}
                     suffix={canvas.unit}
                     onChange={(event) => {
                       setPresetId(null);
-                      setCanvas({ ...canvas, width: Number(event.target.value) });
+                      const entered = Number(event.target.value);
+                      if (!Number.isFinite(entered)) return;
+                      setCanvas({
+                        ...canvas,
+                        width: Math.round(toPixels(entered, canvas.unit, canvas.dpi)),
+                      });
                     }}
                   />
                 </Field>
                 <Field label="Height">
                   <Input
                     type="number"
-                    value={canvas.height}
+                    value={roundLength(fromPixels(canvas.height, canvas.unit, canvas.dpi))}
                     suffix={canvas.unit}
                     onChange={(event) => {
                       setPresetId(null);
-                      setCanvas({ ...canvas, height: Number(event.target.value) });
+                      const entered = Number(event.target.value);
+                      if (!Number.isFinite(entered)) return;
+                      setCanvas({
+                        ...canvas,
+                        height: Math.round(toPixels(entered, canvas.unit, canvas.dpi)),
+                      });
                     }}
                   />
                 </Field>
@@ -371,7 +433,21 @@ export function CreationFlow() {
                     }))}
                     onChange={(event) => {
                       setPresetId(null);
-                      setCanvas({ ...canvas, unit: event.target.value as Canvas['unit'] });
+                      const unit = event.target.value as Canvas['unit'];
+                      // The physical size stays the same; only the unit it is expressed in
+                      // changes. The size is converted out of pixels into the new unit and back,
+                      // so a canvas of 1080 px at 96 dpi stays 285.8 mm rather than becoming
+                      // 1080 mm.
+                      setCanvas({
+                        ...canvas,
+                        unit,
+                        width: Math.round(
+                          toPixels(fromPixels(canvas.width, unit, canvas.dpi), unit, canvas.dpi),
+                        ),
+                        height: Math.round(
+                          toPixels(fromPixels(canvas.height, unit, canvas.dpi), unit, canvas.dpi),
+                        ),
+                      });
                     }}
                   />
                 </Field>
@@ -381,6 +457,8 @@ export function CreationFlow() {
                     value={canvas.dpi}
                     suffix="dpi"
                     onChange={(event) => {
+                      // The canvas no longer matches the preset it came from.
+                      setPresetId(null);
                       setCanvas({ ...canvas, dpi: Number(event.target.value) });
                     }}
                   />
@@ -393,7 +471,12 @@ export function CreationFlow() {
         {step === 'details' ? (
           <section aria-labelledby="step-details" className="space-y-5">
             <div>
-              <h2 id="step-details" className="text-fg text-lg font-semibold">
+              <h2
+                id="step-details"
+                ref={stepHeadingRef}
+                tabIndex={-1}
+                className="text-fg text-lg font-semibold"
+              >
                 Name it and set it up
               </h2>
               <p className="text-fg-muted mt-0.5 text-sm">
@@ -427,9 +510,13 @@ export function CreationFlow() {
               </Field>
             </div>
 
-            <Field label="Summary" hint="Optional, one line about the intended use.">
+            <Field
+              label="Summary"
+              hint={`Optional, one line about the intended use. Up to ${String(MAX_SUMMARY_LENGTH)} characters.`}
+            >
               <Textarea
                 value={summary}
+                maxLength={MAX_SUMMARY_LENGTH}
                 onChange={(event) => {
                   setSummary(event.target.value);
                 }}
@@ -547,7 +634,12 @@ export function CreationFlow() {
         {step === 'review' ? (
           <section aria-labelledby="step-review" className="space-y-4">
             <div>
-              <h2 id="step-review" className="text-fg text-lg font-semibold">
+              <h2
+                id="step-review"
+                ref={stepHeadingRef}
+                tabIndex={-1}
+                className="text-fg text-lg font-semibold"
+              >
                 Review and create
               </h2>
               <p className="text-fg-muted mt-0.5 text-sm">
@@ -561,10 +653,12 @@ export function CreationFlow() {
                 columns={2}
                 items={[
                   { label: 'Name', value: title.trim() || '—' },
-                  { label: 'Studio', value: studioRegistry.require(studioId).name },
+                  { label: 'Studio', value: studioRegistry.get(studioId)?.name ?? studioId },
                   {
                     label: 'Canvas',
-                    value: `${canvas.width} × ${canvas.height} ${canvas.unit}`,
+                    value: `${roundLength(fromPixels(canvas.width, canvas.unit, canvas.dpi))} × ${roundLength(
+                      fromPixels(canvas.height, canvas.unit, canvas.dpi),
+                    )} ${canvas.unit} · ${String(canvas.width)} × ${String(canvas.height)} px`,
                     mono: true,
                   },
                   { label: 'Aspect ratio', value: aspectRatioLabel(canvas), mono: true },
@@ -572,7 +666,9 @@ export function CreationFlow() {
                   { label: 'Density', value: megapixelLabel(canvas), mono: true },
                   {
                     label: 'Safe margin',
-                    value: formatLength(guides.safeMarginMm, 'mm', canvas.dpi),
+                    // The safe margin is already millimetres; converting it as if it were pixels
+                    // reported a fraction of the real margin.
+                    value: `${guides.safeMarginMm} mm`,
                     mono: true,
                   },
                   {

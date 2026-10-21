@@ -103,10 +103,30 @@ export const ALL_NAV_ITEMS: readonly NavItem[] = NAV_GROUPS.flatMap((group) => g
 
 /** Longest-prefix match so `/studios/design` still reports "Studios". */
 export function findNavItemForPath(pathname: string): NavItem | undefined {
-  const matches = ALL_NAV_ITEMS.filter(
-    (item) => item.href === '/' || pathname === item.href || pathname.startsWith(`${item.href}/`),
+  const matches = ALL_NAV_ITEMS.filter((item) =>
+    // Home is the *root*, not a prefix of everything: matching it for any path made the whole
+    // application claim you were on the Home page, including the editor.
+    item.href === '/'
+      ? pathname === '/'
+      : pathname === item.href || pathname.startsWith(`${item.href}/`),
   );
   return matches.sort((a, b) => b.href.length - a.href.length)[0];
+}
+
+/**
+ * The name of a screen that is not in the navigation.
+ *
+ * The workspace is per document rather than a navigation destination, so it has no nav item — but
+ * the chrome still has to say where the reader is.
+ */
+export function contextLabelForPath(pathname: string): string | undefined {
+  if (pathname === '/workspace' || pathname.startsWith('/workspace/')) return 'Workspace';
+  return undefined;
+}
+
+/** The label the chrome should show for a path, navigation item or not. */
+export function screenLabelForPath(pathname: string): string | undefined {
+  return findNavItemForPath(pathname)?.label ?? contextLabelForPath(pathname);
 }
 
 export function isNavItemActive(item: NavItem, pathname: string): boolean {

@@ -5,10 +5,10 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 import { Button } from '../ui/button';
-import { Kbd } from '../ui/kbd';
 import { AccountMenu } from './account-menu';
 import { MobileNav } from './mobile-nav';
-import { findNavItemForPath } from './nav-items';
+import { contextLabelForPath, findNavItemForPath } from './nav-items';
+import { CommandKeyHint } from './command-key-hint';
 
 /**
  * Application top bar.
@@ -19,15 +19,14 @@ import { findNavItemForPath } from './nav-items';
 export function Topbar({ onOpenPalette }: { readonly onOpenPalette: () => void }) {
   const pathname = usePathname();
   const context = findNavItemForPath(pathname);
+  const label = context?.label ?? contextLabelForPath(pathname);
 
   return (
     <header className="border-line bg-canvas/85 sticky top-0 z-40 flex h-14 items-center gap-3 border-b px-3 backdrop-blur-md sm:px-5">
       <MobileNav />
 
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <p className="text-fg truncate text-base font-medium">
-          {context?.label ?? "Euler's Forge"}
-        </p>
+        <p className="text-fg truncate text-base font-medium">{label ?? "Euler's Forge"}</p>
         {context && pathname !== context.href && pathname !== '/' ? (
           <span className="text-fg-subtle hidden truncate text-sm sm:inline">
             {breadcrumbTail(pathname, context.href)}
@@ -44,7 +43,7 @@ export function Topbar({ onOpenPalette }: { readonly onOpenPalette: () => void }
         >
           <Search aria-hidden className="size-4" />
           <span>Search</span>
-          <Kbd>⌘K</Kbd>
+          <CommandKeyHint />
         </button>
 
         <Button

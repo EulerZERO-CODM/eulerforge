@@ -3,7 +3,7 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Command as CommandIcon, CornerDownLeft, Search } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   COMMAND_GROUP_LABELS,
@@ -37,6 +37,8 @@ export function CommandPalette({
   const documents = useDocuments();
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
+  /** The highlighted row, kept in view so the reader can see what Enter will run. */
+  const activeRowRef = useRef<HTMLButtonElement | null>(null);
 
   const registry = useMemo(() => {
     const created = new CommandRegistry();
@@ -55,6 +57,12 @@ export function CommandPalette({
     () => registry.search(query, availability),
     [registry, query, availability],
   );
+
+  // The list is scrollable and the palette holds more rows than it can show, so the highlighted one
+  // has to be brought into view: a highlight below the fold is a highlight the reader cannot see.
+  useEffect(() => {
+    activeRowRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, results]);
 
   const runCommand = useCallback(
     (commandId: string) => {
@@ -151,7 +159,7 @@ export function CommandPalette({
               <div className="px-3 py-6 text-center">
                 <p className="text-fg text-base">No matching actions</p>
                 <p className="text-fg-subtle mt-1 text-sm">
-                  Try “canvas”, “palette”, “listen” — or press Esc and browse a destination
+                  Try “canvas”, “palette”, “lesson” — or press Esc and browse a destination
                   directly.
                 </p>
               </div>
@@ -169,6 +177,7 @@ export function CommandPalette({
                         <li key={result.command.id}>
                           <button
                             type="button"
+                            ref={active ? activeRowRef : undefined}
                             onMouseEnter={() => {
                               setActiveIndex(index);
                             }}

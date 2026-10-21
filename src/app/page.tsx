@@ -172,9 +172,10 @@ export default function HomePage() {
       >
         <p>
           Photo, Video, Motion, Illustration and 3D have entry points, capability lists and engine
-          plans — and no working editors. Raster export, accounts and cloud sync do not exist
-          either. Each of those places says so in the interface, and the roadmap shows the
-          dependency chain that has to land first.
+          plans — and no working editors. Accounts and cloud sync do not exist either, and every
+          export format other than PNG, JPEG and the project file is blocked with its reason shown.
+          Each of those places says so in the interface, and the roadmap shows the dependency chain
+          that has to land first.
         </p>
       </InlineNote>
     </div>

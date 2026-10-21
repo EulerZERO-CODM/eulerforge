@@ -65,6 +65,19 @@ export type DocumentMetadata = {
 };
 
 /**
+ * The limits the schema puts on a document's metadata.
+ *
+ * They live here so the schema and the interface that edits these fields cannot disagree: a field
+ * that accepted more than the schema allows would produce a document the app saves and then
+ * refuses to read.
+ */
+export const MAX_DOCUMENT_TAGS = 12;
+export const MAX_TAG_LENGTH = 40;
+export const MAX_SUMMARY_LENGTH = 400;
+export const MAX_NOTES_LENGTH = 2000;
+export const MAX_AUTHOR_LABEL_LENGTH = 80;
+
+/**
  * Studio-neutral project record.
  *
  * `schemaVersion` drives the migration chain in `./migrations.ts`; `revision` is a monotonic

@@ -22,8 +22,9 @@ import {
   updateLayerSettings,
   validateTextSettings,
 } from './layer-operations';
-import { MAX_LAYERS, type Scene } from './layer-types';
+import { MAX_ATTRIBUTION_RECORDS, MAX_LAYERS, type Scene } from './layer-types';
 import { createRect } from './geometry';
+import type { AttributionRecord } from './layer-types';
 import {
   attributionRecord,
   ellipseLayer,
@@ -368,6 +369,28 @@ describe('attribution records', () => {
     const second = addAttribution(first, attributionRecord({ id: 'attr-2', notes: 'updated' }));
     expect(second).toHaveLength(1);
     expect(second[0]?.notes).toBe('updated');
+  });
+
+  it('keeps the newest record when the collection reaches its cap', () => {
+    // A full collection of the oldest records...
+    let records: readonly AttributionRecord[] = [];
+    for (let index = 0; index < MAX_ATTRIBUTION_RECORDS; index += 1) {
+      records = addAttribution(
+        records,
+        attributionRecord({ id: `attr-${String(index)}`, assetId: `asset-${String(index)}` }),
+      );
+    }
+    expect(records).toHaveLength(MAX_ATTRIBUTION_RECORDS);
+
+    // ...must not lose the record that was just written: it describes a graphic the document now
+    // contains, and the export lists the obligations that come with it.
+    const added = addAttribution(
+      records,
+      attributionRecord({ id: 'attr-new', assetId: 'asset-new' }),
+    );
+    expect(added).toHaveLength(MAX_ATTRIBUTION_RECORDS);
+    expect(added[added.length - 1]?.assetId).toBe('asset-new');
+    expect(added[0]?.assetId).toBe('asset-1');
   });
 
   it('finds a record by asset id', () => {

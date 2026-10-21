@@ -13,7 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
-import { findNavItemForPath } from './nav-items';
+import { contextLabelForPath, findNavItemForPath } from './nav-items';
 
 /**
  * Account and context menu.
@@ -25,6 +25,7 @@ import { findNavItemForPath } from './nav-items';
 export function AccountMenu() {
   const pathname = usePathname();
   const context = findNavItemForPath(pathname);
+  const label = context?.label ?? contextLabelForPath(pathname);
 
   return (
     <DropdownMenu>
@@ -40,9 +41,7 @@ export function AccountMenu() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="min-w-64">
-        <DropdownMenuLabel>
-          {context ? `You are in ${context.label}` : "Euler's Forge"}
-        </DropdownMenuLabel>
+        <DropdownMenuLabel>{label ? `You are in ${label}` : "Euler's Forge"}</DropdownMenuLabel>
         <DropdownMenuItem asChild>
           <Link href="/settings">
             <Settings aria-hidden className="text-fg-subtle size-4" />

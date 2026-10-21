@@ -2,9 +2,47 @@ import { describe, expect, it } from 'vitest';
 
 import { imageFitScale, imagePlacement, paintPlan, textLineOrigin } from './paint';
 import type { ImageOp, RenderPlan, TextOp } from './plan';
-import { createRecordingContext, STUB_IMAGE } from '../../testing/render';
+import type { PaintSurface } from './paint';
+import { createRecordingContext, STUB_IMAGE, type RecordedCall } from '../../testing/render';
 import { createRect } from '../documents/geometry';
 import { defaultShapeSettings, defaultTextSettings } from '../documents/layer-defaults';
+
+/** Marker used to recognise the call that composites a finished surface back onto the canvas. */
+const SURFACE_MARKER = { surface: true };
+
+/** A recording surface, so a test can see what the painter does to an isolated graphic. */
+function createRecordingSurface(): {
+  readonly surface: PaintSurface;
+  readonly calls: RecordedCall[];
+  readonly modeWhenTinting: string;
+} {
+  const { context, calls } = createRecordingContext();
+  const state = { modeWhenTinting: '' };
+  const tracked = {
+    ...context,
+    get globalCompositeOperation() {
+      return context.globalCompositeOperation;
+    },
+    set globalCompositeOperation(value: string) {
+      context.globalCompositeOperation = value;
+      if (value === 'source-atop') state.modeWhenTinting = value;
+    },
+  };
+  return {
+    calls,
+    get modeWhenTinting() {
+      return state.modeWhenTinting;
+    },
+    surface: {
+      context: tracked,
+      width: 200,
+      height: 100,
+      draw: (target, x, y, width, height) => {
+        target.drawImage(SURFACE_MARKER, x, y, width, height);
+      },
+    },
+  };
+}
 
 function imageOp(overrides: Partial<ImageOp> = {}): ImageOp {
   return {
@@ -268,26 +306,41 @@ describe('image placement', () => {
     });
   });
 
-  it('tints with source-atop so transparent graphics stay transparent', () => {
+  it('tints the graphic on an isolated surface, so the wash cannot reach the background', () => {
     const { context, calls, depth } = createRecordingContext();
-    let modeWhenTinting = '';
-    const tracked = {
-      ...context,
-      get globalCompositeOperation() {
-        return context.globalCompositeOperation;
-      },
-      set globalCompositeOperation(value: string) {
-        context.globalCompositeOperation = value;
-        if (value === 'source-atop') modeWhenTinting = value;
-      },
-    };
-    paintPlan(tracked, planOf([imageOp({ tint: '#ff8800' })]), { clear: false });
+    const surface = createRecordingSurface();
+    const warnings = paintPlan(context, planOf([imageOp({ tint: '#ff8800' })]), {
+      clear: false,
+      createSurface: () => surface.surface,
+    });
 
-    const drawIndex = calls.findIndex((call) => call.op === 'drawImage');
-    const tintIndex = calls.findIndex((call) => call.op === 'fillRect');
-    expect(drawIndex).toBeGreaterThanOrEqual(0);
-    expect(tintIndex).toBeGreaterThan(drawIndex);
-    expect(modeWhenTinting).toBe('source-atop');
+    // The tint is applied to the surface, where the graphic is the only thing drawn. Applied on the
+    // shared canvas it would cover the document background underneath the graphic instead.
+    const surfaceFill = surface.calls.find((call) => call.op === 'fillRect');
+    expect(surfaceFill).toBeDefined();
+    expect(surface.modeWhenTinting).toBe('source-atop');
+
+    // The shared canvas never receives the wash.
+    expect(calls.find((call) => call.op === 'fillRect')).toBeUndefined();
+
+    // The finished surface is composited back onto the shared canvas.
+    const composite = calls.find(
+      (call) => call.op === 'drawImage' && call.args[0] === SURFACE_MARKER,
+    );
+    expect(composite).toBeDefined();
+    expect(warnings).toEqual([]);
+    expect(depth()).toBe(0);
+  });
+
+  it('draws a graphic untinted, and says so, when no surface can be made', () => {
+    const { context, calls, depth } = createRecordingContext();
+    const warnings = paintPlan(context, planOf([imageOp({ tint: '#ff8800' })]), { clear: false });
+
+    // The artwork is still drawn; losing the tint is a smaller fault than losing the artwork.
+    expect(calls.find((call) => call.op === 'drawImage')).toBeDefined();
+    expect(calls.find((call) => call.op === 'fillRect')).toBeUndefined();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/not tinted/i);
     expect(depth()).toBe(0);
   });
 

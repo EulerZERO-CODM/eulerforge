@@ -191,6 +191,12 @@ export type PaintTextLineOptions = {
  * applies. When letter spacing *is* set, characters are drawn individually at measured positions,
  * which is the only way to get identical output from browsers that implement `letterSpacing` and
  * ones that do not.
+ *
+ * Kerning is why the characters are not simply placed one after another: a shaped run is narrower
+ * than the sum of its characters, so drawing them one by one makes the line wider than the text the
+ * layout measured. Right-aligned text would then run past the edge of its frame and centre-aligned
+ * text would sit off centre. The difference is taken out of the gaps between the characters, so the
+ * drawn line is exactly as wide as the measured one.
  */
 export function paintTextLine(context: TextPaintContext, options: PaintTextLineOptions): void {
   const { line, settings, origin } = options;
@@ -209,9 +215,22 @@ export function paintTextLine(context: TextPaintContext, options: PaintTextLineO
     return;
   }
 
+  const characters = [...line.text];
+  const advances = characters.map((character) => context.measureText(character).width);
+  // The trailing advance of the last character is left alone: nothing is drawn after it, so it
+  // cannot make the line any wider.
+  const lastAdvance = advances.length > 0 ? (advances[advances.length - 1] ?? 0) : 0;
+  const between = advances.slice(0, -1);
+  const betweenTotal = between.reduce((sum, width) => sum + width, 0);
+  const shaped = context.measureText(line.text).width;
+  const correction = betweenTotal > 0 ? Math.max(0, shaped - lastAdvance) / betweenTotal : 1;
+
   let cursor = startX;
-  for (const character of line.text) {
+  for (let index = 0; index < characters.length; index += 1) {
+    const character = characters[index]!;
     if (character !== ' ') context.fillText(character, cursor, origin.y);
-    cursor += context.measureText(character).width + settings.letterSpacing;
+    const advance = advances[index] ?? 0;
+    const isLast = index === characters.length - 1;
+    cursor += (isLast ? advance : advance * correction) + settings.letterSpacing;
   }
 }

@@ -18,7 +18,7 @@
 import type { ForgeDocument } from '../documents/types';
 import { err, forgeError, ok, type Result } from '../result';
 import { buildRenderPlan, type ImageResolver, type RenderIssue } from '../render/plan';
-import { paintPlan, type PainterContext } from '../render/paint';
+import { paintPlan, type PaintSurface, type PainterContext } from '../render/paint';
 import { contextMeasureFactory } from '../render/measure';
 
 export type RasterFormat = 'png' | 'jpeg';
@@ -71,6 +71,14 @@ export type RasterCanvas = {
   height: number;
   getContext(contextId: '2d'): PainterContext | null;
   toBlob(callback: (blob: Blob | null) => void, type?: string, quality?: number): void;
+  /**
+   * Creates an isolated drawing surface beside this canvas.
+   *
+   * Some drawing operations need their own alpha mask — tinting a graphic, for example — and a
+   * shared canvas cannot provide one, because the document background is already painted underneath
+   * the graphic. Returning `null` means this environment cannot make one.
+   */
+  createSurface: (width: number, height: number) => PaintSurface | null;
 };
 
 export type CanvasFactory = (width: number, height: number) => RasterCanvas;
@@ -243,7 +251,10 @@ export async function exportRasterImage(
   // Output scale: everything below this line is drawn in document pixels.
   context.save();
   context.scale(request.scale, request.scale);
-  paintPlan(context, plan, { clear: true });
+  const paintWarnings = paintPlan(context, plan, {
+    clear: true,
+    createSurface: canvas.createSurface,
+  });
   context.restore();
 
   const blob = await encode(canvas, RASTER_MIME_TYPES[request.format], quality);
@@ -259,7 +270,10 @@ export async function exportRasterImage(
     );
   }
 
-  const warnings = plan.issues.filter((issue) => !issue.blocking).map((issue) => issue.message);
+  const warnings = [
+    ...paintWarnings,
+    ...plan.issues.filter((issue) => !issue.blocking).map((issue) => issue.message),
+  ];
 
   return ok({
     blob,

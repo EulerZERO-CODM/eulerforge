@@ -13,6 +13,14 @@ export type AssetId = Branded<string, 'AssetId'>;
 export type AssetKind =
   'template' | 'graphic' | 'font' | 'palette' | 'component' | 'preset' | 'texture' | 'sound';
 
+/**
+ * Whether a catalogue record exists or is only planned.
+ *
+ * `sample` — bundled sample content, available now.
+ * `planned` — a record describing content the catalogue will carry; it is not downloadable.
+ */
+export type AssetStatus = 'sample' | 'planned';
+
 export const ASSET_KIND_LABELS: Readonly<Record<AssetKind, string>> = {
   template: 'Templates',
   graphic: 'Graphics',
@@ -94,7 +102,7 @@ export type AssetRecord = {
   readonly documentTypes: readonly string[];
   readonly formats: readonly string[];
   /** Only `sample` records exist in Phase 1; `planned` records document the intended catalogue. */
-  readonly status: 'sample' | 'planned';
+  readonly status: AssetStatus;
   readonly preview: AssetPreview;
   /** Present only when a real file ships with the catalogue and can be placed on a canvas. */
   readonly file?: AssetFile | undefined;
