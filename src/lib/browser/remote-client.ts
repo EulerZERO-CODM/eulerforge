@@ -79,19 +79,44 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+/**
+ * How long the first session question may stay unanswered.
+ *
+ * The account panel cannot tell "the server is thinking" from "the request was swallowed" without one,
+ * and a swallowed request leaves it saying "Checking whether the optional server is running…" for as
+ * long as the tab is open. Ten seconds is far beyond any local or hosted answer this endpoint gives,
+ * and the timeout is reported as an unreachable server, which is what it behaves like.
+ */
+const SESSION_TIMEOUT_MS = 10_000;
+
 export async function fetchSession(signal?: AbortSignal): Promise<SessionState> {
-  const result = await call('/api/auth/session', { ...(signal ? { signal } : {}) });
-  if (!result.ok) {
-    // A 5xx from the session endpoint is "no account server", not a broken app.
-    return {
-      status: 'unavailable',
-      notice:
-        result.error.status === 0
-          ? 'The optional server could not be reached. Everything still works in this browser.'
-          : result.error.message,
-    };
+  const controller = signal ? null : new AbortController();
+  const timer =
+    controller === null
+      ? null
+      : window.setTimeout(() => {
+          controller.abort();
+        }, SESSION_TIMEOUT_MS);
+  const requestSignal = signal ?? controller?.signal;
+  try {
+    const result = await call('/api/auth/session', {
+      ...(requestSignal ? { signal: requestSignal } : {}),
+    });
+    if (!result.ok) {
+      // A failed request from the session endpoint is "no account server", not a broken app:
+      // status 0 covers an unreachable host, a blocked request and the timeout above.
+      return {
+        status: 'unavailable',
+        notice:
+          result.error.status === 0
+            ? 'The optional server could not be reached. Everything still works in this browser.'
+            : result.error.message,
+      };
+    }
+    return parseSessionState(result.value);
+  } finally {
+    if (timer !== null) window.clearTimeout(timer);
   }
-  return parseSessionState(result.value);
 }
 
 export async function register(input: {

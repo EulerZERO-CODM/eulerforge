@@ -20,11 +20,16 @@ import { STORAGE_KEY, addLayer, createProject, layerRow, stored } from './fixtur
 
 const PHONE = { width: 390, height: 844 } as const;
 
-/** Collects uncaught exceptions: a page that throws is not usable even if it still renders. */
+/**
+ * Collects uncaught exceptions: a page that throws is not usable even if it still renders.
+ *
+ * The route is part of each entry — a hydration mismatch is reported by React as a minified error on
+ * the console, and without the path the message says nothing about where to look.
+ */
 function watchForCrashes(page: Page): string[] {
   const crashes: string[] = [];
   page.on('pageerror', (error) => {
-    crashes.push(error.message);
+    crashes.push(`[${new URL(page.url()).pathname}] ${error.message}`);
   });
   return crashes;
 }
@@ -182,5 +187,67 @@ test.describe('damaged saved data', () => {
     await expect(layerRow(page, 'Text')).toBeVisible();
 
     expect(crashes).toEqual([]);
+  });
+});
+
+test.describe('a first visit', () => {
+  test('starts empty without pretending, and every destination exists', async ({ page }) => {
+    const crashes = watchForCrashes(page);
+
+    // Nothing stored yet: the home screen offers a way in rather than a blank page.
+    await page.goto('/');
+    await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible();
+    await expect(
+      page.getByRole('link', { name: /New project|Create a project/i }).first(),
+    ).toBeVisible();
+
+    // The empty library says it is empty, says where projects live, and offers the way in.
+    await page.goto('/projects');
+    await expect(page.getByText('Your library is empty')).toBeVisible();
+    await expect(page.getByText(/stored in this browser on this device/i).first()).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Create a project' }).first()).toBeVisible();
+
+    // Every studio page loads at a laptop width and offers its own entry point.
+    for (const studio of ['design', 'illustration', 'photo', 'motion', 'video']) {
+      await page.goto(`/studios/${studio}`);
+      await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible();
+      await expect(page.getByRole('link', { name: /Create a project/i }).first()).toBeVisible();
+    }
+
+    // An unknown route is a real 404 page with destinations, not an empty render.
+    const missing = await page.goto('/this-page-does-not-exist');
+    expect(missing?.status()).toBe(404);
+    await expect(page.getByText('That page does not exist')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Browse studios' })).toBeVisible();
+
+    // A share link that cannot resolve explains itself instead of showing a broken document.
+    await page.goto('/shared/not-a-real-token');
+    await expect(page.getByText('This link does not open')).toBeVisible();
+    await expect(page.getByText(/Links expire/)).toBeVisible();
+
+    // The static pages that make the product's claims render without a server.
+    for (const route of ['/roadmap', '/platform-status', '/learn', '/assets', '/settings']) {
+      const response = await page.goto(route);
+      expect(response?.status(), route).toBe(200);
+      await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible();
+    }
+
+    expect(crashes).toEqual([]);
+  });
+});
+
+test.describe('every studio on a phone', () => {
+  test.use({ viewport: PHONE });
+
+  test('lays out without a sideways scroll', async ({ page }) => {
+    for (const studio of ['design', 'illustration', 'photo', 'motion', 'video']) {
+      await page.goto(`/studios/${studio}`);
+      await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible();
+      await expectNoHorizontalOverflow(page);
+    }
+    for (const route of ['/', '/projects', '/roadmap', '/settings']) {
+      await page.goto(route);
+      await expectNoHorizontalOverflow(page);
+    }
   });
 });

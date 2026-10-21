@@ -101,12 +101,25 @@ export const NAV_GROUPS: readonly NavGroup[] = [
 
 export const ALL_NAV_ITEMS: readonly NavItem[] = NAV_GROUPS.flatMap((group) => group.items);
 
-/** Longest-prefix match so `/studios/design` still reports "Studios". */
+/**
+ * Longest-prefix match so `/studios/design` still reports "Studios".
+ *
+ * Home matches the root path only. Treating `/` as a prefix of everything made every unknown route
+ * claim to be Home, and the top bar then built a breadcrumb out of whatever the URL happened to be:
+ * `/this-page-does-not-exist` rendered "/ this page does not exist". On a server-rendered 404 the
+ * router reports the synthetic path `/_not-found` instead, so the two sides rendered different text
+ * and React reported a hydration mismatch on every 404. An unknown route now has no section, which
+ * is the truth, and both renders agree.
+ */
 export function findNavItemForPath(pathname: string): NavItem | undefined {
+  const root = pathname === '/' ? ALL_NAV_ITEMS.find((item) => item.href === '/') : undefined;
   const matches = ALL_NAV_ITEMS.filter(
-    (item) => item.href === '/' || pathname === item.href || pathname.startsWith(`${item.href}/`),
+    (item) => item.href !== '/' && (pathname === item.href || pathname.startsWith(`${item.href}/`)),
   );
-  return matches.sort((a, b) => b.href.length - a.href.length)[0];
+  return (
+    matches.sort((a, b) => b.href.length - a.href.length)[0] ??
+    (pathname === '/' ? root : undefined)
+  );
 }
 
 export function isNavItemActive(item: NavItem, pathname: string): boolean {
