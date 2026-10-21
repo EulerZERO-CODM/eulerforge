@@ -49,47 +49,21 @@ const SEEK_TIMEOUT_MS = 8_000;
 const READY_TIMEOUT_MS = 15_000;
 
 /**
- * How long a seek may wait for the browser to present the frame it landed on.
+ * A seek is reported as reached once `seeked` fires and the element holds a current frame.
  *
- * The wait is an improvement, never a failure: if no frame callback arrives the seek still completes
- * and the canvas is painted with whatever the browser holds, which is what happened before this wait
- * existed. A browser without `requestVideoFrameCallback` (Firefox) skips the wait entirely.
+ * There is deliberately no second wait for `requestVideoFrameCallback`. That callback was tried: it
+ * is the API for "a frame has been presented", so it looks like the right confirmation after a seek.
+ * Measured in the browser this project tests against (Chromium 153, software rendering), it never
+ * fires for a paused seek — neither for a detached element nor for one attached off-screen — so the
+ * wait only added a per-frame timeout to every export (eighteen frames took twenty seconds instead
+ * of three) while confirming nothing. `seeked` already promises the frame at the new position is
+ * available for `drawImage`, which is what the painter needs.
  *
- * It is paid once per exported frame, so it is short. A compositor frame is about 16 ms and the seek
- * has already reported completion by the time the wait starts, so a quarter of a second is generous;
- * a longer budget was measured to make an eighteen-frame export take twenty seconds on this machine
- * for callbacks that a detached element never delivers.
+ * Two *different* elements seeking the same timestamp can still land on adjacent frames when the
+ * source has variable frame timing (a MediaRecorder file spaces frames by wall clock). That is a
+ * property of decoding, not of this wait, and it is why the browser suite compares a frame against
+ * the preview as a thumbnail rather than pixel for pixel.
  */
-const PRESENT_TIMEOUT_MS = 250;
-
-type FrameCallbackElement = MediaElementLike & {
-  requestVideoFrameCallback?: (callback: () => void) => number;
-};
-
-/**
- * Waits until the decoder has presented the frame the seek landed on.
- *
- * `seeked` means the seek algorithm finished, not that the new picture has reached the compositor:
- * `drawImage` immediately afterwards can still copy the previous frame. On an idle machine that
- * window is almost never missed; on a loaded one it is, and an exported frame then disagrees with
- * the preview at the same timestamp. The frame callback fires when a frame is actually presented,
- * so waiting for it makes the exported PNG the frame the preview shows.
- */
-function waitForPresentedFrame(element: MediaElementLike): Promise<void> {
-  const video = element as FrameCallbackElement;
-  if (typeof video.requestVideoFrameCallback !== 'function') return Promise.resolve();
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (): void => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timer);
-      resolve();
-    };
-    const timer = window.setTimeout(finish, PRESENT_TIMEOUT_MS);
-    video.requestVideoFrameCallback?.(finish);
-  });
-}
 
 function waitFor(
   target: EventTarget,
@@ -202,9 +176,7 @@ export class VideoMediaPool {
       return false;
     }
     const reached = await seeked;
-    if (!reached || element.readyState < 2) return false;
-    await waitForPresentedFrame(element);
-    return true;
+    return reached && element.readyState >= 2;
   }
 
   /** Seconds of the element that are buffered ahead of the playhead, for the resource readout. */

@@ -646,7 +646,7 @@ export const ROADMAP: readonly RoadmapPhase[] = [
       },
     ],
     exitCriteria: [
-      'A three-minute edit can be assembled and exported in-browser',
+      'A three-minute edit can be assembled and exported in-browser at the composition frame rate',
       'Audio and video stay in sync throughout',
     ],
   },

@@ -293,13 +293,17 @@ The browser spec downloads both: it parses the archive, decodes the frame whose 
 0.4 s and compares it with the live preview canvas at 0.4 s — as an 8 × 8 thumbnail, because two
 decoders seeking the same timestamp can land on adjacent frames when the source's own timestamps do
 not align with the export grid — checks that a title's glyph coverage in an exported frame matches the
-preview, and checks the recording's EBML magic number and byte count.
+preview, and checks the recording's EBML magic number and byte count. The export seeks the decoder
+once per frame and does not wait for a presentation callback, which was measured to add a per-frame
+timeout without ever firing for a paused seek in the browser this project tests against.
 There is no MP4 encoder and the panel says so.
 
 Still missing, and therefore still labelled planned: proxy generation, ripple and roll editing,
 transitions, fades and ducking, and any offline (faster-than-real-time) encode. The roadmap's
-three-minute exit criterion is **not** met: a frame sequence is capped at 1 800 frames and a capture
-at two minutes, so a three-minute edit can be assembled and played but not exported in one piece yet.
+three-minute exit criterion is **partly** met and is stated precisely: the cap is 1 800 *frames*, not
+seconds, so a three-minute timeline exports in one piece only at a reduced frame step — 1 350 frames
+at step 4 (7.5 fps at a 30 fps composition) — while at the composition's own 30 fps the same range is
+5 400 frames and is refused with the limit named. A real-time WebM capture is capped at two minutes.
 The browser suite is Chromium only.
 
 ### Phase 7 — Persistence, accounts and collaboration

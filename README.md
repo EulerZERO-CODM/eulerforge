@@ -129,7 +129,9 @@ verifies it. A summary:
   templates and brand kits, PDF output, curve-exact booleans, and shape rotation in the design
   model.
 - MP4 encoding and offline (faster-than-real-time) video export; video proxies, transitions, fades
-  and ducking. The three-minute export criterion is not met.
+  and ducking. The three-minute export criterion is partly met: the frame-sequence cap is 1 800
+  frames, so a three-minute range exports in one piece only at a reduced frame step (`docs/ROADMAP.md`
+  states the exact numbers).
 - Motion masks, imported illustration artboards inside motion documents, transitions and expressions.
 - Photo blend modes beyond the documented adjustment stack, and a 12 MP/16 ms guarantee (the
   working copy and the measured budgets are stated in `docs/PERFORMANCE.md`, not assumed).

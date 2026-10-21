@@ -137,6 +137,33 @@ describe('planVideoExport', () => {
     if (!scale.ok) expect(scale.error.message).toMatch(/scale/);
   });
 
+  it('exports a three-minute range in one piece at a reduced frame step, and says what the cap means', () => {
+    const document = videoDocument();
+    // The roadmap's three-minute criterion. At the composition's own 30 fps this is 5 400 frames and
+    // is refused; at one frame in four it is 1 350 and is a single export. The limit is on frames,
+    // not on seconds, and this pins that distinction so the documentation cannot drift from it.
+    const payload = payloadWithClip({ duration: 180 });
+    const threeMinutes = { ...payload, duration: 180 };
+
+    const atFullRate = planVideoExport({ document, payload: threeMinutes, from: 0, to: 180 });
+    expect(atFullRate.ok).toBe(false);
+    if (!atFullRate.ok) expect(atFullRate.error.message).toContain(String(MAX_VIDEO_EXPORT_FRAMES));
+
+    const reduced = planVideoExport({
+      document,
+      payload: threeMinutes,
+      from: 0,
+      to: 180,
+      frameStep: 4,
+    });
+    expect(reduced.ok).toBe(true);
+    if (reduced.ok) {
+      expect(reduced.value.frameCount).toBe(1350);
+      expect(reduced.value.times.at(-1)).toBeLessThan(180);
+      expect(reduced.value.times[1]! - reduced.value.times[0]!).toBeCloseTo(4 / 30, 6);
+    }
+  });
+
   it('refuses an export with missing media or nothing to render', () => {
     const document = videoDocument();
 

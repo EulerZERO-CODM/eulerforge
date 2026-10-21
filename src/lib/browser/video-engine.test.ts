@@ -137,7 +137,7 @@ describe('VideoMediaPool', () => {
     await expect(pending).resolves.toBe(true);
   });
 
-  it('waits for the frame the seek landed on, not merely for `seeked`', async () => {
+  it('reports a seek as reached on `seeked`, without waiting for a presentation callback', async () => {
     const pool = makePool();
     const ensured = pool.ensure(MEDIA);
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -147,72 +147,17 @@ describe('VideoMediaPool', () => {
     element.dispatchEvent(new Event('loadeddata'));
     await ensured;
 
-    // The browser says the seek is over while the compositor still shows the previous picture.
-    // `drawImage` at that moment copies the old frame, which is how an exported PNG could disagree
-    // with the preview at the same timestamp on a busy machine.
-    let presented: (() => void) | undefined;
-    element.requestVideoFrameCallback = (callback) => {
-      presented = callback;
+    // A timeout would show up as a delayed resolution; a callback that never fires must not delay
+    // the seek, because the export pays this cost once per frame.
+    let presented = 0;
+    element.requestVideoFrameCallback = () => {
+      presented += 1;
       return 1;
     };
-    let settled = false;
-    const pending = pool.seek(MEDIA.id, 0.4).then((result) => {
-      settled = true;
-      return result;
-    });
-    element.dispatchEvent(new Event('seeked'));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(settled).toBe(false);
-
-    presented?.();
-    await expect(pending).resolves.toBe(true);
-    expect(settled).toBe(true);
-  });
-
-  it('still reaches the position when the browser has no frame callbacks', async () => {
-    const pool = makePool();
-    const ensured = pool.ensure(MEDIA);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const element = created[0];
-    if (!element) throw new Error('the pool created no element');
-    element.readyState = 2;
-    element.dispatchEvent(new Event('loadeddata'));
-    await ensured;
-
-    // Firefox has no `requestVideoFrameCallback`; a seek must not hang waiting for one.
-    vi.useFakeTimers();
     const pending = pool.seek(MEDIA.id, 0.4);
     element.dispatchEvent(new Event('seeked'));
-    await Promise.resolve();
-    await Promise.resolve();
-    await vi.advanceTimersByTimeAsync(2_500);
     await expect(pending).resolves.toBe(true);
-  });
-
-  it('does not hang when a frame callback never arrives', async () => {
-    const pool = makePool();
-    const ensured = pool.ensure(MEDIA);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    const element = created[0];
-    if (!element) throw new Error('the pool created no element');
-    element.readyState = 2;
-    element.dispatchEvent(new Event('loadeddata'));
-    await ensured;
-
-    // A callback that is advertised and never called must cost one bounded wait, not a hang.
-    element.requestVideoFrameCallback = () => 1;
-    vi.useFakeTimers();
-    const pending = pool.seek(MEDIA.id, 0.4);
-    element.dispatchEvent(new Event('seeked'));
-    await vi.advanceTimersByTimeAsync(0);
-    let settled = false;
-    void pending.then(() => {
-      settled = true;
-    });
-    expect(settled).toBe(false);
-
-    await vi.advanceTimersByTimeAsync(2_500);
-    await expect(pending).resolves.toBe(true);
+    expect(presented).toBe(0);
   });
 
   it('reports a missing element rather than pretending a seek happened', async () => {
