@@ -20,6 +20,28 @@ import { STORAGE_KEY, addLayer, createProject, layerRow, stored } from './fixtur
 
 const PHONE = { width: 390, height: 844 } as const;
 
+const STUDIOS = ['design', 'illustration', 'photo', 'motion', 'video'] as const;
+
+/**
+ * The landmark that proves the right workspace opened.
+ *
+ * A new Photo project has no photograph yet, so the stage shows an import prompt rather than the
+ * preview canvas; the prompt is the surface at that point and is what a person sees.
+ */
+function studioSurface(page: Page, studio: (typeof STUDIOS)[number]) {
+  const testId = {
+    design: 'artboard',
+    illustration: 'vector-surface',
+    photo: null,
+    motion: 'motion-preview',
+    video: 'video-preview',
+  } as const;
+  const id = testId[studio];
+  return id === null
+    ? page.getByRole('button', { name: 'Import a photo file' })
+    : page.getByTestId(id);
+}
+
 /**
  * Collects uncaught exceptions: a page that throws is not usable even if it still renders.
  *
@@ -239,12 +261,29 @@ test.describe('a first visit', () => {
 test.describe('every studio on a phone', () => {
   test.use({ viewport: PHONE });
 
-  test('lays out without a sideways scroll', async ({ page }) => {
-    for (const studio of ['design', 'illustration', 'photo', 'motion', 'video']) {
+  test('lays out the landing pages, the workspaces and the main routes without a sideways scroll', async ({
+    page,
+  }) => {
+    for (const studio of STUDIOS) {
       await page.goto(`/studios/${studio}`);
       await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible();
       await expectNoHorizontalOverflow(page);
+
+      // The workspace is the screen a person actually edits in, and it is the one with the most
+      // controls competing for the width — so open a real project in each studio at this width.
+      await page.getByRole('link', { name: 'Create a project' }).first().click();
+      await expect(page).toHaveURL(new RegExp(`/create\\?studio=${studio}$`));
+      await page.getByRole('button', { name: 'Continue', exact: true }).click();
+      await page.getByRole('button', { name: 'Continue', exact: true }).click();
+      await page.getByLabel('Project name').fill(`${studio} on a phone`);
+      await page.getByRole('button', { name: 'Continue', exact: true }).click();
+      await page.getByRole('button', { name: 'Create project' }).click();
+      await page.waitForURL(/\/workspace\/[^/]+$/);
+      // Each studio's own editing surface, so "the workspace opened" means the real one did.
+      await expect(studioSurface(page, studio)).toBeVisible({ timeout: 20_000 });
+      await expectNoHorizontalOverflow(page);
     }
+
     for (const route of ['/', '/projects', '/roadmap', '/settings']) {
       await page.goto(route);
       await expectNoHorizontalOverflow(page);
