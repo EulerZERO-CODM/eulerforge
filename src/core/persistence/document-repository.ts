@@ -53,9 +53,13 @@ function parseEnvelope(raw: string | null): Result<readonly unknown[]> {
     parsed = JSON.parse(raw);
   } catch (error) {
     return err(
-      forgeError('storage-corrupt', 'The saved project index could not be read and was ignored.', {
-        detail: error instanceof Error ? error.message : undefined,
-      }),
+      forgeError(
+        'storage-corrupt',
+        'The saved project index could not be read. Nothing was deleted — clear it in Settings › Local data to start again.',
+        {
+          detail: error instanceof Error ? error.message : undefined,
+        },
+      ),
     );
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
@@ -69,11 +73,33 @@ function parseEnvelope(raw: string | null): Result<readonly unknown[]> {
 export class LocalDocumentRepository implements DocumentRepository {
   public constructor(private readonly storage: KeyValueStorage) {}
 
-  public async list(): Promise<Result<DocumentLoadReport>> {
+  /** The stored entries exactly as written, before any validation. */
+  private entries(): Result<readonly unknown[]> {
     const raw = this.storage.get(DOCUMENTS_KEY);
     if (!raw.ok) return err(raw.error);
+    return parseEnvelope(raw.value);
+  }
 
-    const parsed = parseEnvelope(raw.value);
+  /**
+   * Entries that do not migrate, so a later write can keep them.
+   *
+   * A record this build cannot read is not garbage: it may have been written by a newer deployment.
+   * Rewriting storage from the successfully loaded documents alone would delete it the next time
+   * anything at all was saved — a silent loss with no error and no undo.
+   */
+  private unreadableEntries(excludeId?: string): readonly unknown[] {
+    const entries = this.entries();
+    if (!entries.ok) return [];
+    return entries.value.filter((entry) => {
+      if (migrateDocument(entry).ok) return false;
+      if (excludeId === undefined) return true;
+      const id = (entry as { readonly id?: unknown }).id;
+      return typeof id !== 'string' || id !== excludeId;
+    });
+  }
+
+  public async list(): Promise<Result<DocumentLoadReport>> {
+    const parsed = this.entries();
     if (!parsed.ok) return err(parsed.error);
 
     const documents: ForgeDocument[] = [];
@@ -113,7 +139,8 @@ export class LocalDocumentRepository implements DocumentRepository {
     if (!list.ok) return err(list.error);
 
     const others = list.value.documents.filter((existing) => existing.id !== document.id);
-    const next = [document, ...others];
+    // Keep the records this build cannot read; only this document's old copy is replaced.
+    const next = [document, ...others, ...this.unreadableEntries(document.id)];
     const write = this.write(next);
     if (!write.ok) return err(write.error);
     return ok(document);
@@ -122,7 +149,10 @@ export class LocalDocumentRepository implements DocumentRepository {
   public async remove(id: DocumentId): Promise<Result<void>> {
     const list = await this.list();
     if (!list.ok) return err(list.error);
-    return this.write(list.value.documents.filter((document) => document.id !== id));
+    return this.write([
+      ...list.value.documents.filter((document) => document.id !== id),
+      ...this.unreadableEntries(id),
+    ]);
   }
 
   public async clearAll(): Promise<Result<void>> {
@@ -130,7 +160,7 @@ export class LocalDocumentRepository implements DocumentRepository {
     return removed.ok ? ok(undefined) : err(removed.error);
   }
 
-  private write(documents: readonly ForgeDocument[]): Result<void> {
+  private write(documents: readonly unknown[]): Result<void> {
     const envelope: DocumentsEnvelope = {
       schemaVersion: CURRENT_SCHEMA_VERSION,
       savedAt: new Date().toISOString(),

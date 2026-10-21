@@ -2,7 +2,7 @@
   "name": "eulerforge",
   "version": "0.1.0",
   "private": true,
-  "description": "Euler's Forge \u2014 a browser-first, all-in-one creative platform. Create anything. Learn everything.",
+  "description": "Euler's Forge — a browser-first, all-in-one creative platform. Create anything. Learn everything.",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=22.12.0"
@@ -34,6 +34,7 @@
     "@radix-ui/react-visually-hidden": "1.2.13",
     "lucide-react": "1.55.0",
     "next": "16.4.0",
+    "polygon-clipping": "^0.15.7",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "zod": "4.6.6"

@@ -8,7 +8,7 @@ import {
   sceneSchema,
   textLayerSchema,
 } from './schema';
-import { MAX_LAYERS, MAX_LAYER_SIZE, MAX_TEXT_LENGTH } from './layer-types';
+import { MAX_LAYERS, MAX_LAYER_SIZE, MAX_TEXT_LENGTH, PATH_TEXT_LIMITS } from './layer-types';
 import { attributionRecord, imageLayer, rectLayer, sceneOf, textLayer } from '../../testing/layers';
 
 describe('layerSchema', () => {
@@ -116,6 +116,83 @@ describe('textLayerSchema', () => {
     expect(
       textLayerSchema.safeParse({ ...layer, text: { ...layer.text, color: '#fff' } }).success,
     ).toBe(false);
+  });
+});
+
+describe('path text schema', () => {
+  const square = {
+    contours: [
+      {
+        closed: true,
+        nodes: [
+          { point: { x: 0, y: 0 }, handleIn: null, handleOut: null },
+          { point: { x: 10, y: 0 }, handleIn: null, handleOut: null },
+          { point: { x: 10, y: 10 }, handleIn: null, handleOut: null },
+        ],
+      },
+    ],
+  };
+  const style = {
+    fill: '#22cc88',
+    fillRule: 'nonzero',
+    fillOpacity: 1,
+    stroke: null,
+    strokeWidth: 1,
+    strokeOpacity: 1,
+    lineCap: 'butt',
+    lineJoin: 'miter',
+    dashArray: [],
+  };
+  const run = {
+    content: 'Stored run',
+    fontSize: 24,
+    letterSpacing: 1,
+    startOffset: 0.25,
+    baseline: 'below',
+    colour: '#112233',
+    fontStackId: 'mono',
+  };
+
+  function pathLayerWith(text: unknown) {
+    return {
+      id: 'lyr-path-text',
+      name: 'Arc',
+      type: 'path',
+      visible: true,
+      locked: false,
+      opacity: 1,
+      frame: { x: 0, y: 0, width: 10, height: 10 },
+      vector: { path: square, style, text },
+    };
+  }
+
+  it('accepts a run and accepts its absence', () => {
+    expect(layerSchema.safeParse(pathLayerWith(run)).success).toBe(true);
+    expect(layerSchema.safeParse(pathLayerWith(null)).success).toBe(true);
+    expect(layerSchema.safeParse(pathLayerWith(undefined)).success).toBe(true);
+  });
+
+  it('rejects settings outside the documented ranges', () => {
+    expect(layerSchema.safeParse(pathLayerWith({ ...run, fontSize: 2 })).success).toBe(false);
+    expect(layerSchema.safeParse(pathLayerWith({ ...run, letterSpacing: 500 })).success).toBe(
+      false,
+    );
+    expect(layerSchema.safeParse(pathLayerWith({ ...run, startOffset: 2 })).success).toBe(false);
+    expect(
+      layerSchema.safeParse(
+        pathLayerWith({ ...run, content: 'x'.repeat(PATH_TEXT_LIMITS.maxContentLength + 1) }),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('rejects an unknown baseline, font stack or colour', () => {
+    expect(layerSchema.safeParse(pathLayerWith({ ...run, baseline: 'sideways' })).success).toBe(
+      false,
+    );
+    expect(layerSchema.safeParse(pathLayerWith({ ...run, fontStackId: 'comic' })).success).toBe(
+      false,
+    );
+    expect(layerSchema.safeParse(pathLayerWith({ ...run, colour: '#fff' })).success).toBe(false);
   });
 });
 

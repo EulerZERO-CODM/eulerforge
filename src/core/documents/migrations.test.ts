@@ -92,6 +92,32 @@ describe('migrateDocument', () => {
     }
   });
 
+  it('refuses an object that is not shaped like any project at all', () => {
+    // Treating every version-less object as a blank v0 project would replace a corrupted record
+    // with an empty one that looks saved.
+    const foreign = migrateDocument({ nonsense: true });
+    expect(foreign.ok).toBe(false);
+    if (!foreign.ok) {
+      expect(foreign.error.code).toBe('storage-corrupt');
+      expect(foreign.error.message).toMatch(/not a document/i);
+    }
+    expect(migrateDocument({}).ok).toBe(false);
+  });
+
+  it('refuses a record whose version field is present but unreadable', () => {
+    for (const schemaVersion of ['7', -1, 1.5, null]) {
+      const result = migrateDocument({ ...legacyRecord, schemaVersion });
+      expect(result.ok, JSON.stringify(schemaVersion)).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('storage-corrupt');
+    }
+  });
+
+  it('still rescues a version-less record that only has a title', () => {
+    const result = migrateDocument({ title: 'Only a title' });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.title).toBe('Only a title');
+  });
+
   it('reports corrupt records rather than crashing the loader', () => {
     expect(migrateDocument('nope').ok).toBe(false);
     expect(migrateDocument([1, 2, 3]).ok).toBe(false);
@@ -133,13 +159,13 @@ const versionOneRecord = {
   updatedAt: '2025-12-02T10:00:00.000Z',
 };
 
-describe('migrateDocument — v1 to v2', () => {
+describe('migrateDocument — legacy records to the current schema', () => {
   it('opens an existing saved project with an empty scene instead of inventing artwork', () => {
     const result = migrateDocument(versionOneRecord);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.value.schemaVersion).toBe(2);
+    expect(result.value.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(result.value.scene).toEqual({ layers: [] });
     expect(result.value.attribution).toEqual([]);
   });
@@ -165,12 +191,12 @@ describe('migrateDocument — v1 to v2', () => {
     expect(result.value.canvas.width).toBe(1080);
   });
 
-  it('runs v0 records through both steps in order', () => {
+  it('runs v0 records through every step in order', () => {
     const result = migrateDocument(legacyRecord);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.value.schemaVersion).toBe(2);
+    expect(result.value.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(result.value.scene.layers).toEqual([]);
     expect(result.value.canvas.width).toBe(1240);
   });
@@ -187,16 +213,198 @@ describe('migrateDocument — v1 to v2', () => {
   });
 
   it('rejects a document from a newer schema instead of dropping its scene', () => {
-    const result = migrateDocument({ ...versionOneRecord, schemaVersion: 3 });
+    const result = migrateDocument({
+      ...versionOneRecord,
+      schemaVersion: CURRENT_SCHEMA_VERSION + 1,
+    });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('unsupported');
   });
 });
 
+describe('older documents reach the current schema without rewriting their content', () => {
+  function v4PathDocument() {
+    const created = createDocument(
+      {
+        title: 'Saved before paint',
+        studioId: 'illustration',
+        documentTypeId: brand<'DocumentTypeId'>('illustration.artboard'),
+        canvas: DEFAULT_CANVAS,
+        scene: {
+          layers: [
+            {
+              id: brand<'LayerId'>('lyr-flat'),
+              name: 'Flat card',
+              visible: true,
+              locked: false,
+              opacity: 1,
+              frame: { x: 0, y: 0, width: 10, height: 10 },
+              type: 'path',
+              vector: {
+                path: {
+                  contours: [
+                    {
+                      closed: true,
+                      nodes: [
+                        { point: { x: 0, y: 0 }, handleIn: null, handleOut: null },
+                        { point: { x: 10, y: 0 }, handleIn: null, handleOut: null },
+                        { point: { x: 10, y: 10 }, handleIn: null, handleOut: null },
+                      ],
+                    },
+                  ],
+                },
+                style: {
+                  fill: '#22cc88',
+                  fillRule: 'nonzero',
+                  fillOpacity: 1,
+                  stroke: null,
+                  strokeWidth: 1,
+                  strokeOpacity: 1,
+                  lineCap: 'butt',
+                  lineJoin: 'miter',
+                  dashArray: [],
+                },
+              },
+            },
+          ],
+        },
+      },
+      { generateId: () => 'doc-v4-paint', now: () => new Date('2026-06-01T00:00:00.000Z') },
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    return JSON.parse(JSON.stringify(created.value)) as Record<string, unknown>;
+  }
+
+  it('stamps the current version and leaves the flat fill meaning the same thing', () => {
+    const v4 = { ...v4PathDocument(), schemaVersion: 4 };
+    const migrated = migrateDocument(v4);
+    expect(migrated.ok).toBe(true);
+    if (!migrated.ok) return;
+    expect(migrated.value.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    const layer = migrated.value.scene.layers[0];
+    if (layer?.type !== 'path') throw new Error('expected a path layer');
+    expect(layer.vector.style.fill).toBe('#22cc88');
+    expect(layer.vector.style.fillPaint).toBeUndefined();
+  });
+
+  it('does not invent paint for a document that had none', () => {
+    const v4 = { ...v4PathDocument(), schemaVersion: 4 };
+    const migrated = migrateDocument(v4);
+    if (!migrated.ok) throw new Error(migrated.error.message);
+    const layer = migrated.value.scene.layers[0];
+    if (layer?.type !== 'path') throw new Error('expected a path layer');
+    expect(layer.vector.style.strokePaint).toBeUndefined();
+  });
+});
+
+describe('v6 → v7: a path that carried no text keeps meaning the same', () => {
+  /**
+   * A record exactly as the previous version wrote it: the same path and paint, with no `text` key
+   * at all. v7 only *adds* an optional field, so the migration must not invent one or rewrite the
+   * geometry — the old file has to load looking identical.
+   */
+  function v6PathDocument(): Record<string, unknown> {
+    const created = createDocument(
+      {
+        title: 'Saved before text on a path',
+        studioId: 'illustration',
+        documentTypeId: brand<'DocumentTypeId'>('illustration.artboard'),
+        canvas: DEFAULT_CANVAS,
+        scene: {
+          layers: [
+            {
+              id: brand<'LayerId'>('lyr-plain'),
+              name: 'Plain arc',
+              visible: true,
+              locked: false,
+              opacity: 1,
+              frame: { x: 0, y: 0, width: 10, height: 5 },
+              type: 'path',
+              vector: {
+                path: {
+                  contours: [
+                    {
+                      closed: false,
+                      nodes: [
+                        { point: { x: 0, y: 5 }, handleIn: null, handleOut: null },
+                        { point: { x: 5, y: 0 }, handleIn: null, handleOut: null },
+                        { point: { x: 10, y: 5 }, handleIn: null, handleOut: null },
+                      ],
+                    },
+                  ],
+                },
+                style: {
+                  fill: null,
+                  fillRule: 'nonzero',
+                  fillOpacity: 1,
+                  stroke: '#112233',
+                  strokeWidth: 2,
+                  strokeOpacity: 1,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                  dashArray: [],
+                },
+              },
+            },
+          ],
+        },
+      },
+      { generateId: () => 'doc-v6-text', now: () => new Date('2026-07-01T00:00:00.000Z') },
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    const record = JSON.parse(JSON.stringify(created.value)) as {
+      schemaVersion: number;
+      scene: { layers: { vector: { text?: unknown } }[] };
+    };
+    record.schemaVersion = 6;
+    for (const layer of record.scene.layers) delete layer.vector.text;
+    return record as unknown as Record<string, unknown>;
+  }
+
+  it('stamps v7 without adding a run or moving the geometry', () => {
+    const migrated = migrateDocument(v6PathDocument());
+    expect(migrated.ok).toBe(true);
+    if (!migrated.ok) return;
+    expect(migrated.value.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    const layer = migrated.value.scene.layers[0];
+    if (layer?.type !== 'path') throw new Error('expected a path layer');
+    // Absent and `null` both mean "this path carries no text"; the loader materialises the optional
+    // field, which is the only change v7 makes to an older record.
+    expect(layer.vector.text ?? null).toBeNull();
+    expect(layer.vector.style.stroke).toBe('#112233');
+    expect(layer.vector.path.contours[0]?.nodes).toHaveLength(3);
+  });
+
+  it('migrates a v0 record through the new step too', () => {
+    const result = migrateDocument(legacyRecord);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.schemaVersion).toBe(7);
+  });
+});
+
 describe('pendingMigrations', () => {
   it('lists the steps a version still has to pass through', () => {
-    expect(pendingMigrations(0)).toHaveLength(2);
-    expect(pendingMigrations(1)).toHaveLength(1);
+    // One step per published version, so a version-0 record walks the whole documented chain.
+    expect(pendingMigrations(0)).toHaveLength(CURRENT_SCHEMA_VERSION);
+    expect(pendingMigrations(1)).toHaveLength(CURRENT_SCHEMA_VERSION - 1);
+    expect(pendingMigrations(CURRENT_SCHEMA_VERSION - 1)).toHaveLength(1);
     expect(pendingMigrations(CURRENT_SCHEMA_VERSION)).toHaveLength(0);
+  });
+
+  it('appends one step per published version and never rewrites an older one', () => {
+    const steps = pendingMigrations(2);
+    expect(steps.map((step) => `${String(step.from)}->${String(step.to)}`)).toEqual([
+      '2->3',
+      '3->4',
+      '4->5',
+      '5->6',
+      '6->7',
+    ]);
+    expect(steps[0]?.description).toMatch(/vector path layers/i);
+    expect(steps[1]?.description).toMatch(/studio payload/i);
+    expect(steps[2]?.description).toMatch(/gradient or pattern paint/i);
+    expect(steps[3]?.description).toMatch(/range selections/i);
+    expect(steps[4]?.description).toMatch(/text on their contour/i);
   });
 });

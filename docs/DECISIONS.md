@@ -572,3 +572,566 @@ persistence, core not knowing about React, the DOM, the state layer or routes �
 is crossed, and each was verified by introducing a deliberate violation and watching ESLint report it.
 A future module that needs a browser API has one obvious home, and a reviewer can accept or reject it as
 a one-line change of a pattern list rather than as an unwritten convention.
+
+## ADR-0020 — The path kernel is its own model, and geometry never learns about SVG or React
+
+**Status:** accepted (Phase 3).
+
+**Context.** Phase 3 needs a vector capability that the Illustration Studio can edit, the renderer can
+paint, the export pipeline can serialise and a later Motion Studio can animate. The obvious shortcut is
+to make SVG path syntax the in-memory representation: `M/L/C/A` strings, parsed on demand, with the
+editor mutating document text. That shortcut fails the requirements in three separate ways. It puts a
+*markup* format at the centre of a data model that has to answer geometric questions (bounds,
+hit-testing, transforms, boolean combination) cheaply and unambiguously; it makes every edit a string
+rewrite, so a node drag has no natural target to address and no round-trip identity; and it welds the
+editor's keyboard and pointer behaviour to whatever the last serialiser happened to emit.
+
+The second shortcut is to let the kernel reach for the browser: measure a curve with
+`SVGGeometryElement.getTotalLength`, hit-test with `isPointInStroke`, or compute bounds from a rendered
+`<path>`. Those APIs are only available in a DOM and only for vector shapes that are attached to a
+document, which would make the kernel untestable in Node and unusable in the export path.
+
+**Decision.**
+
+- **One immutable path model, addressed by index.** `src/core/vector/types.ts` defines a path as
+  contours of nodes; each node carries a point, an optional `handleIn`/`handleOut`, and a kind
+  (corner / smooth / asymmetric). Segments are therefore *between* nodes, and an edit targets
+  `{ contourIndex, nodeIndex, side }` — the identity the UI needs and the identity a test can assert.
+  A contour that closes records `closed: true` rather than repeating its first node, so a closed shape
+  has no duplicate vertex to keep in sync.
+- **Geometry is framework-free and dependency-light.** `src/core/vector/**` imports no DOM, no React,
+  no storage and no SVG module; ESLint bans those imports for `src/core/**` (ADR-0019), and the kernel
+  is covered by Node tests (`path`, `geometry`, `path-data`, `validity`, `ops`, `shapes`, `pen`,
+  `pick`, `boolean`). Numbers are the only currency: flattening, arc-length sampling and area
+  computation are hand-written where they are small and well understood, and all of them are
+  deterministic.
+- **SVG is a boundary, not a model.** `src/core/svg/**` converts between the model and markup in both
+  directions. The serialiser is deterministic (sorted attribute order, computed `viewBox`, stable
+  number formatting at a fixed digit count) and the importer parses markup into the same model. A
+  round-trip is therefore a property of the conversion, not of the editor: the tests compare
+  coordinates within a documented tolerance (`1e-3` in user units) rather than comparing strings.
+- **Tolerances are declared once.** `src/core/vector/tolerance.ts` is the single source: point
+  coincidence `1e-6`, flattening step `0.05` px, area epsilon `1e-6`, stroke hit slack `3` px. Nothing
+  else is allowed to invent an epsilon, and an operation that changes the effective tolerance (a
+  boolean, which flattens first) has to *report* it — which is why the boolean command returns the
+  flattening tolerance and the flattened segment counts to the interface.
+- **Invalid geometry is a value, not an exception.** Because paths can come from a file, every
+  operation returns a `Result<T>` and `validatePath`/`validateVectorContent` name the specific problem
+  (`degenerate-contour`, `non-finite-point`, `too-many-nodes`, …). A closed contour with fewer than
+  three distinct nodes is rejected rather than silently repaired.
+
+**Consequences.** The editing surface, the painter, the SVG exporter and the interchange path all
+consume exactly the same geometry, so an edit cannot mean one thing on screen and another in a file;
+the kernel is unit-testable in Node with no canvas; and boolean results can be re-validated for
+topological consistency before they are offered to the user. The cost is conversion code in two
+places (SVG and the render plan) and a flattening step before boolean operations, which is a visible,
+reported approximation rather than a hidden one. Curve-preserving boolean operations remain future
+work, and the interface says so where it matters.
+
+## ADR-0021 — Boolean operations come from a reviewed dependency, and the result is checked
+
+**Status:** accepted (Phase 3).
+
+**Context.** Union, difference, intersection and exclusive-or over paths are the part of a vector
+editor where hand-written code goes wrong quietly: self-intersections, coincident edges, overlapping
+holes and degenerate slivers each produce output that *looks* plausible and is not topologically valid.
+The Phase 3 brief asks for reliable output and for a mature library to be evaluated before writing
+computational geometry from scratch.
+
+Four candidate libraries were compared on the criteria that matter here — licence, algorithm,
+dependency weight, DOM-independence and maintenance: `polygon-clipping` (MIT, Martinez–Rueda sweep on
+polygons, no dependencies, plain JavaScript), `martinez-polygon-clipping` (MIT, the upstream of the
+same algorithm), `js-angusj-clipper` (a WebAssembly port of Clipper, permissive licence but a WASM
+artefact), and `paper.js` (a full graphics framework under a permissive licence). The last two were
+rejected for weight and for pulling a framework into the core; the first two are the same algorithm,
+with `polygon-clipping` being the maintained one that ships a modern entry point.
+
+**Decision.**
+
+- **Depend on `polygon-clipping@0.15.7` (MIT)** in `src/core/vector/boolean.ts` only. It is pure
+  JavaScript with no DOM dependency, so the kernel stays usable in Node; it takes and returns plain
+  nested arrays, so no library type leaks into the model.
+- **Import it as a default import.** The published module is CommonJS/UMD with an ESM wrapper that
+  exports the operations object as the *default*; `import * as` resolves to `undefined` in a browser
+  bundle while still working under Node. The regression was found by the browser CI job, so a
+  Chromium E2E performs a real boolean operation as a guard.
+- **Own the approximation.** Curves are flattened to line segments at `TOLERANCE.flatten` before
+  clipping, because the library is polygonal. That is a real limitation, so the command reports the
+  tolerance and both flattened segment counts, and the result is a polygonal path with corner nodes —
+  the interface states this instead of implying that curves survived.
+- **Validate the output.** Every result is re-parsed through `validatePath` and checked for
+  topological consistency in `boolean.test.ts`: contour count and nesting for holes, no repeated
+  degenerate contours, area identities for difference and intersection, coincidence handling, and the
+  documented refusals for empty or invalid input. A boolean that cannot produce a sound path fails
+  with a message rather than returning geometry that would silently corrupt a document.
+- **Keep the licence record honest.** The dependency is listed with its licence in the repository's
+  dependency documentation, and no other vector dependency is added.
+
+**Consequences.** Boolean operations behave predictably on the cases that break naive implementations,
+and the failure mode for the polygonal approximation is *visible* rather than silent. The cost is one
+runtime dependency in the core, a flattening step that loses curve handles inside the affected shapes,
+and output that is denser than its input. Those costs are the reason curve-exact booleans stay
+`planned` in the studio registry.
+
+## ADR-0022 — Vector artwork crosses the Design/Illustration boundary as a translation with a report
+
+**Status:** accepted (Phase 3).
+
+**Context.** The two studios hold artwork in different documents, and Phase 3 requires a tested
+interchange in both directions *for the supported subset*, with unsupported content named rather than
+dropped. The tempting shortcut is to copy the layer list and hope: a text layer becomes a path with no
+glyphs, an image layer becomes an empty shape, and the user discovers the loss after the fact.
+
+**Decision.**
+
+- **Interchange is an explicit conversion, not a shared container.** `src/core/documents/interchange.ts`
+  takes layers and returns a `Result` with the converted layers, a per-layer list of what was carried
+  and a per-layer list of what was refused with a reason (`INTERCHANGE_LIMITATIONS` names each case in
+  the interface). Neither studio gains a dependency on the other's editor, and the conversion is
+  unit-tested from both directions.
+- **The supported subset is stated in one place.** Path layers travel whole, with geometry and style;
+  rectangle and ellipse layers travel as their generated paths (their shape has an exact path
+  equivalent in the kernel); text, graphics/images, groups with unsupported members, and any style the
+  target document type does not support are refused *by name*. Nothing is approximated silently.
+- **Rotation, effects and metadata are refused rather than baked.** A rotated layer cannot be
+  represented losslessly in a frame-only target without rasterising it, so it is reported; ids, names
+  and z-order are preserved so the converted document is still recognisable next to the original.
+- **The converted document is a new document, created through the normal path.** The interface calls
+  the same `documents.create` used by the creation flow (with the target studio's primary document
+  type), so a converted project is validated, persisted and reopenable like any other — and the
+  interface links to it.
+
+**Consequences.** A user sees exactly what will move before they press the button, and a refusal is
+impossible to mistake for success. The cost is that the conversion is conservative: some artwork a
+person might expect to travel does not, and the interface has to say so in plain language.
+
+## ADR-0023 — SVG export is only `available` when the bytes are produced in a browser
+
+**Status:** accepted (Phase 3).
+
+**Context.** `src/core/export/formats.ts` drives what the export panel offers, and a format marked
+`available` is a promise that pressing the button writes a real file. Phase 3's SVG payload is built in
+the core, but handing bytes to the browser is not: it needs an object URL, an anchor and a click
+(same boundary as ADR-0019). A format that is `available` while the panel falls through to the raster
+branch would be exactly the kind of misleading capability claim this project forbids.
+
+**Decision.**
+
+- **The core builds a payload; the browser adapter performs the download.**
+  `src/core/export/svg-export.ts` returns `{ contents, fileName, mimeType, bytes, unsupported }` with a
+  `Result` when the document cannot produce a valid file; `src/lib/browser/download.ts` hands it over.
+  Everything except the final click is unit-testable.
+- **The readiness checks and the download agree.** `export/checklist.ts` evaluates the same payload, so
+  the panel cannot show a green checklist and then download a different file. When layers are omitted
+  the export is *blocked* by default; the user may opt in to a partial export, and the interface then
+  names how many layers were left out and the payload records them.
+- **Evidence comes from the browser.** A Chromium spec performs the export, captures the download,
+  reads the file's bytes and re-imports them; the format stays `available` only while that spec passes.
+  Format status is also part of the format registry's own tests.
+- **Icon sets go through the same path.** The zip writer is pure (a stored-mode ZIP written by hand),
+  so the archive is unit-tested, and the browser spec checks the downloaded bytes start with the ZIP
+  signature and that the manifest names one file per object.
+- **An icon set is a selection export, not a scene export.** The panel is given the workspace
+  selection, and one classification (`iconLayersForSelection`) decides which selected layers are
+  visible paths. The count shown before the click, the button's enabled state, the layers handed to
+  the builder, the files in the archive and the report afterwards all come from that one set. A
+  selected layer that is hidden, fully transparent or not a path is named as skipped; a layer that is
+  merely present in the document is never included. The builder applies the same visibility rule itself, so
+  a caller cannot widen the set by passing the whole scene, and it returns the skipped layers rather
+  than dropping them. The regression test asserts the archive's entry list, not just its size, both
+  in jsdom (the bytes handed to the adapter) and in Chromium (the downloaded file).
+
+## ADR-0024 — Photo rendering is one pipeline with two backends, not two features
+
+**Status:** accepted (Phase 4).
+
+**Context.** Per-pixel adjustment work is what a GPU is for, and the roadmap commits to a WebGL2
+path. But WebGL2 is not guaranteed (headless browsers, blocked drivers, old hardware), and a photo
+editor that silently does nothing on such a device is worse than a slower one. Two independent
+implementations would also drift: the shader and the CPU code would disagree about exposure by one
+stop and nobody would notice until a user compared a preview with an export.
+
+**Decision.**
+
+- **`src/core/photo/pipeline.ts` is the definition.** It is pure, framework-free and returns pixels.
+  The WebGL renderer's fragment shader mirrors it, and the CPU renderer *is* it. A 12-swatch chart
+  and a masked mix are compared across both renderers in Chromium within **2/255 per channel**; the
+  parity test fails the build if they disagree.
+- **`auto` is the default renderer.** The engine tries WebGL2, and on refusal falls back to Canvas
+  2D *and reports why* (`fallbackReason` is shown in the stage and in the renderer panel). Choosing
+  "GPU" explicitly still falls back rather than failing to render, because a document you cannot
+  see is not a useful error message; the interface says which renderer produced the last preview.
+- **Export always uses the same decision.** The export panel re-renders the saved document at its
+  stored size through `renderPhoto`, encodes with the browser's own encoder, and reports the engine,
+  dimensions and byte count that produced the file. There is no second export renderer to drift.
+- **The working copy is capped at 2048 px on the long edge and previews at 1280 px.**
+  `preparePhoto` re-encodes the imported image to that size and stores it in the document, so a
+  project reopens without the original file and a 40 MP camera file cannot exhaust memory. The cap
+  is a product decision with a cost: the roadmap's 12 MP target is not exercised by the shipped
+  pipeline, and the capability ledger says so instead of quoting the target as if it were met.
+- **Masking is a strength map, not a selection object.** Strokes are normalised points plus radius,
+  hardness and fill, rasterised to one byte per pixel at the render size. That keeps masks this side
+  of the document schema (they are serialisable, migratable and tested) and makes the mask cost
+  proportional to the render, not to the number of points.
+
+**Consequences.** A browser without WebGL2 edits and exports the same documents, more slowly, and
+the UI never pretends otherwise. The cost is that GPU-specific effects (blur, distortion) cannot be
+added to one renderer alone, and every adjustment has to be expressible as a per-pixel function plus
+a separable blur — which is also what makes the parity test possible.
+
+## ADR-0025 — Motion export is a frame sequence, and the evaluator is the shared truth
+
+**Status:** accepted (Phase 5).
+
+**Context.** A motion editor promises "what you see is what you export". The tempting shape is a
+preview implementation and an export implementation that are "kept in sync" — which is precisely how
+the two drift apart. A video file would raise the same promise to "what you export plays back
+correctly", and a codec is a much larger claim: container, muxing, keyframes, audio and a browser
+support matrix that would have to be measured on real devices.
+
+**Decision.**
+
+- **One pure evaluator, two callers.** `src/core/motion/evaluate.ts` takes a document and a time and
+  returns the document at that time. The preview paints the result; the exporter evaluates the same
+  times and paints through the same `buildRenderPlan`/`paintPlan` pair. Neither has a private path.
+- **Export is a PNG sequence plus a manifest, in a zip.** The manifest records the composition, the
+  frame rate, the exact times and the file names, so the sequence can be reassembled elsewhere. The
+  panel and the studio page say "frame sequence", never "video".
+- **Times come from a plan, not from a clock.** `planMotionExport` computes the frame grid (inclusive
+  start, exclusive end) before a canvas exists, refuses an empty range, more than 1800 frames, or an
+  out-of-range scale, and reports those refusals as sentences. A 30 fps, 2 s export is exactly 60
+  frames — not "about 60".
+- **Frames are rendered one at a time.** Holding 30 canvases at 1080 px would allocate hundreds of
+  megabytes; the exporter renders, encodes and releases each frame, reports progress by count and
+  discards the partial archive when it is cancelled.
+- **The graph editor edits the same curve the evaluator solves.** Easing is stored as CSS-style cubic
+  control points, the editor drags those points, and the preset names map to the same numbers in one
+  table — so a curve cannot look different in the editor and in the output.
+
+**Consequences.** The parity claim is testable rather than aspirational: a Chromium spec downloads
+the archive, decodes a PNG and compares it with the live preview canvas at the same timestamp. The
+cost is that a user who expected an MP4 does not get one, and the studio must say so plainly — which
+it does, in the export panel and in the capability ledger.
+
+## ADR-0026 — Browser decoders, IndexedDB for bytes, and two honest exports
+
+**Status:** accepted (Phase 6).
+
+**Context.** Video is the first studio whose input and output are files the browser has to encode
+and decode. Three temptations had to be refused: storing media in the document, pretending a
+`<video>` element is frame-accurate, and offering "MP4 export" behind a button that cannot deliver
+one. The available primitives are the media elements (universally supported, codec support decided by
+the browser), `MediaRecorder` (widely supported, real-time only) and WebCodecs (powerful, not
+available in every browser this project must run in — notably not in the CI browser).
+
+**Decision.**
+
+- **Bytes in IndexedDB, metadata in the document.** `MediaStore` is a small promise-based interface
+  with an IndexedDB implementation and an in-memory fallback; the document references a media id and
+  carries only name, duration, dimensions and size. A photo project embeds its image because it is
+  capped at 2048 px; a video cannot.
+- **Decode with media elements.** One element per file, created lazily and kept in a pool. This
+  edits exactly the codecs the user's browser can play, which is the only claim that can be tested
+  on their machine. WebCodecs would be faster and frame-exact, and is left as a future upgrade
+  behind the same pool interface.
+- **Two exports, each labelled for what it is.** A PNG frame sequence is deterministic: the plan
+  fixes the times, every clip is seeked to its source time and the frame is painted by the same
+  `paintVideoFrame` the preview uses, then zipped with a manifest. A WebM take is a real-time
+  `MediaRecorder` capture of the same canvas plus the mixed audio graph; it is a *recording*, the
+  panel says so, and the report names the container the browser negotiated. There is no MP4 claim.
+- **Playback is a clock, not a fact about the file.** The transport owns time; elements are seeked
+  when paused and drift-corrected while playing. Scrubbing is therefore exact, and a slow decode
+  shows a `Decoding…` state rather than a silent freeze.
+
+**Consequences.** The parity claim is testable: the browser suite compares a decoded exported frame
+with the live preview at the same timestamp. The cost is a real limit — no proxy pipeline, so a very
+large file scrubs as fast as the browser can seek it, and a capture takes as long as the edit. Both
+limits are stated in the studio, the ledger and the roadmap rather than hidden.
+
+## ADR-0027 — An optional, single-process server behind the repository boundary
+
+**Status:** accepted (Phase 7).
+
+**Context.** Phase 7 asks for a remote document repository, authentication, account settings, a
+paginated catalogue and tests for authorization boundaries — while the product rule says local-first
+must keep working without an account, and the repository must never imply a deployed service. Three
+options were open: a hosted database (Supabase, Postgres, an ORM), a separate API service, or route
+handlers in the app with a small store.
+
+**Decision.** Route handlers inside the existing Next.js build, over a dependency-free JSON file
+store, with:
+- the platform's own document schema validating every write;
+- optimistic concurrency on the document's `revision`, with a `409` carrying the server's revision
+  and timestamp;
+- scrypt password hashes and opaque session tokens stored only as SHA-256 digests, delivered in
+  HttpOnly `SameSite=Lax` cookies;
+- ownership scoping in the store, so another account's document is `404` rather than `403`;
+- a deletion cascade (account → sessions, documents, index entries, share links) tested as one
+  operation;
+- an in-process write queue and atomic file replacement.
+
+The UI is a settings panel that plans a sync before performing one. The plan is a pure function over
+the local documents, the server's summaries and the last agreement this browser recorded, and it
+treats "present on both sides with no history" as a conflict rather than picking a winner.
+
+**Why not a database.** A database is the right next step, not the right first step: it would add a
+service dependency, credentials in the environment and a schema toolchain to a repository whose
+acceptance criteria are `npm ci && npm run verify && npm run test:e2e` on a clean machine. The store
+is deliberately small and replaceable — the route handlers use only its methods — and ADR-0027's
+successor (a database adapter) does not require touching them.
+
+**Why not a separate API service.** One optional feature does not justify a second build, a second
+dependency tree and a second deploy target, and sharing the document schema is what makes "the
+server never stores what the app cannot open" true by construction.
+
+**Consequences, stated plainly.**
+- **One process per data directory.** Concurrent writers from two Node instances would race; the
+  in-process queue protects only one process. This is in `docs/SERVER.md` next to the deployment
+  steps, not in a footnote.
+- **Rate limiting does not survive a restart** and does not coordinate across instances.
+- **No email verification, password reset, OAuth or MFA**, and no billing — the last is a product
+  decision, not a gap.
+- **Conflict resolution is a choice, not a merge.** Two independently edited documents offer "keep
+  this browser's copy" or "keep the server's copy"; there is no automatic three-way merge, and
+  saying otherwise would be the most dangerous kind of dishonesty in this feature.
+
+## ADR-0028 — Paint is geometry, and gradients are resolved from the shape's own bounds
+
+**Status:** accepted (Phase 3 hardening). Schema v5.
+
+**Context.** Phase 3's remaining honest gap was that shapes could only be painted with a flat colour.
+Paint is where a vector editor most easily lies to itself: a preview drawn one way and an exported file
+another, a gradient anchored to a shape in the editor and to the canvas in the file, or a "gradient"
+that is really a bitmap baked at the zoom level it happened to be viewed at. The repository rules also
+forbid adding a heavyweight graphics dependency without a compelling reason.
+
+**Decision.** Paint is described once, in `src/core/vector/paint.ts`, in the vocabulary both renderers
+speak:
+
+- four kinds: `solid`, `linear-gradient`, `radial-gradient`, `pattern`;
+- gradient points and centres are **fractions of the shape's bounding box** (`objectBoundingBox`
+  semantics), and a radial radius is a fraction of the shorter side;
+- a pattern is one of four deterministic motifs (`stripes`, `dots`, `grid`, `checks`) with a tile size
+  as a fraction of the shorter side, a rotation about the bounds centre and a foreground/background
+  colour — not a reference to arbitrary artwork;
+- stops are sorted, clamped and de-duplicated by `normaliseStops`, so the stored document, the canvas
+  gradient and the file always agree;
+- the canvas painter builds a real `CanvasGradient` from `resolveGradient`, and draws a pattern by
+  clipping to the path and tiling the motif's primitives — the same primitives `resolvePattern` hands
+  the SVG writer;
+- the SVG writer emits `userSpaceOnUse` definitions in absolute coordinates derived from the same
+  bounds, positional ids (`paint-1`, …) so re-exporting is byte-identical, and a
+  `data-forge-pattern` annotation on patterns so a re-import is exact;
+- the importer accepts only same-document `url(#id)` references to definitions it actually read,
+  converts absolute gradient coordinates back to shape-relative fractions, and reports anything it
+  cannot represent as `approximated` while keeping the shape's solid colour.
+
+**Why this over a library.** The four motifs and two gradient types cover the studio's stated scope,
+are ~250 lines with no dependency, are resolution-independent, and are serialisable without an
+intermediate bitmap. A full SVG-paint library would add a dependency and still not solve the harder
+problem — that the preview and the file must agree — which is solved here by construction: one
+resolver, two consumers.
+
+**Why the schema version bumps to 5.** ADR-0005 requires a bump, a migration step and a fixture test
+for every schema change. A v4 build reading a v5 document would silently drop `fillPaint`/
+`strokePaint` (they are optional and unknown keys are stripped), which is exactly the silent field
+loss ADR-0005 exists to prevent. The v4 → v5 migration rewrites nothing: a flat fill keeps its
+meaning, and the new keys are simply absent. `src/core/documents/migrations.test.ts` proves that a v4
+path document loads unchanged apart from its version stamp.
+
+**Consequences, stated plainly.**
+- Gradients cannot be anchored to strokes independently of the geometry, there is no gradient
+  `spreadMethod`/focal radial support, and arbitrary imported `<pattern>` content is approximated to a
+  solid colour rather than imitated.
+- Pattern tiles are square and anchored to the bounds' top-left corner; there is no per-side tiling.
+- A pattern is drawn as clipped primitives by the canvas painter, so a very small tile scale on a very
+  large shape costs more draw calls than a real `CanvasPattern` would. The UI caps scale at 0.02 of the
+  shorter side, and the painter's tile count is bounded by the shape's diagonal.
+- Flat fills and strokes remain the default and the fallback everywhere. `representativeColour` can
+  name a single colour for any consumer that genuinely needs one, and it is documented and tested as
+  a stand-in — the renderers never use it, because drawing a gradient as its midpoint would be a lie
+  about the file.
+
+## ADR-0029 — Range selections are stored as parameters and evaluated from the source pixels
+
+**Context.** Photo masks had only painted strokes: a brush, a lasso and an eraser. The remaining
+obvious way to describe a region is the one every raster editor offers — "select everything this
+bright" or "select everything this colour" — and the roadmap listed it as the gap that kept
+`p4.selection-mask` partial.
+
+**Decision.** A mask may carry up to eight *range selections* alongside its strokes. A range stores
+its parameters, never a bitmap:
+
+- luminance: `min` and `max` in 0–1 of relative luminance (Rec. 709 weights over sRGB bytes);
+- colour: a `#rrggbb` target and a `tolerance` in 0–1, measured as the root-mean-square distance in
+  normalised RGB;
+- both: a `feather` in 0–1 that widens the edge with a smoothstep, so a feathered range has a
+  continuous falloff rather than a 1-pixel step.
+
+Ranges and strokes combine with `max` into the same one-byte-per-pixel strength map that
+`rasteriseMask` already produced, and `inverted` is applied once to that union. The renderers are
+untouched: the Canvas 2D path, the WebGL mask pass and the CPU pipeline all consume the finished
+byte map exactly as before. Range evaluation lives in `src/core/photo/range.ts` (framework-free) and
+is called from `src/lib/browser/photo-engine.ts`, which owns the only DOM work — drawing the decoded
+photograph into an offscreen canvas to read its bytes.
+
+**Why parameters rather than a bitmap.** A stored bitmap would have to be re-derived whenever the
+preview size, the working copy or the selection's definition changed, would need its own history
+entries, and would make "remove this range" impossible to express without another mask layer. Stored
+parameters are resolution-independent, survive save/reload by construction, cost a few hundred bytes,
+and can be re-evaluated deterministically — `src/core/photo/range.test.ts` pins the arithmetic, and
+`src/core/photo/range.perf.test.ts` pins the cost (one range over 1.09 MP: ~9 ms median here; eight
+ranges: ~43 ms).
+
+**Measured from the source, never the preview.** A range is evaluated against the *unadjusted*
+source bytes, so dragging an exposure slider cannot make the selection crawl, and the preview and
+the export select the same pixels even though they render at different sizes. This mirrors the
+existing rule for the mask as a whole: the stack applies where the mask says, and the mask describes
+the photograph.
+
+**Honest limits.**
+- There is no subject/foreground detection. "Select by subject" would be a different promise (a model
+  or a segmentation algorithm), and it is not claimed.
+- Ranges are evaluated on the CPU even when the stack runs on the GPU; the readback happens only when
+  a range exists, but on a large export it is a real cost, hence the documented eight-range limit.
+- A feathered edge is an 8-bit strength map, so at most 256 levels; banding has not been inspected on
+  reference display hardware.
+- The selection is a union of *additive* ranges; there is no subtractive range or per-range inversion.
+  Inverting the whole mask remains the way to reverse the union.
+
+**Why the schema version bumps to 6.** ADR-0005 requires a bump for every additive schema change,
+because a v5 build reading a v6 document would strip `ranges` while reporting a clean load. The
+v5 → v6 migration rewrites nothing: a mask with no `ranges` keeps meaning exactly what it did, and
+`src/core/documents/migrations.test.ts` and `payload.test.ts` both prove that a v5 mask loads and is
+read as painted-only.
+
+## ADR-0030 — Text on a path is a property of the path, stored as parameters
+
+**Decision.** A path layer may carry one run of text laid along its own contour. The run is stored
+inside the layer's vector content (`vector.text` in the document schema) as parameters — content,
+font size, letter spacing, start offset as a fraction of the contour, which side of the line it sits
+on, colour and font stack — never as glyph positions or outlined geometry.
+
+**Why it belongs to the path.** The alternative, a separate text object that happens to follow a
+curve, would have to be kept in sync with the geometry on every node edit, transform and boolean
+operation, and would produce two history entries where the user made one change. Keeping the run on
+the path means a node drag moves the letters, a paint change leaves them alone, and one undo restores
+both the curve and the words. It also means a document has no orphaned text to explain when a path is
+deleted.
+
+**Layout is a pure function.** `src/core/vector/path-text.ts` flattens the path's first contour at
+`PATH_TEXT_FLATTENING` (0.25 units), measures each glyph with a measurer the caller supplies, and
+places it at the midpoint of its own advance with the tangent's angle. There is no DOM and no canvas
+in that module: `src/core/render/paint.ts` supplies `context.measureText` in the browser, and the
+tests supply a stub whose advance is exactly ten units per glyph. That is what makes the arithmetic
+pinnable (`path-text.test.ts`: straight lines, arcs, closed contours, spacing, dropped glyphs) instead
+of a screenshot assertion.
+
+**Painting is honest about what it cannot do.** The run is drawn after the shape's own fill and stroke,
+in the run's own colour, with `globalAlpha` taken from the layer opacity. Glyphs that would run past
+the end of the contour are dropped rather than wrapped or squeezed, and the layout reports how many;
+there is no second line and no ellipse-around-a-polygon baseline guessing. A path with no content
+paints exactly as it did before text existed, which is why `paintPath` skips the usual
+"does the style paint anything?" shortcut when a run is present — otherwise a shape whose only ink is
+text would be invisible.
+
+**The SVG boundary keeps the parameters.** A text-bearing shape is written as `<path id="text-path-N">`
+plus `<text font-size … letter-spacing … fill …><textPath href="#text-path-N" startOffset="25%">`.
+`dy` carries the baseline side for other viewers, and `data-forge-baseline` records it exactly so this
+project's importer never has to guess from a resolved length. Reading is deliberately narrow:
+
+- only a same-document `#id` reference is resolved, and only after the whole file has been walked, so
+  document order does not matter; the safety scan has already refused anything with a scheme or path;
+- an absolute `startOffset` is converted to a fraction of the contour's flattened length and reported
+  as an approximation, because SVG allows a length there and this model stores a fraction;
+- an unknown `font-family` is approximated to the system sans stack with a warning, since nothing is
+  downloaded;
+- free-standing `<text x y>` is still reported as unsupported rather than placed by guesswork, and a
+  reference to a shape that is not in the file is reported rather than silently dropped.
+
+**Schema v7.** The field is additive and nullable; ADR-0005 requires the bump because a v6 build
+reading a v7 document would strip the run while reporting a clean load. The v6 → v7 migration rewrites
+nothing: a path without `text` loads with the field absent or `null`, both of which mean "no text", and
+`src/core/documents/migrations.test.ts` proves that with a record written exactly as v6 wrote it.
+
+**Limits, stated rather than implied.** One run per path; the first contour only; no font embedding
+(the three stacks are the platform's own); no per-glyph editing, justification, or text on both sides
+of a line at once; content is capped at 240 characters, size at 4–512 units and spacing at
+−20–200 units. Drawing text *as* outline geometry is a different feature and remains planned.
+
+## ADR-0031 — A model may plan, but only the registry may execute
+
+**Decision.** The assistant has one execution path. A plan is a list of typed `ToolCall`s; a plan is
+produced either by the deterministic native planner or by a model behind `/api/assistant/plan`, and
+the executor validates and applies it identically. Nothing a model writes can reach a document except
+through a tool in `src/core/assistant/registry.ts`, and no tool can run code the model supplied.
+
+**The credential lives on the server.** A deployment enables model-assisted planning with
+`ASSISTANT_PROVIDER_URL`, `ASSISTANT_PROVIDER_KEY` and `ASSISTANT_PROVIDER_MODEL`. The route reads
+them, calls an OpenAI-compatible chat-completions endpoint, and returns a validated plan. `GET`
+publishes a label, a model name and a reason — never the key and never the endpoint. Provider error
+bodies are not forwarded, because a provider can echo the prompt; the user gets a sentence and the
+operator gets the HTTP status. A response with an unknown tool, a tool from another studio, a tool this
+build marks unavailable, an unknown or out-of-range argument, more than 32 steps, or an empty plan is
+rejected at the boundary with the offending step named. The browser checks the route's answer again
+(`readProviderPlanResponse`) and the executor validates once more, because a plan is data that has
+crossed a network.
+
+**Absence is the default, not a failure.** With no variables set, the native planner is the only
+planner: it understands a documented vocabulary, refuses everything else with alternatives, and the
+panel says that no model is configured. Editing never depends on a provider, and no test in this
+repository has been run against a real model or key.
+
+**A run is checkpointed, not replayed.** After each step the browser stores the goal, the plan and the
+ids that finished, under `eulerforge.v1.assistant-runs` and one record per document. It stores no
+document, no result and no credential. Resuming rebuilds a plan from the unfinished steps and rechecks
+it against the registry, so an interrupted run continues from the first unfinished step rather than
+applying the beginning twice; a record from another version, another studio or a corrupt entry is
+dropped. The checkpoint is removed when the run completes.
+
+**Retries are limited to failures that declare themselves recoverable.** A step that fails with
+`retryable: true` (currently only an export the browser refused transiently) gets exactly one more
+attempt and the step says it was retried. Validation failures, refusals and deterministic tool errors
+are never retried: repeating them would only delay the message the user needs.
+
+**Deliberately absent.** One wire format is implemented, with no streaming, no tool-calling API and no
+multi-turn revision; a plan is a single request. There is no image or video generation tool because the
+product has no such capability, and no tool can publish or share content, so there is nothing for the
+assistant to confirm before an external action. Motion and Video are refusal surfaces until they have
+native tools.
+
+## ADR-0032 — Tracing produces editable geometry, and says what it approximated
+
+**Decision.** Image tracing is a *vector* feature with a vector result: one filled path layer per
+palette colour, whose contours are the boundaries between that colour and everything else. It is not
+an import that embeds the bitmap, and not an autotrace that returns a single opaque blob: the output
+is ordinary path layers, so every node can be edited, the fill can be changed, the layer can be
+reordered and the export path is the one the studio already had.
+
+**Where the code lives.** The algorithm is `src/core/vector/trace.ts` — pure, framework-free, no DOM,
+tested in Node against synthetic RGBA buffers with known geometry. The browser work (file, decode,
+scratch canvas, pixel readback) is `src/lib/browser/image-trace.ts`, and the command that turns a
+report into layers is `src/core/editor/trace-commands.ts`. The split is the same one the rest of the
+application uses (ADR-0006, ADR-0020): the interesting arithmetic is testable without a browser, and
+the browser adapter is the only part that needs one.
+
+**The algorithm, and why these choices.** Box-average down to a 512 px working edge, median-cut the
+palette, assign each pixel to its nearest colour, walk the pixel lattice collecting every inside/outside
+edge, chain the edges into closed loops, simplify each loop, scale back to source coordinates. Holes
+are inner contours filled with the **even-odd** rule — the one thing that makes a ring a ring rather
+than a disc. Determinism is a requirement, not a nicety: the same pixels must trace to the same paths,
+so tie-breaks at diagonal pinches are fixed rather than incidental.
+
+Simplification is Douglas–Peucker **between detected corners**, not plain Douglas–Peucker over the
+loop. Plain recursion started on an arbitrary mid-edge point can shave a rectangle's corner into a
+skewed quadrilateral, which the tests caught: a traced square came back with an area 10 px² short.
+Corners are found with a wide window so the 90° steps of a pixel staircase average out, and the corner
+point itself is the index furthest from its window's chord.
+
+**What it refuses to pretend.** Boundaries are staircase polygons, not fitted Bézier curves, so a
+circle traced at high detail is a many-sided polygon; the panel says so and the detail slider is the
+honest control. The tracer works on a 512 px copy (a 12 MP photograph would otherwise cost 48 MB of
+pixel buffer for detail that is then discarded), so fine texture becomes colour regions, not detail.
+There is no stroke reconstruction: a line drawing becomes filled shapes. Transparent pixels are never
+traced, so a cut-out subject arrives without its background. The palette is capped at 16 colours and a
+single region at 4,000 nodes, and both are refusals with a reason rather than a silent truncation.

@@ -6,6 +6,7 @@
  * invented its own defaults would drift from what a user gets when they press the same button.
  */
 
+import { DEFAULT_VECTOR_STYLE, type VectorStyle } from '../vector';
 import type {
   FontStackId,
   ImageSettings,
@@ -33,6 +34,7 @@ export type LayerDefaults = {
   readonly text: TextSettings;
   readonly shape: ShapeSettings;
   readonly image: Omit<ImageSettings, 'href'>;
+  readonly vectorStyle: VectorStyle;
 };
 
 /** Neutral wording for a text layer created from the toolbar. */
@@ -85,12 +87,15 @@ export function defaultNameFor(type: LayerType): string {
       return 'Ellipse';
     case 'image':
       return 'Graphic';
+    case 'path':
+      return 'Path';
   }
 }
 
 export function layerDefaultsFor(type: LayerType): LayerDefaults {
   return {
     name: defaultNameFor(type),
+    vectorStyle: DEFAULT_VECTOR_STYLE,
     text: defaultTextSettings(),
     shape: defaultShapeSettings(),
     image: {

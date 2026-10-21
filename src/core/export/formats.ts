@@ -82,8 +82,9 @@ export const EXPORT_FORMATS: readonly ExportFormat[] = [
     mediaType: 'image/webp',
     kind: 'raster',
     capabilities: { transparency: true, animation: true, printReady: false, lossy: true },
-    status: 'planned',
-    notes: 'Modern web delivery format with alpha and animation support.',
+    status: 'available',
+    notes:
+      'Written by Photo Studio from the stored working copy. The browser decides whether it can encode WebP; if it cannot, the export says so and offers PNG or JPEG instead.',
   },
   {
     id: formatId('svg'),
@@ -92,8 +93,9 @@ export const EXPORT_FORMATS: readonly ExportFormat[] = [
     mediaType: 'image/svg+xml',
     kind: 'vector',
     capabilities: { transparency: true, animation: false, printReady: true, lossy: false },
-    status: 'planned',
-    notes: 'Vector export requires the vector scene graph from the Illustration Studio work.',
+    status: 'available',
+    notes:
+      'Vector export of paths, rectangles and ellipses, written to a real file by the browser. Text is not outlined and graphic layers are raster, so a document containing them is exported only after the panel names them (or not at all).',
   },
   {
     id: formatId('pdf'),
@@ -123,9 +125,21 @@ export const EXPORT_FORMATS: readonly ExportFormat[] = [
     extension: 'webm',
     mediaType: 'video/webm',
     kind: 'video',
-    capabilities: { transparency: true, animation: true, printReady: false, lossy: true },
-    status: 'planned',
-    notes: 'Web-friendly video with alpha; a candidate for browser-side encoding.',
+    capabilities: { transparency: false, animation: true, printReady: false, lossy: true },
+    status: 'available',
+    notes:
+      'Recorded in real time by Video Studio through MediaRecorder, which negotiates VP9 or VP8 with Opus audio. It is a capture of the timeline canvas: no alpha channel, no faster-than-real-time encode, and no scrub-free seeking in the file it writes.',
+  },
+  {
+    id: formatId('png-sequence'),
+    label: 'PNG frame sequence (.zip)',
+    extension: 'zip',
+    mediaType: 'application/zip',
+    kind: 'raster',
+    capabilities: { transparency: true, animation: true, printReady: false, lossy: false },
+    status: 'available',
+    notes:
+      'One PNG per frame plus a JSON manifest of the exact frame times. Produced by Motion and Video Studio; deterministic, but not a video file and not playable in a browser without re-encoding.',
   },
   {
     id: formatId('glb'),
@@ -160,8 +174,13 @@ export const DOCUMENT_OUTPUT_FORMATS: Readonly<Record<string, readonly ExportFor
     formatId('svg'),
   ],
   'photo.image': [PROJECT_FILE_FORMAT_ID, formatId('png'), formatId('jpg'), formatId('webp')],
-  'video.timeline': [PROJECT_FILE_FORMAT_ID, formatId('mp4'), formatId('webm')],
-  'motion.scene': [PROJECT_FILE_FORMAT_ID, formatId('mp4'), formatId('webm')],
+  'video.timeline': [
+    PROJECT_FILE_FORMAT_ID,
+    formatId('png-sequence'),
+    formatId('webm'),
+    formatId('mp4'),
+  ],
+  'motion.scene': [PROJECT_FILE_FORMAT_ID, formatId('png-sequence'), formatId('mp4')],
   'illustration.artboard': [PROJECT_FILE_FORMAT_ID, formatId('svg'), formatId('png')],
   'three.scene': [PROJECT_FILE_FORMAT_ID, formatId('glb')],
 };

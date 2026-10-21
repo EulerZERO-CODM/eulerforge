@@ -9,10 +9,25 @@
 import { z } from 'zod';
 
 import { brand, type Branded } from '../types/brand';
+import {
+  boundsOfPath,
+  MAX_CONTOURS,
+  MAX_NODES_PER_CONTOUR,
+  MAX_NODES_TOTAL,
+  PAINT_LIMITS,
+  PATTERN_MOTIFS,
+  STROKE_LINE_CAPS,
+  STROKE_LINE_JOINS,
+  VECTOR_STYLE_LIMITS,
+  type VectorPath,
+  type VectorStyle,
+} from '../vector';
 import type {
   AttributionRecord,
   ImageLayer,
   Layer,
+  PathLayer,
+  PathText,
   RectLayer,
   Scene,
   TextLayer,
@@ -28,6 +43,8 @@ import {
   MAX_LAYER_SIZE,
   MAX_TEXT_LENGTH,
   MIN_LAYER_SIZE,
+  PATH_TEXT_BASELINES,
+  PATH_TEXT_LIMITS,
   TEXT_ALIGNMENTS,
 } from './layer-types';
 import type {
@@ -37,6 +54,11 @@ import type {
   ForgeDocument,
   GuideSettings,
 } from './types';
+import { payloadKindForDocumentType } from './payload';
+import { studioPayloadSchema, studioPayloadValueSchema } from './payload-schema';
+import { hexColorSchema } from './schema-shared';
+
+export { hexColorSchema };
 import { MAX_CANVAS_PX, MIN_CANVAS_PX } from './units';
 
 /** Branded-but-validated identifier: lowercase-ish slug ids such as `design.canvas`. */
@@ -50,10 +72,6 @@ export const idSchema = <TName extends string>(_name: TName) =>
       'may only contain letters, numbers, dot, dash, colon, underscore',
     )
     .transform((value): Branded<string, TName> => brand<TName>(value));
-
-export const hexColorSchema = z
-  .string()
-  .regex(/^#[0-9a-fA-F]{6}$/, 'must be a 6-digit hex colour such as #1f2933');
 
 export const canvasSchema = z.object({
   width: z
@@ -215,11 +233,211 @@ export const imageLayerSchema = z.object({
   image: imageSettingsSchema,
 });
 
+/* -------------------------------------------------------------------------------------------- */
+/* Vector paths                                                                                   */
+/* -------------------------------------------------------------------------------------------- */
+
+/**
+ * A path coordinate, in document pixels.
+ *
+ * Bounded by the same limit as a layer frame: a node the user cannot see, select or scroll to is
+ * data a stored document would carry forever without ever being reachable.
+ */
+const pathCoordinate = finiteNumber('coordinate')
+  .min(-MAX_FRAME_COORDINATE)
+  .max(MAX_FRAME_COORDINATE);
+
+const pointSchema = z.object({ x: pathCoordinate, y: pathCoordinate });
+
+export const pathNodeSchema = z.object({
+  point: pointSchema,
+  handleIn: pointSchema.nullable(),
+  handleOut: pointSchema.nullable(),
+});
+
+/**
+ * One subpath.
+ *
+ * The first node is never repeated at the end — a stored path is a canonical description, so two
+ * documents that describe the same shape are the same bytes.
+ */
+export const pathContourSchema = z.object({
+  nodes: z
+    .array(pathNodeSchema)
+    .min(1, 'a contour needs at least one node')
+    .max(MAX_NODES_PER_CONTOUR, `a contour may hold at most ${MAX_NODES_PER_CONTOUR} nodes`),
+  closed: z.boolean(),
+});
+
+export const vectorPathSchema = z
+  .object({
+    contours: z
+      .array(pathContourSchema)
+      .max(MAX_CONTOURS, `a path may hold at most ${MAX_CONTOURS} contours`),
+  })
+  .superRefine((path, ctx) => {
+    const total = path.contours.reduce((sum, contour) => sum + contour.nodes.length, 0);
+    if (total > MAX_NODES_TOTAL) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['contours'],
+        message: `a path may hold at most ${MAX_NODES_TOTAL} nodes (found ${total})`,
+      });
+    }
+  }) satisfies z.ZodType<VectorPath>;
+
+/**
+ * Gradients and patterns, as stored.
+ *
+ * The same shape the vector kernel's `PaintSpec` describes. It is optional in the schema so a
+ * document written before paint existed still validates; absent means "solid, use `fill`". Stops are
+ * bounded and colours are hex, so nothing here can smuggle a CSS expression, a URL or a resource
+ * reference into a document.
+ */
+export const gradientStopSchema = z.object({
+  offset: finiteNumber('offset').min(0).max(1),
+  color: hexColorSchema,
+});
+
+export const paintSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('solid'), color: hexColorSchema }),
+  z.object({
+    kind: z.literal('linear-gradient'),
+    from: z.object({ x: finiteNumber('x'), y: finiteNumber('y') }),
+    to: z.object({ x: finiteNumber('x'), y: finiteNumber('y') }),
+    stops: z.array(gradientStopSchema).min(2).max(PAINT_LIMITS.maxStops),
+  }),
+  z.object({
+    kind: z.literal('radial-gradient'),
+    centre: z.object({ x: finiteNumber('x'), y: finiteNumber('y') }),
+    radius: finiteNumber('radius').min(0).max(4),
+    stops: z.array(gradientStopSchema).min(2).max(PAINT_LIMITS.maxStops),
+  }),
+  z.object({
+    kind: z.literal('pattern'),
+    motif: z.enum(PATTERN_MOTIFS),
+    foreground: hexColorSchema,
+    background: hexColorSchema.nullable(),
+    scale: finiteNumber('scale')
+      .min(PAINT_LIMITS.minPatternScale)
+      .max(PAINT_LIMITS.maxPatternScale),
+    rotation: finiteNumber('rotation')
+      .min(-PAINT_LIMITS.maxRotationDegrees)
+      .max(PAINT_LIMITS.maxRotationDegrees),
+  }),
+]);
+
+export const vectorStyleSchema = z.object({
+  fillPaint: paintSchema.nullable().optional(),
+  strokePaint: paintSchema.nullable().optional(),
+  fill: hexColorSchema.nullable(),
+  fillRule: z.enum(['nonzero', 'evenodd']),
+  fillOpacity: finiteNumber('fillOpacity').min(0).max(1),
+  stroke: hexColorSchema.nullable(),
+  strokeWidth: finiteNumber('strokeWidth').min(0).max(VECTOR_STYLE_LIMITS.maxStrokeWidth),
+  strokeOpacity: finiteNumber('strokeOpacity').min(0).max(1),
+  lineCap: z.enum(STROKE_LINE_CAPS),
+  lineJoin: z.enum(STROKE_LINE_JOINS),
+  dashArray: z
+    .array(finiteNumber('dash').min(0).max(VECTOR_STYLE_LIMITS.maxDashLength))
+    .max(VECTOR_STYLE_LIMITS.maxDashEntries)
+    .readonly(),
+}) satisfies z.ZodType<VectorStyle>;
+
+/**
+ * Text laid along a path's contour.
+ *
+ * Validated as strictly as any other document field: a stored font size of 10^9 or a colour that is
+ * not a hex value is a corrupt document, not a creative choice, and the renderer must never have to
+ * guess what to draw.
+ */
+export const pathTextSchema = z
+  .object({
+    content: z.string().max(PATH_TEXT_LIMITS.maxContentLength),
+    fontSize: finiteNumber('fontSize')
+      .min(PATH_TEXT_LIMITS.minFontSize)
+      .max(PATH_TEXT_LIMITS.maxFontSize),
+    letterSpacing: finiteNumber('letterSpacing')
+      .min(PATH_TEXT_LIMITS.minLetterSpacing)
+      .max(PATH_TEXT_LIMITS.maxLetterSpacing),
+    startOffset: finiteNumber('startOffset').min(0).max(1),
+    baseline: z.enum(PATH_TEXT_BASELINES),
+    colour: hexColorSchema,
+    fontStackId: z.enum(FONT_STACKS),
+  })
+  .readonly() satisfies z.ZodType<PathText>;
+
+/** A path layer's frame may legitimately be degenerate: a straight line is one pixel tall? No — zero. */
+export const pathLayerFrameSchema = z.object({
+  x: finiteNumber('x').min(-MAX_FRAME_COORDINATE).max(MAX_FRAME_COORDINATE),
+  y: finiteNumber('y').min(-MAX_FRAME_COORDINATE).max(MAX_FRAME_COORDINATE),
+  width: finiteNumber('width').min(0).max(MAX_LAYER_SIZE),
+  height: finiteNumber('height').min(0).max(MAX_LAYER_SIZE),
+});
+
+/**
+ * A vector path layer.
+ *
+ * The frame is the bounding box of the geometry and every operation keeps it that way, so the two
+ * are validated together: a stored layer whose frame disagrees with its geometry would make
+ * selection, hit testing and the layer tree point at a box that is not where the artwork is.
+ */
+export const pathLayerSchema = z
+  .object({
+    id: idSchema('LayerId'),
+    name: layerNameSchema,
+    visible: z.boolean(),
+    locked: z.boolean(),
+    opacity: finiteNumber('opacity')
+      .min(0, 'opacity cannot be below 0')
+      .max(1, 'opacity cannot exceed 1'),
+    frame: pathLayerFrameSchema,
+    type: z.literal('path'),
+    vector: z.object({
+      path: vectorPathSchema,
+      style: vectorStyleSchema,
+      text: pathTextSchema.nullable().optional(),
+    }),
+  })
+  .superRefine((layer, ctx) => {
+    const bounds = boundsOfPath(layer.vector.path);
+    const expected = bounds
+      ? {
+          x: bounds.minX,
+          y: bounds.minY,
+          width: bounds.maxX - bounds.minX,
+          height: bounds.maxY - bounds.minY,
+        }
+      : null;
+    if (!expected) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['vector', 'path'],
+        message: 'a vector layer must contain at least one node',
+      });
+      return;
+    }
+    const drift = Math.max(
+      Math.abs(layer.frame.x - expected.x),
+      Math.abs(layer.frame.y - expected.y),
+      Math.abs(layer.frame.width - expected.width),
+      Math.abs(layer.frame.height - expected.height),
+    );
+    if (drift > 1e-6) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['frame'],
+        message: `the frame must match the geometry's bounds (off by ${drift.toFixed(6)}px)`,
+      });
+    }
+  });
+
 export const layerSchema = z.discriminatedUnion('type', [
   textLayerSchema,
   rectLayerSchema,
   ellipseLayerSchema,
   imageLayerSchema,
+  pathLayerSchema,
 ]);
 
 /**
@@ -274,43 +492,77 @@ export const attributionSchema = z
   )
   .readonly();
 
-export const forgeDocumentSchema = z.object({
-  id: idSchema('DocumentId'),
-  schemaVersion: z.number().int().min(1),
-  studioId: z.string().min(1),
-  documentTypeId: idSchema('DocumentTypeId'),
-  title: z
-    .string()
-    .min(1, 'a document needs a title')
-    .max(120, 'title must be 120 characters or fewer'),
-  summary: z.string().max(400),
-  canvas: canvasSchema,
-  guides: guideSettingsSchema,
-  palette: z.array(hexColorSchema).max(12).readonly(),
-  scene: sceneSchema,
-  attribution: attributionSchema,
-  metadata: documentMetadataSchema,
-  status: z.enum(['draft', 'in-review', 'ready', 'archived']),
-  revision: z.number().int().min(1),
-  createdAt: z.iso.datetime(),
-  updatedAt: z.iso.datetime(),
-});
+export const forgeDocumentSchema = z
+  .object({
+    id: idSchema('DocumentId'),
+    schemaVersion: z.number().int().min(1),
+    studioId: z.string().min(1),
+    documentTypeId: idSchema('DocumentTypeId'),
+    title: z
+      .string()
+      .min(1, 'a document needs a title')
+      .max(120, 'title must be 120 characters or fewer'),
+    summary: z.string().max(400),
+    canvas: canvasSchema,
+    guides: guideSettingsSchema,
+    palette: z.array(hexColorSchema).max(12).readonly(),
+    scene: sceneSchema,
+    attribution: attributionSchema,
+    metadata: documentMetadataSchema,
+    status: z.enum(['draft', 'in-review', 'ready', 'archived']),
+    revision: z.number().int().min(1),
+    studioPayload: studioPayloadSchema,
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+  })
+  .superRefine((document, context) => {
+    // One payload kind per document type, and no payload on studios that do not use one. This is
+    // what stops a motion scene being loaded into the photo surface (or vice versa).
+    const expected = payloadKindForDocumentType(document.documentTypeId);
+    const actual = document.studioPayload?.kind ?? null;
+    if (expected !== actual) {
+      context.addIssue({
+        code: 'custom',
+        path: ['studioPayload'],
+        message:
+          expected === null
+            ? `a ${String(document.documentTypeId)} document must not carry a studio payload`
+            : `a ${String(document.documentTypeId)} document must carry a ${expected} payload`,
+      });
+    }
+  });
 
-export const createDocumentInputSchema = z.object({
-  title: z
-    .string()
-    .trim()
-    .min(1, 'give the project a name')
-    .max(120, 'project names are limited to 120 characters'),
-  summary: z.string().trim().max(400).optional(),
-  studioId: z.string().min(1),
-  documentTypeId: idSchema('DocumentTypeId'),
-  canvas: canvasSchema,
-  guides: guideSettingsSchema.partial().optional(),
-  palette: z.array(hexColorSchema).max(12).readonly().optional(),
-  tags: z.array(z.string().trim().min(1).max(40)).max(12).readonly().optional(),
-  scene: sceneSchema.optional(),
-});
+export const createDocumentInputSchema = z
+  .object({
+    title: z
+      .string()
+      .trim()
+      .min(1, 'give the project a name')
+      .max(120, 'project names are limited to 120 characters'),
+    summary: z.string().trim().max(400).optional(),
+    studioId: z.string().min(1),
+    documentTypeId: idSchema('DocumentTypeId'),
+    canvas: canvasSchema,
+    guides: guideSettingsSchema.partial().optional(),
+    palette: z.array(hexColorSchema).max(12).readonly().optional(),
+    tags: z.array(z.string().trim().min(1).max(40)).max(12).readonly().optional(),
+    scene: sceneSchema.optional(),
+    studioPayload: studioPayloadValueSchema.optional(),
+  })
+  .superRefine((input, context) => {
+    if (input.studioPayload === undefined) return;
+    const expected = payloadKindForDocumentType(input.documentTypeId);
+    if (input.studioPayload.kind !== expected) {
+      context.addIssue({
+        code: 'custom',
+        path: ['studioPayload'],
+        message:
+          expected === null
+            ? `${String(input.documentTypeId)} documents do not take a studio payload`
+            : `${String(input.documentTypeId)} documents take a ${expected} payload`,
+      });
+    }
+  });
 
 /** Human-readable, field-addressed messages for anything shaped like a Zod error. */
 export function formatIssues(
@@ -353,6 +605,7 @@ export type _ImageLayerSchemaMatchesDomain = Assignable<
   z.infer<typeof imageLayerSchema>,
   ImageLayer
 >;
+export type _PathLayerSchemaMatchesDomain = Assignable<z.infer<typeof pathLayerSchema>, PathLayer>;
 export type _AttributionSchemaMatchesDomain = Assignable<
   z.infer<typeof attributionRecordSchema>,
   AttributionRecord

@@ -177,6 +177,13 @@ anything else.
   from the `@sparticuz/chromium` npm package — a different build from CI's. It is the right place to
   reproduce *behaviour* (locators, preparation, history state) and the wrong place to compare timings with
   CI.
+
+  **Update (2026-10-20).** The path works again. The `@sparticuz/chromium` binary needs `libnspr4` and
+  `libnss3`, the image has neither, and the Debian package indexes are unreachable — so NSPR and NSS
+  were compiled from source in the container and put on `LD_LIBRARY_PATH`. Chromium 153 then starts,
+  and the full browser suite runs (78 tests, `retries: 0`); that is a behaviour check, not a timing
+  measurement. The CI rows below remain the acceptance evidence, and this document does not quote a
+  sandbox number as if it were one.
 - **No mid-range laptop has run this benchmark.** The four-fold throttle stands in for that hardware; §4
   says what the proxy can and cannot mean.
 
@@ -185,11 +192,12 @@ and the commit it measured (`GITHUB_HEAD_SHA` in CI, `local` in the sandbox).
 
 ### The acceptance run: CI, both phases, all twelve scenarios
 
-Every complete CI run of this benchmark that has a durable report, newest first. `43c4008` is the commit
-that fixed the harness's preparation; **every commit after it changes documentation only**, so `9eb530e`,
-`5a81f69`, `a585815`, `ec28a27`, `bd9e4bc`, `712356f`, `30226cd` and anything that follows them measure
-byte-identical application code with a byte-identical benchmark — each row below is the same measurement,
-repeated, on a different runner instance.
+Every complete CI run of this benchmark that has a durable report, newest first. This is the **Phase 2
+acceptance series**: `43c4008` is the commit that fixed the harness's preparation, and the commits after
+it in that series — `9eb530e`, `5a81f69`, `a585815`, `ec28a27`, `bd9e4bc`, `712356f`, `30226cd` — changed
+documentation only, so each row below is the same measurement of byte-identical application code,
+repeated on a different runner instance. Phases 3–7 changed code; their CI results are in §7 rather than
+mixed into this series.
 
 | Run | Workflows — pull request · push | Browser (Chromium) jobs | Verdict | Report |
 | --- | --- | --- | --- | --- |
@@ -382,7 +390,7 @@ the observed cost rather than a margin around it, and why a single number from a
 whole story. What the benchmark is for is catching a *gross* regression — a doubled critical path, a
 per-frame re-plan, a synchronous decode — not adjudicating 15 ms.
 
-## 7. What was profiled, and why nothing was optimised
+## 7. What was profiled, and what the benchmark changed
 
 Before writing the benchmark, the render and interaction paths were measured directly (Node, via
 `vite-node`, over the pure functions the editor calls) on the same thirty-layer scene:
@@ -399,11 +407,61 @@ The only large number was a **cold** `paintPlan` at 458 ms, which is first-call 
 the canvas context warming up — and is exactly the cost the benchmark's unrecorded warm-up pass exists to
 keep out of the recorded samples.
 
-There was no hot spot to fix, so none was fixed: no speculative architecture rewrite, no change to the
-render plan, no edit to the gesture path. Optimising where the evidence does not point is how an editor
-gets a benchmark-shaped bug. What the profiling did produce is the coalescing work already in the
-history (`replaceLatest` with an explicit coalescing key for a single interaction, so a drag or a slider
-is one undo step), which is a correctness fix first and a cost fix second.
+There was no hot spot in that pipeline to fix, so none was invented: no speculative architecture
+rewrite, no change to the render plan, no change to the maths of a gesture. Optimising where the
+evidence does not point is how an editor gets a benchmark-shaped bug. What the profiling did produce is
+the coalescing work already in the history (`replaceLatest` with an explicit coalescing key for a single
+interaction, so a drag or a slider is one undo step), which is a correctness fix first and a cost fix
+second.
+
+### A drag applies one pointer move per animation frame
+
+The first CI run to fail the gated phase was `c4cdda3` (Phase 5). Its browser job took 11.4 minutes
+against the usual 5–7, and three drag scenarios crossed the p95 budget while every other spec passed:
+
+| Scenario | CI `c4cdda3` p95 | CI worst | Budget |
+| --- | ---: | ---: | --- |
+| `drag-layer` | 100.1 ms | 133.3 ms | p95 100 ms / worst 400 ms |
+| `drag-group` | 83.3 ms | 133.2 ms | p95 100 ms / worst 400 ms |
+| `resize-handle` | 116.7 ms | 149.9 ms | p95 100 ms / worst 400 ms |
+
+The same commit passed the same gate in this sandbox (`p95` 16.8 ms on the drag scenarios), so this is
+a runner-under-load result, not a measurement of the code on a normal machine — which is exactly why
+the budget is not a stopwatch. The response was still to reduce work per frame rather than to touch
+the budget: a pointer reports at up to 120 Hz, and the artboard applied **every** event — re-resolving
+snapping, re-rendering the workspace and repainting thirty layers two or three times per visible frame.
+`artboard.tsx` now stores the newest pointer position and applies it once per `requestAnimationFrame`,
+flushing the last pending point on pointer-up so no movement is lost. The same change also fixed a
+latent double commit: a resize handle inside the capture surface delivered one pointer-up twice, and
+both copies committed; with coalescing the second copy could commit a *stale* frame, so one pointer-up
+now ends exactly one interaction.
+
+The local run of the production build afterwards, same throttle and sample counts, reported:
+
+| Scenario | n | p50 | p95 | worst | Gaps over 50 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `drag-layer` | 5 | 16.7 ms | 16.8 ms | 66.6 ms | 0 % of 438 |
+| `drag-group` | 5 | 16.7 ms | 16.8 ms | 33.4 ms | 0 % of 420 |
+| `resize-handle` | 5 | 16.7 ms | 16.8 ms | 33.3 ms | 0 % of 353 |
+
+Both the pre-change and post-change builds pass locally, so these numbers do not prove the CI
+failure is gone; they show the change did not cost anything. The next complete CI run answered the
+question: **`8e30e27` (Phase 6) failed the same three drag scenarios** on GitHub's runner, on the build
+that contains the coalescing change. (The run that prompted it, `c4cdda3`, is the one described
+above.) The report CI published for `8e30e27` is archived verbatim in
+[`perf-reports/8e30e27.md`](perf-reports/8e30e27.md): `drag-layer` p95 116.6 ms / worst 150.1 ms with
+55 % of its 253 gaps over 50 ms; `drag-group` p95 83.4 ms / worst 116.7 ms with 35 % over 50 ms;
+`resize-handle` p95 100.1 ms / worst 133.3 ms with 52 % over 50 ms. The sandbox, on the same commit
+and the same throttle, reports p50 16.7 ms with 0 % of gaps over 50 ms on all three, and the full
+browser suite passes there (72 specs).
+
+The budget was **not** widened. The measurements point to a loaded shared runner rather than a per-frame
+cost in the application — on that one run `drag-group` still had a 16.7 ms median while `drag-layer` had
+66.6 ms for the same painting path, and the same commit is at display rate in the sandbox — but that is
+an inference, not a measurement of the runner, and this document does not treat it as a pass. What the CI report can be asked for is a gross
+regression; what it reports is that a CPU-throttled drag on that machine does not stay at 60 Hz. The CI
+Browser job's log and Playwright archive are not reachable from the development environment this
+document was written in, so the performance report is the only part of that job's evidence quoted here.
 
 ## 8. Limitations
 
@@ -457,3 +515,96 @@ is one undo step), which is a correctness fix first and a cost fix second.
   benchmark loudly instead of being published as a measurement.
 - **One document shape.** A 1600 × 1100 canvas with 30 layers is one point in the space; a document with
   a single huge image layer, or a hundred text layers, is not covered.
+
+## 9. Photo pipeline: the CPU reference renderer
+
+The photo renderer has two backends (ADR-0024), and only one of them runs in CI's software
+environment with a measurable cost per pixel: the CPU path. The GPU path's budget is the roadmap's
+"under 16 ms at 12 MP on reference hardware"; that number is **not** measured here, and nothing in
+the capability ledger claims it is. What is measured is the cost of the reference renderer, which is
+the fallback a WebGL2-less browser actually runs.
+
+- Benchmark: `src/core/photo/pipeline.perf.test.ts` (Vitest, Node)
+- Workload: 1280 × 853 (1,091,840 px — the preview cap across both axes), a nine-entry stack that
+  exercises every maths branch, plus a half-frame mask; one warm-up pass, then three measured passes.
+- Reported: median and worst-case wall time. Asserted: a **ceiling** of 4000 ms median / 6000 ms worst
+  case, and a scaling ratio (nine adjustments must cost more than 1.5× two adjustments).
+- Measured in this sandbox: **≈0.47–0.57 s median, ≈0.51–0.59 s worst** for the nine-adjustment stack
+  with a mask; **≈0.14 s** for a two-adjustment stack. The numbers are printed by the test, so a CI
+  log carries the measurement next to the assertion.
+
+Why a ceiling rather than a target: the number is a function of the machine and of how many suites
+Vitest runs concurrently. A tight budget would flake on a shared runner and teach people to re-run
+until green, which is worse than no budget. The ratio check is the part that is insensitive to load —
+if a refactor makes cost sublinear in the stack, or accidentally skips the mask, it fails.
+
+A 12 MP photograph is not rendered by this pipeline: `preparePhoto` caps the working copy at 2048 px
+on the long edge (ADR-0024), so the largest document Photo Studio can hold is 2048 × 2048. At the
+measured ≈0.49 s per megapixel-adjustment-pass, a 12 MP nine-adjustment pass would be roughly 5 s on
+this sandbox's CPU — which is exactly why previews are capped at 1280 px and render off a preview
+copy while export re-renders once at the stored size.
+
+The GPU comparison is a correctness check, not a timing check: `e2e/photo.spec.ts` renders the same
+twelve-swatch chart through both renderers and requires the pixels to agree within 2/255. CI's
+Chromium runs WebGL2 through SwiftShader (software), so any timing taken there would describe the
+sandbox rather than a GPU.
+
+### 9.1 Range-selection evaluation
+
+Luminance and colour range selections are evaluated on the CPU, even when the adjustment stack runs
+on the GPU, because they read the source pixels. The cost is linear in pixels × ranges, so the budget
+is stated per range and at the document's eight-range limit, over the same 1280 × 853 preview size.
+
+- Benchmark: `src/core/photo/range.perf.test.ts` (Vitest, Node)
+- Workload: a deterministic source buffer, a half-painted mask and one feathered luminance range;
+  then eight mixed ranges. One warm-up pass, then three measured passes.
+- Thresholds, fixed before the first run: one range **≤ 150 ms median / 400 ms worst**; eight ranges
+  **≤ 900 ms median / 2000 ms worst**; and eight ranges must cost less than 20× one range, which
+  catches preparing a range per pixel instead of once per render.
+- Measured in this sandbox: **≈9–16 ms median** for one range and **≈43–54 ms** for eight ranges. The
+  test prints both numbers, so a CI log carries the measurement next to the assertion.
+
+`rasteriseMask` draws painted strokes on a canvas first and then unions the ranges in; range
+preparation (parsing a hex colour, computing a falloff width) happens once per render, not per pixel.
+
+## 8. Photo pipeline at 12 MP — measured, not assumed
+
+The roadmap's Phase 4 wording asks for a 12 MP / 16 ms measurement. That target is about the CPU
+reference path (`src/core/photo/pipeline.ts`) unless a browser with WebGL2 is available, so the
+measurable half was measured directly, with numbers kept so the claim cannot drift into folklore.
+
+```bash
+FORGE_BENCH=1 npx vitest run src/core/photo/pipeline.bench.test.ts
+```
+
+The benchmark allocates a synthetic RGBA image, runs one unrecorded warm-up pass, then three recorded
+passes and reports the median; it is skipped in the normal suite (the 12 MP case takes seconds) and
+never fails on a slow machine, because its output is the artefact.
+
+- **Environment:** Node v22.22.3, 2 vCPU Intel Xeon @ 2.60 GHz, Linux x64 — the development sandbox,
+  not CI and not a GPU. Date: 2026-10-19.
+- **Input:** 4000 × 3000 (12.0 MP) and 1280 × 853 (1.1 MP), RGBA bytes, sRGB.
+
+| Stack | 12 MP median | 12 MP best / worst | 1280 px preview median |
+| --- | ---: | ---: | ---: |
+| 1 adjustment (exposure) | **1 089 ms** | 1 052 / 1 101 ms | **100 ms** |
+| 4 adjustments | **1 827 ms** | 1 784 / 1 962 ms | **179 ms** |
+| 12 adjustments | **5 301 ms** | 5 228 / 5 524 ms | **526 ms** |
+
+**Verdict.** The 16 ms budget is **not met**, and cannot be met by this JavaScript path at 12 MP: 16 ms
+for 12 million pixels is roughly 1.3 ns per pixel for the whole stack. The product does not pretend
+otherwise:
+
+- **Previews are capped at 1280 px** (`src/components/photo/use-photo-preview.ts`), where this CPU
+  fallback costs 100–526 ms — still above a frame, but this is the fallback. The WebGL2 renderer is
+  the interactive path on a machine with a GPU; its full-resolution timing has **not** been measured
+  here, because this sandbox cannot start a browser.
+- **The working copy is capped at 2048 px on the long edge** and embedded in the project. A 12 MP
+  photograph is downscaled on import and the interface says so
+  (`src/components/photo/photo-import-panel.tsx`).
+- **Export re-renders once** at the stored working copy, so an export pays one pass of the numbers
+  above at ≤2048 px, not a per-frame cost.
+- **Tiling** would bound peak memory for a larger canvas, but it would not change the per-pixel cost
+  that makes 12 MP / 16 ms unreachable on this path; the engine's real 12 MP story is the GPU path,
+  which remains unmeasured. Tiling is therefore not implemented and is labelled planned, rather than
+  added to make a number look closer.

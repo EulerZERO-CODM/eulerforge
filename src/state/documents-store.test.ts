@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { DocumentSession } from './document-session';
 import { DocumentsStore } from './documents-store';
 import { createDocument } from '../core/documents/factories';
+import { defaultPhotoPayload, type PhotoPayload } from '../core/documents/payload';
 import { createPlatformEventBus, type PlatformEventMap } from '../core/events/event-bus';
 import { DOCUMENTS_KEY, LocalDocumentRepository } from '../core/persistence/document-repository';
 import type { DocumentRepository } from '../core/persistence/document-repository';
@@ -239,6 +240,36 @@ describe('DocumentSession', () => {
     expect(result.ok).toBe(false);
     expect(session.getState().document.canvas.width).toBe(1080);
     expect(session.getState().history).toEqual([]);
+  });
+
+  it('treats a studio payload change as a real edit and an identical payload as a no-op', async () => {
+    const harness = createHarness();
+    const created = await harness.store.create({
+      ...baseInput,
+      studioId: 'photo',
+      documentTypeId: brand<'DocumentTypeId'>('photo.image'),
+      studioPayload: defaultPhotoPayload(),
+    });
+    if (!created.ok) throw new Error('photo creation should succeed');
+    const session = harness.store.session(created.value.id);
+    if (!session) throw new Error('session should exist');
+
+    const payload: PhotoPayload = {
+      ...defaultPhotoPayload(),
+      adjustments: [{ id: 'adjustment-a', kind: 'exposure', value: 25, enabled: true }],
+    };
+    const changed = await session.commit('Add exposure', { studioPayload: payload });
+    expect(changed.ok).toBe(true);
+    expect(session.getState().document.revision).toBe(created.value.revision + 1);
+    const stored = session.getState().document.studioPayload;
+    expect(stored?.kind === 'photo' ? stored.adjustments : []).toHaveLength(1);
+    expect(harness.store.getById(created.value.id)?.studioPayload).toEqual(payload);
+
+    const unchanged = await session.commit('Add exposure again', {
+      studioPayload: session.getState().document.studioPayload,
+    });
+    expect(unchanged.ok).toBe(true);
+    expect(session.getState().history).toHaveLength(1);
   });
 
   it('treats an identical value as a no-op rather than a history entry', async () => {

@@ -27,13 +27,21 @@ export type RecordedCall = {
  * It also tracks save/restore depth so a test can prove the painter leaves no state behind: the
  * artboard would otherwise inherit a stale `globalAlpha` or composite mode from any draw call.
  */
+/** A gradient the painter created, captured with the stops added to it. */
+export type RecordedGradient = {
+  readonly kind: 'linear' | 'radial';
+  readonly stops: { offset: number; color: string }[];
+};
+
 export function createRecordingContext(): {
   readonly context: PainterContext;
   readonly calls: RecordedCall[];
   readonly depth: () => number;
   readonly names: () => readonly string[];
+  readonly gradients: readonly RecordedGradient[];
 } {
   const calls: RecordedCall[] = [];
+  const gradients: RecordedGradient[] = [];
   let depth = 0;
 
   const record =
@@ -49,6 +57,7 @@ export function createRecordingContext(): {
     globalCompositeOperation: 'source-over',
     lineWidth: 1,
     lineJoin: 'miter',
+    lineCap: 'butt',
     imageSmoothingEnabled: true,
     font: '',
     textAlign: 'left',
@@ -94,6 +103,12 @@ export function createRecordingContext(): {
     set lineJoin(value: string) {
       proxyState.lineJoin = value;
     },
+    get lineCap() {
+      return proxyState.lineCap;
+    },
+    set lineCap(value: string) {
+      proxyState.lineCap = value;
+    },
     get imageSmoothingEnabled() {
       return proxyState.imageSmoothingEnabled;
     },
@@ -128,15 +143,19 @@ export function createRecordingContext(): {
       calls.push({ op: 'restore', args: [] });
     },
     scale: record('scale') as PainterContext['scale'],
+    translate: record('translate') as PainterContext['translate'],
+    rotate: record('rotate') as PainterContext['rotate'],
     clearRect: record('clearRect') as PainterContext['clearRect'],
     fillRect: record('fillRect') as PainterContext['fillRect'],
     strokeRect: record('strokeRect') as PainterContext['strokeRect'],
     beginPath: record('beginPath'),
     closePath: record('closePath'),
-    fill: record('fill'),
+    fill: record('fill') as PainterContext['fill'],
     stroke: record('stroke'),
     moveTo: record('moveTo') as PainterContext['moveTo'],
     lineTo: record('lineTo') as PainterContext['lineTo'],
+    bezierCurveTo: record('bezierCurveTo') as PainterContext['bezierCurveTo'],
+    setLineDash: record('setLineDash') as PainterContext['setLineDash'],
     rect: record('rect'),
     clip: record('clip'),
     roundRect: record('roundRect') as PainterContext['roundRect'],
@@ -144,11 +163,41 @@ export function createRecordingContext(): {
     drawImage: record('drawImage') as PainterContext['drawImage'],
     fillText: record('fillText') as PainterContext['fillText'],
     measureText: (text: string) => ({ width: text.length * 10 }),
+    /* A gradient is recorded as the stops that were added to it, so a test can assert the resolved
+       geometry and the colour order without needing a real canvas. */
+    createLinearGradient: ((x0: number, y0: number, x1: number, y1: number) => {
+      const stops: { offset: number; color: string }[] = [];
+      calls.push({ op: 'createLinearGradient', args: [x0, y0, x1, y1] });
+      gradients.push({ kind: 'linear', stops });
+      return {
+        addColorStop: (offset: number, color: string) => {
+          stops.push({ offset, color });
+        },
+      };
+    }) as PainterContext['createLinearGradient'],
+    createRadialGradient: ((
+      x0: number,
+      y0: number,
+      r0: number,
+      x1: number,
+      y1: number,
+      r1: number,
+    ) => {
+      const stops: { offset: number; color: string }[] = [];
+      calls.push({ op: 'createRadialGradient', args: [x0, y0, r0, x1, y1, r1] });
+      gradients.push({ kind: 'radial', stops });
+      return {
+        addColorStop: (offset: number, color: string) => {
+          stops.push({ offset, color });
+        },
+      };
+    }) as PainterContext['createRadialGradient'],
   };
 
   return {
     context,
     calls,
+    gradients,
     depth: () => depth,
     names: () => calls.map((call) => call.op),
   };

@@ -188,10 +188,43 @@ describe('DocumentAside', () => {
 
   it('still refuses a format that is not implemented at all', async () => {
     const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText('Format'), 'svg');
+    await user.selectOptions(screen.getByLabelText('Format'), 'pdf');
 
     expect(await screen.findByRole('button', { name: /export blocked/i })).toBeDisabled();
     expect(screen.getByText(/not implemented in this build/i)).toBeInTheDocument();
+  });
+
+  it('blocks an SVG export of a document with no geometry, and says why', async () => {
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText('Format'), 'svg');
+
+    // This fixture is an empty artboard. An SVG of it would be an empty file, so the export is
+    // blocked and the reason is on screen rather than a disabled button with no explanation.
+    expect(await screen.findByRole('button', { name: /export blocked/i })).toBeDisabled();
+    expect(screen.getByText(/nothing in this document is a path/i)).toBeInTheDocument();
+    // An empty document is not a partial export: there is nothing to opt into, so no checkbox is
+    // offered and nothing implies the file would contain anything.
+    expect(screen.queryByTestId('export-allow-partial')).not.toBeInTheDocument();
+  });
+
+  it('offers the interchange panel and refuses to send an empty document', async () => {
+    const user = userEvent.setup();
+
+    await screen.findByRole('heading', { name: 'Interchange' });
+    expect(screen.getByTestId('interchange-refused')).toHaveTextContent(
+      /none of the chosen layers can become vector artwork/i,
+    );
+    expect(screen.queryByTestId('interchange-create')).not.toBeInTheDocument();
+
+    // The limitations of the model are stated on every interchange, not only when something is
+    // dropped, so a user can read what will not travel before they create anything.
+    await user.click(screen.getByText(/what the model cannot carry/i));
+    expect(
+      screen.getByText(/rotated geometry rather than as a frame with an angle/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/text becomes paths only when font outlining exists/i),
+    ).toBeInTheDocument();
   });
 
   it('enables undo only once there is something to undo', async () => {

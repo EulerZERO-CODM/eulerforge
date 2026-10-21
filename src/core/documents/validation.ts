@@ -6,11 +6,22 @@
  * about whether a canvas is valid.
  */
 
+import { validatePath, VECTOR_STYLE_LIMITS } from '../vector';
 import type { Rect } from './geometry';
-import type { ImageSettings, Layer, Scene, ShapeSettings, TextSettings } from './layer-types';
+import type {
+  ImageSettings,
+  Layer,
+  Scene,
+  ShapeSettings,
+  TextSettings,
+  VectorContent,
+} from './layer-types';
 import {
   FONT_STACKS,
   FONT_WEIGHTS,
+  PATH_TEXT_BASELINES,
+  PATH_TEXT_LIMITS,
+  type PathText,
   IMAGE_FITS,
   MAX_FRAME_COORDINATE,
   MAX_LAYERS,
@@ -124,7 +135,14 @@ function between(value: number, min: number, max: number): boolean {
  * coordinate limits are generous. What they must not be is unbounded, because a saved document is
  * re-opened by the same renderer that draws it.
  */
-export function validateLayerFrame(frame: Rect): readonly FieldValidation[] {
+export function validateLayerFrame(
+  frame: Rect,
+  options: { readonly minimumSize?: number | undefined } = {},
+): readonly FieldValidation[] {
+  // A path layer's frame is derived from its outline, and a straight line is legitimate artwork
+  // whose box is genuinely one pixel tall and zero wide. Refusing it here would mean the editor
+  // could not draw a line that the storage schema is perfectly happy to hold.
+  const minimum = options.minimumSize ?? MIN_LAYER_SIZE;
   const issues: FieldValidation[] = [];
   if (!finite(frame.x) || Math.abs(frame.x) > MAX_FRAME_COORDINATE) {
     issues.push({
@@ -140,12 +158,65 @@ export function validateLayerFrame(frame: Rect): readonly FieldValidation[] {
   }
   for (const axis of ['width', 'height'] as const) {
     const value = frame[axis];
-    if (!between(value, MIN_LAYER_SIZE, MAX_LAYER_SIZE)) {
+    if (!between(value, minimum, MAX_LAYER_SIZE)) {
       issues.push({
         field: axis,
-        message: `Layer ${axis} must be between ${MIN_LAYER_SIZE} and ${MAX_LAYER_SIZE} px.`,
+        message: `Layer ${axis} must be between ${minimum} and ${MAX_LAYER_SIZE} px.`,
       });
     }
+  }
+  return issues;
+}
+
+/**
+ * Checks the run laid along a path.
+ *
+ * The same ranges the schema enforces, applied before a change is committed: a number input can
+ * produce `NaN`, and a document holding one must be refused at the edit rather than at the next load.
+ */
+export function validatePathText(text: PathText): readonly FieldValidation[] {
+  const issues: FieldValidation[] = [];
+  if (text.content.length > PATH_TEXT_LIMITS.maxContentLength) {
+    issues.push({
+      field: 'vector.text.content',
+      message: `Text on a path is limited to ${String(PATH_TEXT_LIMITS.maxContentLength)} characters.`,
+    });
+  }
+  if (!between(text.fontSize, PATH_TEXT_LIMITS.minFontSize, PATH_TEXT_LIMITS.maxFontSize)) {
+    issues.push({
+      field: 'vector.text.fontSize',
+      message: `Text size must be between ${String(PATH_TEXT_LIMITS.minFontSize)} and ${String(PATH_TEXT_LIMITS.maxFontSize)} units.`,
+    });
+  }
+  if (
+    !between(
+      text.letterSpacing,
+      PATH_TEXT_LIMITS.minLetterSpacing,
+      PATH_TEXT_LIMITS.maxLetterSpacing,
+    )
+  ) {
+    issues.push({
+      field: 'vector.text.letterSpacing',
+      message: `Letter spacing must be between ${String(PATH_TEXT_LIMITS.minLetterSpacing)} and ${String(PATH_TEXT_LIMITS.maxLetterSpacing)} units.`,
+    });
+  }
+  if (!between(text.startOffset, 0, 1)) {
+    issues.push({
+      field: 'vector.text.startOffset',
+      message: 'The start offset is a fraction of the contour, between 0 and 1.',
+    });
+  }
+  if (!PATH_TEXT_BASELINES.includes(text.baseline)) {
+    issues.push({ field: 'vector.text.baseline', message: 'Unknown text baseline.' });
+  }
+  if (!HEX.test(text.colour)) {
+    issues.push({ field: 'vector.text.colour', message: 'Text colour must be a hex colour.' });
+  }
+  if (!FONT_STACKS.includes(text.fontStackId)) {
+    issues.push({
+      field: 'vector.text.fontStackId',
+      message: `Text font must be one of ${FONT_STACKS.join(', ')}.`,
+    });
   }
   return issues;
 }
@@ -243,7 +314,9 @@ export function validateImageSettings(image: ImageSettings): readonly FieldValid
 
 /** Field-level validation for a single layer, whichever type it is. */
 export function validateLayer(layer: Layer): readonly FieldValidation[] {
-  const issues: FieldValidation[] = [...validateLayerFrame(layer.frame)];
+  const issues: FieldValidation[] = [
+    ...validateLayerFrame(layer.frame, layer.type === 'path' ? { minimumSize: 0 } : {}),
+  ];
 
   if (layer.name.trim().length === 0 || layer.name.length > MAX_LAYER_NAME_LENGTH) {
     issues.push({
@@ -266,8 +339,46 @@ export function validateLayer(layer: Layer): readonly FieldValidation[] {
     case 'image':
       issues.push(...validateImageSettings(layer.image));
       break;
+    case 'path':
+      issues.push(...validateVectorContent(layer.vector));
+      break;
   }
 
+  return issues;
+}
+
+/**
+ * Structural and geometric checks for a vector layer's content.
+ *
+ * The same properties the storage schema checks, evaluated here as well because the editor reaches
+ * this function *before* a change is committed: telling a user "that node would fall outside the
+ * supported range" while they drag beats rejecting their document on the next reload.
+ */
+export function validateVectorContent(content: VectorContent): readonly FieldValidation[] {
+  const issues: FieldValidation[] = [];
+  for (const issue of validatePath(content.path)) {
+    // Only *severe* kernel issues block an edit. A non-severe one (a closed contour with two nodes,
+    // for instance — a shape the storage schema accepts and the renderer draws) is a note about the
+    // geometry, not a reason to refuse the change the user just made.
+    if (!issue.severe) continue;
+    issues.push({ field: 'vector.path', message: issue.message });
+  }
+  const { style } = content;
+  if (style.strokeWidth < 0 || style.strokeWidth > VECTOR_STYLE_LIMITS.maxStrokeWidth) {
+    issues.push({
+      field: 'vector.style.strokeWidth',
+      message: `Stroke width must be between 0 and ${String(VECTOR_STYLE_LIMITS.maxStrokeWidth)}.`,
+    });
+  }
+  if (
+    style.fillOpacity < 0 ||
+    style.fillOpacity > 1 ||
+    style.strokeOpacity < 0 ||
+    style.strokeOpacity > 1
+  ) {
+    issues.push({ field: 'vector.style.opacity', message: 'Opacity must be between 0 and 1.' });
+  }
+  if (content.text != null) issues.push(...validatePathText(content.text));
   return issues;
 }
 

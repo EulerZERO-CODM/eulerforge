@@ -3,10 +3,45 @@ import { describe, expect, it } from 'vitest';
 import { buildExportChecklist } from './checklist';
 import { PROJECT_FILE_FORMAT_ID } from './formats';
 import { createDocument } from '../documents/factories';
+import { createLayer } from '../documents/layer-operations';
+import { parsePathData } from '../vector/path-data';
 import { brand } from '../types/brand';
 import type { CreateDocumentInput, ForgeDocument } from '../documents/types';
 
 const documentTypeId = brand<'DocumentTypeId'>('design.canvas');
+
+/** A document whose entire content is geometry, so SVG can represent all of it. */
+function vectorDocument(): ForgeDocument {
+  const result = createDocument(
+    {
+      title: 'Icon sheet',
+      studioId: 'illustration',
+      documentTypeId: brand<'DocumentTypeId'>('illustration.artboard'),
+      canvas: {
+        width: 64,
+        height: 64,
+        unit: 'px',
+        dpi: 96,
+        background: '#ffffff',
+        transparent: false,
+      },
+    },
+    { generateId: () => 'doc-vector' },
+  );
+  if (!result.ok) throw new Error('fixture document should be valid');
+  const parsed = parsePathData('M4 4 L28 4 L28 28 L4 28 Z');
+  if (!parsed.ok) throw new Error(parsed.error.message);
+  const layer = createLayer(
+    {
+      type: 'path',
+      frame: { x: 4, y: 4, width: 24, height: 24 },
+      vector: { path: parsed.value.path, style: { fill: '#22cc88' } },
+    },
+    { name: 'Square', generateId: () => 'lyr-path' },
+  );
+  if (!layer.ok) throw new Error('fixture layer should be valid');
+  return { ...result.value, scene: { layers: [layer.value] } };
+}
 
 function makeDocument(overrides: Partial<CreateDocumentInput> = {}): ForgeDocument {
   const result = createDocument(
@@ -153,9 +188,80 @@ describe('buildExportChecklist for raster formats', () => {
   });
 });
 
-describe('buildExportChecklist for planned formats', () => {
-  it('blocks a format this build cannot write, and says so', () => {
-    const checklist = buildExportChecklist(makeDocument(), 'svg');
+describe('buildExportChecklist for vector formats', () => {
+  it('is ready for a document made only of geometry', () => {
+    const checklist = buildExportChecklist(vectorDocument(), 'svg');
+
+    expect(checklist.format.id).toBe('svg');
+    expect(checklist.ready).toBe(true);
+    expect(checklist.blocked).toEqual([]);
+    expect(checklist.checks.map((entry) => entry.id)).toEqual([
+      'vector-content',
+      'svg-support',
+      'svg-geometry',
+      'svg-download',
+    ]);
+  });
+
+  it('blocks and names the layers SVG cannot represent', () => {
+    const withText = createDocument(
+      {
+        title: 'Poster',
+        studioId: 'design',
+        documentTypeId,
+        canvas: {
+          width: 400,
+          height: 400,
+          unit: 'px',
+          dpi: 96,
+          background: '#ffffff',
+          transparent: false,
+        },
+      },
+      { generateId: () => 'doc-svg-text' },
+    );
+    if (!withText.ok) throw new Error('fixture document should be valid');
+    const text = createLayer(
+      { type: 'text', frame: { x: 0, y: 0, width: 100, height: 40 }, text: { content: 'Hello' } },
+      { name: 'Headline', generateId: () => 'lyr-text' },
+    );
+    if (!text.ok) throw new Error('fixture layer should be valid');
+
+    // Geometry plus a headline: the geometry is fine and the headline is exactly what blocks it.
+    const checklist = buildExportChecklist(
+      { ...withText.value, scene: { layers: [...vectorDocument().scene.layers, text.value] } },
+      'svg',
+    );
+    expect(checklist.ready).toBe(false);
+    expect(checklist.blocked.map((entry) => entry.id)).toEqual(['svg-support']);
+    expect(checklist.blocked[0]?.detail).toContain('Headline');
+    expect(checklist.blocked[0]?.detail).toContain('cannot represent');
+
+    // Nothing but text blocks twice, because both statements are true of it, and each is actionable.
+    const onlyText = buildExportChecklist(
+      { ...withText.value, scene: { layers: [text.value] } },
+      'svg',
+    );
+    expect(onlyText.blocked.map((entry) => entry.id)).toEqual(['vector-content', 'svg-support']);
+  });
+
+  it('blocks an empty document, because the file would contain nothing', () => {
+    const checklist = buildExportChecklist(makeDocument({ title: 'Empty' }), 'svg');
+    expect(checklist.ready).toBe(false);
+    expect(checklist.blocked.map((entry) => entry.id)).toEqual(['vector-content']);
+    expect(checklist.blocked[0]?.label).toBe('Document contains vector artwork');
+    expect(checklist.blocked[0]?.remedy).toContain('vector tools');
+  });
+
+  it('blocks when the environment cannot hand a file to the browser', () => {
+    const checklist = buildExportChecklist(vectorDocument(), 'svg', { downloadAvailable: false });
+    expect(checklist.ready).toBe(false);
+    expect(checklist.blocked.map((entry) => entry.id)).toEqual(['svg-download']);
+    expect(checklist.blocked[0]?.detail).toMatch(/cannot hand a file to the browser/);
+  });
+
+  it('still blocks a vector format this build cannot write, and says so', () => {
+    const checklist = buildExportChecklist(vectorDocument(), 'pdf');
 
     expect(checklist.ready).toBe(false);
     expect(checklist.blocked.map((entry) => entry.id)).toContain('implementation');
