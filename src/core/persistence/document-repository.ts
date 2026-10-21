@@ -53,9 +53,13 @@ function parseEnvelope(raw: string | null): Result<readonly unknown[]> {
     parsed = JSON.parse(raw);
   } catch (error) {
     return err(
-      forgeError('storage-corrupt', 'The saved project index could not be read and was ignored.', {
-        detail: error instanceof Error ? error.message : undefined,
-      }),
+      forgeError(
+        'storage-corrupt',
+        'The saved project index could not be read. Nothing was deleted — clear it in Settings › Local data to start again.',
+        {
+          detail: error instanceof Error ? error.message : undefined,
+        },
+      ),
     );
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {

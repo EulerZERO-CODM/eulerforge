@@ -52,14 +52,20 @@ export function ProjectLibrary() {
         description={state.error?.message ?? 'Local storage is unavailable in this browser.'}
         detail={state.error?.detail}
         action={
-          <Button
-            variant="secondary"
-            onClick={() => {
-              void documents.load();
-            }}
-          >
-            Try again
-          </Button>
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                void documents.load();
+              }}
+            >
+              Try again
+            </Button>
+            {/* The damaged value is never deleted implicitly, so recovery is a deliberate step. */}
+            <Button asChild variant="quiet">
+              <Link href="/settings">Open storage settings</Link>
+            </Button>
+          </>
         }
       />
     );

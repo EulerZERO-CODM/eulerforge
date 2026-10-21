@@ -105,6 +105,13 @@ Four scenarios are asserted in the browser rather than by hand:
    documented stand-in for slower hardware, and the same scenarios are reported again at full speed.
    Method, thresholds, measured results, environment and limitations are in `docs/PERFORMANCE.md`, and
    every run publishes its table to the pull request.
+6. The promises a first-time user relies on, in `e2e/readiness.spec.ts`. A **phone-sized window**
+   (390 × 844) navigates through the drawer, never scrolls sideways, and creates, edits, saves,
+   reloads and exports a real 320 × 240 PNG; with **every API request failed at the network layer**
+   the studios, saving, reopening and export still work and the account panel says "Working locally,
+   as designed"; and a **truncated saved index** is reported with the recovery step and a link to
+   Settings › Local data, is not deleted behind the user's back, and leaves the product fully usable
+   after the deliberate reset.
 
 What is still *not* covered automatically, and therefore stays a manual check:
 

@@ -70,7 +70,7 @@ must not be presented as one.
 ## Browser verification
 
 The claims that only a real browser can settle — canvas pixels, pointer capture, real downloads, real
-decoding, WebGL2 fallback — are covered by the Playwright suite in `e2e/` (78 tests in 14 files), run
+decoding, WebGL2 fallback — are covered by the Playwright suite in `e2e/` (81 tests in 15 files), run
 against the production build by the `Browser (Chromium)` CI job.
 
 On the audit branch the suite was executed in the development container against this head's
@@ -78,7 +78,7 @@ production build, with the repository's own `playwright.config.ts` — no local 
 timeouts, `retries: 0`:
 
 ```
-npx playwright test       78 passed (8.7m)
+npx playwright test       81 passed
 ```
 
 The container cannot reach Playwright's browser CDN and has no system NSS, so the browser was a
@@ -89,6 +89,18 @@ selection and pointer and keyboard transforms, undo and redo, snapping, text wra
 export with the downloaded bytes decoded again, Photo Studio's WebGL2 and CPU parity, Video Studio's
 import, scrubbing, frame export and recording, the assistant's multi-step tasks, and the honest
 reporting of a browser that refuses storage.
+
+`e2e/readiness.spec.ts` adds the three promises a first-time user relies on:
+
+- **a phone-sized screen** (390 × 844): the drawer is the navigation, the page never scrolls
+  sideways, and a project can be created, edited, saved, reloaded and exported to a real 320 × 240
+  PNG from that layout;
+- **no optional server**: every `/api/**` request is failed at the network layer, and the studios,
+  saving, reopening and export still work while the account panel says *"Working locally, as
+  designed"*;
+- **damaged saved data**: a truncated index produces a sentence with the recovery step (clear it in
+  Settings › Local data) and a link to that screen, is not deleted behind the user's back, and the
+  product is fully usable again after the deliberate reset.
 
 ## Vercel
 

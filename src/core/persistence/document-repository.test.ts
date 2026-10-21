@@ -250,7 +250,15 @@ describe('LocalDocumentRepository', () => {
 
     const report = await repository.list();
     expect(report.ok).toBe(false);
-    if (!report.ok) expect(report.error.code).toBe('storage-corrupt');
+    if (!report.ok) {
+      expect(report.error.code).toBe('storage-corrupt');
+      // A person who cannot save anything needs the message to say how to recover, and to say that
+      // nothing was destroyed on the way to the error.
+      expect(report.error.message).toMatch(/nothing was deleted/i);
+      expect(report.error.message).toMatch(/settings/i);
+    }
+    // Reading must not rewrite the damaged value: it is the only copy of whatever was there.
+    expect(storage.get(DOCUMENTS_KEY)).toEqual(ok('{ this is not json'));
   });
 
   it('surfaces a full-storage failure when saving', async () => {
