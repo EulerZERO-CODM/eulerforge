@@ -70,7 +70,7 @@ must not be presented as one.
 ## Browser verification
 
 The claims that only a real browser can settle — canvas pixels, pointer capture, real downloads, real
-decoding, WebGL2 fallback — are covered by the Playwright suite in `e2e/` (81 tests in 15 files), run
+decoding, WebGL2 fallback — are covered by the Playwright suite in `e2e/` (83 tests in 15 files), run
 against the production build by the `Browser (Chromium)` CI job.
 
 On the audit branch the suite was executed in the development container against this head's
@@ -78,7 +78,7 @@ production build, with the repository's own `playwright.config.ts` — no local 
 timeouts, `retries: 0`:
 
 ```
-npx playwright test       81 passed
+npx playwright test       83 passed
 ```
 
 The container cannot reach Playwright's browser CDN and has no system NSS, so the browser was a
