@@ -22,6 +22,7 @@ import { buildRenderPlan } from '../../core/render/plan';
 import { paintPlan, type PainterContext } from '../../core/render/paint';
 import { contextMeasureFactory } from '../../core/render/measure';
 import { cn } from '../../lib/cn';
+import { createBrowserSurface } from '../../lib/browser/canvas';
 import {
   beginMove,
   beginResize,
@@ -203,11 +204,16 @@ export function Artboard({
 
     context.save();
     context.scale(zoom * dpr, zoom * dpr);
-    paintPlan(context, plan, { clear: true });
+    // The surface factory is what lets a tinted graphic be tinted on its own alpha mask rather
+    // than over the document background.
+    paintPlan(context, plan, { clear: true, createSurface: createBrowserSurface });
     context.restore();
     // Guides are *editor aids*, not artwork: they live in the DOM overlay below, so they stay one
     // pixel wide at every zoom and can never leak into an exported image.
-  }, [doc, scene, images.resolver, zoom, dpr]);
+    // `images.status` is a dependency, not a convenience: a graphic is decoded asynchronously, so
+    // the plan built when the layer was added cannot draw it. Without this the canvas keeps the
+    // picture it had while the graphic was still loading, and the graphic never appears.
+  }, [doc, scene, images.resolver, images.status, zoom, dpr]);
 
   const toDocument = (event: { clientX: number; clientY: number }): Point => {
     const surface = surfaceRef.current;
@@ -570,7 +576,11 @@ export function Artboard({
                     aria-label={`Resize ${HANDLE_LABELS[handle].toLowerCase()}`}
                     data-testid={`handle-${handle}`}
                     className="bg-surface-raised border-accent pointer-events-auto absolute h-3 w-3 rounded-[2px] border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-focus)]"
-                    style={handleStyle(handle, scaleRect(gestureBox, zoom))}
+                    style={handleStyle(
+                      handle,
+                      scaleRect(gestureBox, zoom),
+                      scaleRect(selectedFrame, zoom),
+                    )}
                     onPointerDown={(event) => {
                       startResize(event, handle);
                     }}
@@ -727,7 +737,16 @@ function subscribeToDisplayDensity(onChange: () => void): () => void {
   return () => query.removeEventListener('change', onChange);
 }
 
-function handleStyle(handle: TransformHandle, screen: Rect): React.CSSProperties {
+/**
+ * Where a handle sits, in the selection overlay's coordinate space.
+ *
+ * The overlay is drawn around the whole selection, but the handles belong to the box a gesture can
+ * actually change — a locked layer inside the selection is shown as selected yet must not inflate
+ * the box the handles promise to resize. The two boxes do not share an origin, so the handle is
+ * measured from the gesture box and expressed relative to the overlay. Without that, a selection
+ * holding a locked layer puts the handles somewhere other than the corner they claim to resize.
+ */
+function handleStyle(handle: TransformHandle, screen: Rect, origin: Rect): React.CSSProperties {
   const anchors: Record<TransformHandle, { x: number; y: number }> = {
     nw: { x: 0, y: 0 },
     n: { x: 0.5, y: 0 },
@@ -740,8 +759,8 @@ function handleStyle(handle: TransformHandle, screen: Rect): React.CSSProperties
   };
   const anchor = anchors[handle];
   return {
-    left: `${String(screen.width * anchor.x - 6)}px`,
-    top: `${String(screen.height * anchor.y - 6)}px`,
+    left: `${String(screen.x - origin.x + screen.width * anchor.x - 6)}px`,
+    top: `${String(screen.y - origin.y + screen.height * anchor.y - 6)}px`,
     cursor: handleCursor(handle),
   };
 }
@@ -768,7 +787,11 @@ export function GuideOverlay({
   const pxPerMm = toPixels(1, 'mm', canvas.dpi);
   const safe = insetRect(canvas, guides.safeMarginMm * pxPerMm);
   const bleed = guides.bleedMm > 0 ? bleedBand(canvas, guides.bleedMm * pxPerMm) : null;
-  const grid = guides.showGrid ? gridLinePositions(canvas, guides.gridMm * pxPerMm) : [];
+  const gridStep = guides.gridMm * pxPerMm;
+  // One list per axis: a single list stopped at the smaller side, leaving a wide canvas without
+  // grid lines across the part that sticks out.
+  const gridX = guides.showGrid ? gridLinePositions(canvas.width, gridStep) : [];
+  const gridY = guides.showGrid ? gridLinePositions(canvas.height, gridStep) : [];
 
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0">
@@ -784,19 +807,21 @@ export function GuideOverlay({
         className="absolute border border-[rgba(79,140,255,0.55)]"
         style={box(scaleRect(safe, zoom))}
       />
-      {grid.map((position) => (
-        <span key={`grid-x-${String(position)}`}>
-          <span
-            data-guide="grid-x"
-            className="absolute top-0 w-px bg-[rgba(244,245,247,0.12)]"
-            style={{ left: `${String(position * zoom)}px`, height: `${String(height)}px` }}
-          />
-          <span
-            data-guide="grid-y"
-            className="absolute left-0 h-px bg-[rgba(244,245,247,0.12)]"
-            style={{ top: `${String(position * zoom)}px`, width: `${String(width)}px` }}
-          />
-        </span>
+      {gridX.map((position) => (
+        <span
+          key={`grid-x-${String(position)}`}
+          data-guide="grid-x"
+          className="absolute top-0 w-px bg-[rgba(244,245,247,0.12)]"
+          style={{ left: `${String(position * zoom)}px`, height: `${String(height)}px` }}
+        />
+      ))}
+      {gridY.map((position) => (
+        <span
+          key={`grid-y-${String(position)}`}
+          data-guide="grid-y"
+          className="absolute left-0 h-px bg-[rgba(244,245,247,0.12)]"
+          style={{ top: `${String(position * zoom)}px`, width: `${String(width)}px` }}
+        />
       ))}
       {guides.showCentreLines ? (
         <>

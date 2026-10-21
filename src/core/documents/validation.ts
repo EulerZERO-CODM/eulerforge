@@ -20,6 +20,7 @@ import {
   MIN_LAYER_SIZE,
   TEXT_ALIGNMENTS,
 } from './layer-types';
+import { forgeDocumentSchema } from './schema';
 import type { Canvas, ForgeDocument, GuideSettings } from './types';
 import { MAX_CANVAS_PX, MIN_CANVAS_PX, isValidDpi } from './units';
 
@@ -300,13 +301,21 @@ export function validateScene(scene: Scene): readonly FieldValidation[] {
   return issues;
 }
 
-/** Cheap structural sanity check used by the store before persisting. */
+/**
+ * Cheap structural sanity check used by the store before persisting.
+ *
+ * The schema is the authority on whether a document will load again, so the save-time gate asks the
+ * schema as well as the field rules below. A gate that checked fewer fields than the loader would
+ * let the application save a document it is then going to refuse to read — the project would
+ * disappear from the library with nothing but "saved" on screen.
+ */
 export function isDocumentStructurallySound(document: ForgeDocument): boolean {
   return (
     validateCanvas(document.canvas).length === 0 &&
     validateGuides(document.guides).length === 0 &&
     validateTitle(document.title).length === 0 &&
     validateScene(document.scene).length === 0 &&
-    document.schemaVersion >= 1
+    document.schemaVersion >= 1 &&
+    forgeDocumentSchema.safeParse(document).success
   );
 }

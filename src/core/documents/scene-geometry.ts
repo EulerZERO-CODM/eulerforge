@@ -111,7 +111,9 @@ export function hitTestScene(
 ): Layer | null {
   for (let index = scene.layers.length - 1; index >= 0; index -= 1) {
     const layer = scene.layers[index];
-    if (!layer || !layer.visible) continue;
+    // A layer that draws nothing cannot be picked: the renderer skips it, so a click has to fall
+    // through to whatever is actually visible underneath.
+    if (!layer || !layer.visible || layer.opacity <= 0) continue;
     if (layer.locked && options.includeLocked !== true) continue;
     if (layerContainsPoint(layer, point)) return layer;
   }
@@ -234,20 +236,31 @@ export function resizeFrame(
     } else if (hasVerticalHandle) {
       width = Math.max(minSize, Math.min(maxSize, height * ratio));
     }
-    // Re-anchor the edge that must stay put after the driven dimension changed.
+    // Re-anchor the edge that must stay put after the driven dimension changed, and derive the
+    // other one from it. Setting only the moving edge would leave the frame's two edges
+    // disagreeing about its width, and a centre resize would come out off-centre: the shape the
+    // group transform produces for the same gesture, which is what the snap candidates are
+    // measured against.
     if (movesLeft) {
       left = options.resizeFromCentre ? frame.x + frame.width / 2 - width / 2 : right - width;
+      right = left + width;
     } else if (movesRight) {
       right = options.resizeFromCentre ? frame.x + frame.width / 2 + width / 2 : left + width;
+      left = right - width;
     } else {
+      // No horizontal edge is being dragged: the frame keeps its horizontal centre.
       left = frame.x + (frame.width - width) / 2;
+      right = left + width;
     }
     if (movesTop) {
       top = options.resizeFromCentre ? frame.y + frame.height / 2 - height / 2 : bottom - height;
+      bottom = top + height;
     } else if (movesBottom) {
       bottom = options.resizeFromCentre ? frame.y + frame.height / 2 + height / 2 : top + height;
+      top = bottom - height;
     } else {
       top = frame.y + (frame.height - height) / 2;
+      bottom = top + height;
     }
     return createRect(left, top, width, height);
   }
@@ -479,9 +492,9 @@ export type SnapEdge = 'left' | 'centreX' | 'right' | 'top' | 'centreY' | 'botto
 /**
  * Computes the snap adjustment for a frame.
  *
- * Candidate edges are matched against the target list; the closest match within the threshold on each
- * axis wins. Ties break towards the axis with the smaller move so a corner snap cannot pull a frame
- * further than necessary.
+ * Candidate edges are matched against the target list, and the closest match within the threshold
+ * wins *on each axis independently*: a corner can therefore snap on both axes at once, which is
+ * what makes a corner meet a corner rather than only one of the two.
  */
 export function computeSnap(input: SnapInput): SnapAdjustment {
   const none: SnapAdjustment = { delta: { x: 0, y: 0 }, guidesX: [], guidesY: [] };

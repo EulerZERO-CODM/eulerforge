@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
 import { LessonView } from './lesson-view';
@@ -18,9 +19,22 @@ function renderLesson(slug: string) {
   // Progress tracking is part of the lesson view, so it runs against the real stores.
   return render(
     <ForgeProvider services={createTestServices()}>
-      <LessonView slug={lesson.slug} sections={lesson.sections} objectives={lesson.objectives} />
+      <LessonView
+        slug={lesson.slug}
+        sections={lesson.sections}
+        objectives={lesson.objectives}
+        {...(lesson.exercise ? { exercise: lesson.exercise } : {})}
+      />
     </ForgeProvider>,
   );
+}
+
+/** The guided-exercise panel, found through the heading the panel labels itself with. */
+function exercisePanel(): HTMLElement {
+  const heading = document.getElementById('exercise-heading');
+  const panel = heading?.closest('section');
+  if (!panel) throw new Error('the lesson should render a guided exercise panel');
+  return panel as HTMLElement;
 }
 
 describe('LessonView', () => {
@@ -105,5 +119,64 @@ describe('LessonView', () => {
     const card = screen.getByText(note.title).closest('[role="note"]');
     expect(card).not.toBeNull();
     if (card) expect(within(card as HTMLElement).getByText(note.body)).toBeInTheDocument();
+  });
+});
+
+describe('guided exercises', () => {
+  it('renders the exercise a lesson declares, so the card and the page agree', () => {
+    const lesson = requireLesson('your-first-project');
+    if (!lesson.exercise) throw new Error('this lesson should declare an exercise');
+    renderLesson(lesson.slug);
+
+    // The lesson card advertises "N-step exercise"; the page has to offer that exercise.
+    expect(
+      screen.getByRole('heading', { name: `Guided exercise: ${lesson.exercise.title}` }),
+    ).toBeInTheDocument();
+    for (const step of lesson.exercise.steps) {
+      expect(screen.getAllByText(step.label).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('lets the reader tick the steps of a declared exercise', async () => {
+    const lesson = requireLesson('your-first-project');
+    if (!lesson.exercise) throw new Error('this lesson should declare an exercise');
+    renderLesson(lesson.slug);
+
+    const checkboxes = screen.getAllByRole('checkbox');
+    expect(checkboxes).toHaveLength(lesson.exercise.steps.length);
+
+    const first = checkboxes[0];
+    if (!first) throw new Error('the exercise should offer a first step');
+    expect(first).not.toBeChecked();
+    await userEvent.click(first);
+    expect(first).toBeChecked();
+  });
+
+  it('does not state a second, different duration for the same exercise', () => {
+    const lesson = requireLesson('canvas-and-units');
+    renderLesson(lesson.slug);
+
+    // The checklist heading states how long the exercise takes. A second number in the panel would
+    // contradict it on the same screen.
+    expect(
+      screen.getByRole('heading', { name: /guided exercise \(\d+ minutes\)/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/~\d+ min/)).not.toBeInTheDocument();
+  });
+
+  it('opens the screen the exercise step points at, and names it accurately', () => {
+    const lesson = requireLesson('canvas-and-units');
+    renderLesson(lesson.slug);
+
+    const checklist = lesson.sections.find((section) => section.type === 'checklist');
+    if (!checklist || checklist.type !== 'checklist') throw new Error('missing checklist');
+    const destination = checklist.items.find((item) => item.actionHref);
+    if (!destination) throw new Error('the exercise should point at a screen');
+
+    const panel = exercisePanel();
+    const link = within(panel).getByRole('link', { name: destination.actionLabel ?? '' });
+    expect(link).toHaveAttribute('href', destination.actionHref);
+    // A button that says "Go to the workspace" and opens the project library misdirects the reader.
+    expect(within(panel).queryByText('Go to the workspace')).not.toBeInTheDocument();
   });
 });

@@ -37,11 +37,18 @@ export function listLessons(filter: LessonFilter = {}): readonly Lesson[] {
     }
     if (filter.tag && !lesson.tags.includes(filter.tag)) return false;
     if (text) {
+      // The glossary is shown beside the search box, so a term the reader can see has to be
+      // findable: a lesson matches when it teaches a concept with that name.
+      const conceptTerms = lesson.conceptIds.flatMap((id) => {
+        const concept = getConcept(id);
+        return concept ? [concept.term, ...concept.alsoKnownAs] : [];
+      });
       const haystack = [
         lesson.title,
         lesson.summary,
         lesson.tags.join(' '),
         lesson.objectives.join(' '),
+        conceptTerms.join(' '),
       ]
         .join(' ')
         .toLowerCase();

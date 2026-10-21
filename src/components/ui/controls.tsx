@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 
 import { cn } from '../../lib/cn';
 
@@ -9,7 +9,8 @@ import { cn } from '../../lib/cn';
  *
  * Behaves as a group of toggle buttons with `aria-pressed`, which is the correct semantic for
  * "filter this list" — a tablist would promise panel switching that does not happen here.
- * Arrow keys move between options.
+ * Arrow keys move between the options and select the one they land on, the way a native radio
+ * group does.
  */
 export type SegmentedControlOption<TValue extends string> = {
   readonly value: TValue;
@@ -32,6 +33,10 @@ export function SegmentedControl<TValue extends string>({
   readonly size?: 'sm' | 'md';
   readonly className?: string;
 }) {
+  // The buttons are kept so the focus can follow the selection: a control that moves the value but
+  // leaves the focus behind is worse than one that does neither.
+  const buttons = useRef<(HTMLButtonElement | null)[]>([]);
+
   return (
     <div
       role="group"
@@ -41,13 +46,31 @@ export function SegmentedControl<TValue extends string>({
         className,
       )}
     >
-      {options.map((option) => {
+      {options.map((option, index) => {
         const selected = option.value === value;
         return (
           <button
             key={option.value}
+            ref={(element) => {
+              buttons.current[index] = element;
+            }}
             type="button"
             aria-pressed={selected}
+            onKeyDown={(event) => {
+              const step =
+                event.key === 'ArrowRight' || event.key === 'ArrowDown'
+                  ? 1
+                  : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+                    ? -1
+                    : 0;
+              if (step === 0 || options.length === 0) return;
+              event.preventDefault();
+              const nextIndex = (index + step + options.length) % options.length;
+              const next = options[nextIndex];
+              if (!next) return;
+              onChange(next.value);
+              buttons.current[nextIndex]?.focus();
+            }}
             onClick={() => {
               onChange(option.value);
             }}

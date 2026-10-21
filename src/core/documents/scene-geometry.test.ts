@@ -396,6 +396,47 @@ describe('group transforms', () => {
     }
   });
 
+  it('agrees with the group transform when the aspect ratio is locked', () => {
+    // With Shift held the height follows the width, so the frame has to be re-anchored. With Alt
+    // held as well it has to stay centred: the two paths disagree unless both edges are derived
+    // from the anchor, which is what the snap candidates are measured against.
+    const deltas = [
+      { x: 120, y: 0 },
+      { x: 0, y: 90 },
+      { x: -60, y: -40 },
+    ];
+    for (const handle of TRANSFORM_HANDLES) {
+      for (const delta of deltas) {
+        const label = `${handle} ${JSON.stringify(delta)}`;
+        for (const resizeFromCentre of [false, true]) {
+          const options = { preserveAspectRatio: true, resizeFromCentre };
+          const transform = groupTransformForHandle(box, handle, delta, options);
+          expect(
+            applyGroupTransform(box, transform),
+            `${label} centre=${String(resizeFromCentre)}`,
+          ).toEqual(resizeFrame(box, handle, delta, options));
+        }
+      }
+    }
+  });
+
+  it('keeps a centre resize centred on the original box', () => {
+    const frame = createRect(100, 100, 400, 200);
+    const resized = resizeFrame(
+      frame,
+      'se',
+      { x: 120, y: 0 },
+      {
+        preserveAspectRatio: true,
+        resizeFromCentre: true,
+      },
+    );
+    expect(resized.x + resized.width / 2).toBeCloseTo(frame.x + frame.width / 2);
+    expect(resized.y + resized.height / 2).toBeCloseTo(frame.y + frame.height / 2);
+    // The aspect ratio is kept, so the height follows the width.
+    expect(resized.height).toBeCloseTo((resized.width * frame.height) / frame.width);
+  });
+
   it('keeps every layer inside the transformed box, at the same relative position', () => {
     for (const handle of TRANSFORM_HANDLES) {
       const delta = { x: 60, y: 40 };

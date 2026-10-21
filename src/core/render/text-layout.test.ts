@@ -208,6 +208,39 @@ describe('paintTextLine', () => {
     expect(calls.map((call) => call.x)).toEqual([0, 12, 36]);
   });
 
+  it('draws a letter-spaced run exactly as wide as the text that was measured', () => {
+    // A font that kerns: the pair is narrower than the two characters measured on their own.
+    const kerned = (text: string) => (text === 'AV' ? 18 : text.length * 10);
+    const calls: Recorded[] = [];
+    const context: TextPaintContext = {
+      font: '',
+      textAlign: 'left',
+      textBaseline: 'top',
+      fillStyle: '#000000',
+      fillText(text, x, y) {
+        calls.push({ text, x, y });
+      },
+      measureText(text) {
+        return { width: kerned(text) };
+      },
+    };
+
+    const spacing = 4;
+    // The layout measured the shaped run: 18 wide, plus one gap of 4.
+    paintTextLine(context, {
+      line: { text: 'AV', width: 18 + spacing },
+      settings: settings({ letterSpacing: spacing, align: 'right' }),
+      frameWidth: 100,
+      origin: { x: 0, y: 0 },
+    });
+
+    const last = calls[calls.length - 1];
+    expect(last?.text).toBe('V');
+    // Right aligned, the run has to end at the frame's edge: 100 - 22 + 12 + 10 = 100. Drawn one
+    // character after another it would end at 102, past the frame.
+    expect((last?.x ?? 0) + 10).toBe(100);
+  });
+
   it('draws nothing for an empty line', () => {
     const { context, calls } = recordingContext();
     paintTextLine(context, {

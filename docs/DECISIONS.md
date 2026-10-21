@@ -131,6 +131,14 @@ destroys data; refusing loudly is recoverable, silently losing fields is not.
 fixture test for the old shape, and a note in this file. Version-less records are treated as v0 so
 pre-versioning projects still load.
 
+**The schema is also the save gate (added in the review pass).** A document is only persisted if it
+would load again: the check the store applies before writing asks the schema, not a hand-written
+list of fields. A gate that checked fewer fields than the loader would let the application save a
+document it is then going to refuse to read — the project would vanish from the library behind a
+"saved" indicator, which is data loss dressed as success. The limits the schema imposes (the
+length of a tag, the number of tags, the length of a summary) are declared once and used by the
+interface as well, so a field cannot accept more than the document will keep.
+
 ---
 
 ## ADR-0006 — Local-first persistence behind a promise-based boundary; no cloud claims
@@ -153,6 +161,23 @@ implementation local now keeps the honesty simple.
 `storage-quota-exceeded`, `storage-corrupt`. Corrupt records are skipped and reported rather than
 crashing the library. Nothing may imply sync until ADR-0006 is superseded by a record that covers
 authentication, conflict handling and data residency.
+
+**A skipped record is kept, not deleted (added in the review pass).** "Skipped" has to mean exactly
+that. A record this build cannot read — because it fails validation, or because a newer app version
+wrote it — is written back **verbatim** on the next save. Saving the readable subset alone would
+turn every refusal into a deletion the moment an unrelated project was saved, which would make the
+refusal in ADR-0005 unrecoverable and would contradict what the interface already says ("left
+untouched"). The read and the write of a save are also performed without an intervening `await`, so
+two saves issued in the same tick cannot both read the same snapshot and then overwrite one another.
+
+**An unreadable index is kept, and the application carries on (added in the review pass).** The same
+rule applies one level up. When the whole index cannot be parsed, the raw bytes are preserved
+verbatim, the library loads empty, the reader is told what happened through the same "skipped"
+report the interface already shows, and the next save writes the bytes back untouched. Refusing to
+read the index is not a reason to refuse to write: an application that cannot save anything is
+worse than one that shows an empty library, and the earlier behaviour locked the reader out of
+their own work until they cleared everything. Clearing local data still discards the unreadable
+bytes, deliberately and on request.
 
 **Durability reporting (added in the Phase 1 review pass).** The in-memory fallback is real but not
 durable, so `createBrowserStorage()` returns the backend *and* its durability (`persistent` or
@@ -455,6 +480,24 @@ graphics dependency would also have added a second geometry model to keep in syn
 that the renderer does not understand produces a **blocking render issue**, so export refuses by
 name instead of emitting an empty file. Because the plan is data, it is also the place to add future
 outputs (SVG, PDF) without touching the editor.
+
+**The artboard repaints when an asynchronous input arrives.** A graphic is decoded asynchronously,
+so the plan built when its layer appears cannot draw it. The artboard therefore repaints when the
+decode finishes, not only when the document changes. Without that, a graphic is in the document, in
+the layer list and in the exported file — and nowhere on the screen, which is the only place the
+reader is looking. The export path does not have this problem, because it resolves the image when it
+exports; that asymmetry is why the defect survived a browser suite that checked exported files.
+
+**Operations that need their own alpha (added in the review pass).** Some paint operations cannot
+be expressed on a shared canvas. Tinting a graphic is the example: `source-atop` only means "colour
+the graphic's own pixels" while the graphic is the *only* thing on the surface. Applied to the
+shared canvas, the document background is already painted underneath the graphic, the wash covers
+it as well, and the artwork is replaced by a rectangle of colour. The painter therefore takes an
+optional **surface factory** (`PaintPlanOptions.createSurface`): the graphic is drawn on an isolated
+surface, washed there, and composited back. The browser adapter creates the surface
+(`src/lib/browser/canvas.ts`), the export pipeline asks the canvas for one (`RasterCanvas`), and a
+context that cannot provide one draws the graphic **untinted and says so** — losing a tint is a
+smaller fault than losing the artwork, and the fallback is reported rather than hidden.
 
 ## ADR-0017 — No interaction is drag-only, and transient state never enters the document
 

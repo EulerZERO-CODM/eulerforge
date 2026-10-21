@@ -11,6 +11,9 @@ import {
   CANVAS_PRESET_CATEGORY_LABELS,
   DOCUMENT_STATUSES,
   DOCUMENT_STATUS_LABELS,
+  MAX_DOCUMENT_TAGS,
+  MAX_NOTES_LENGTH,
+  MAX_TAG_LENGTH,
   type Canvas,
   type DocumentStatus,
   type GuideSettings,
@@ -540,7 +543,9 @@ function DetailsSection({ api }: { readonly api: WorkspaceApi }) {
   const notes = useDraftField({
     value: doc.metadata.notes,
     onCommit: (raw) => {
-      void api.commit('Update notes', { metadata: { ...doc.metadata, notes: raw.slice(0, 2000) } });
+      void api.commit('Update notes', {
+        metadata: { ...doc.metadata, notes: raw.slice(0, MAX_NOTES_LENGTH) },
+      });
       return null;
     },
   });
@@ -550,9 +555,9 @@ function DetailsSection({ api }: { readonly api: WorkspaceApi }) {
     onCommit: (raw) => {
       const parsed = raw
         .split(',')
-        .map((tag) => tag.trim())
+        .map((tag) => tag.trim().slice(0, MAX_TAG_LENGTH))
         .filter(Boolean)
-        .slice(0, 12);
+        .slice(0, MAX_DOCUMENT_TAGS);
       void api.commit('Update tags', { metadata: { ...doc.metadata, tags: parsed } });
       return null;
     },
@@ -612,7 +617,11 @@ function DetailsSection({ api }: { readonly api: WorkspaceApi }) {
           </Field>
         </div>
 
-        <Field label="Tags" error={tags.error} hint="Comma separated, maximum twelve.">
+        <Field
+          label="Tags"
+          error={tags.error}
+          hint={`Comma separated, maximum ${String(MAX_DOCUMENT_TAGS)} of ${String(MAX_TAG_LENGTH)} characters.`}
+        >
           <Input
             value={tags.draft}
             onChange={(event) => {

@@ -21,6 +21,7 @@ import {
 import { createBrowserCanvas, canRasteriseHere } from '../../lib/browser/canvas';
 import { cn } from '../../lib/cn';
 import { useForgeServices } from '../../state/forge-provider';
+import { useCreationDefaults } from '../../state/hooks';
 import { Button } from '../ui/button';
 import { Field, Select } from '../ui/field';
 import { InlineNote } from '../ui/states';
@@ -61,7 +62,8 @@ export function ExportPanel({
   readonly images: SceneImages;
 }) {
   const { toasts } = useForgeServices();
-  const [formatId, setFormatId] = useState<string>(PROJECT_FILE_FORMAT_ID);
+  const defaults = useCreationDefaults();
+  const [formatId, setFormatId] = useState<string>(defaults.defaultExportFormatId);
   const [scale, setScale] = useState<number>(1);
   const [quality, setQuality] = useState<number>(DEFAULT_JPEG_QUALITY);
   const [jpegBackground, setJpegBackground] = useState<JpegBackground>('white');
@@ -77,10 +79,19 @@ export function ExportPanel({
     jpegBackground,
     // A graphic the browser could not decode blocks the export: it would otherwise be missing from
     // the file while the export reported success.
-    renderIssues: images.errors.map((href) => ({
-      message: `“${href}” could not be loaded.`,
-      blocking: true,
-    })),
+    renderIssues: [
+      ...images.errors.map((href) => ({
+        message: `“${href}” could not be loaded.`,
+        blocking: true,
+      })),
+      // A graphic that has not finished decoding blocks it too. The renderer refuses to draw a
+      // document with an unresolved graphic, so a checklist that said "ready" here would be a
+      // promise the export cannot keep.
+      ...images.pending.map((href) => ({
+        message: `“${href}” is still loading.`,
+        blocking: true,
+      })),
+    ],
   });
 
   const runRaster = async () => {

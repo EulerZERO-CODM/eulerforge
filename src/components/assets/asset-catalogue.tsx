@@ -6,18 +6,20 @@ import { useEffect, useState } from 'react';
 import type {
   AssetFacets,
   AssetKind,
+  AssetLicense,
   AssetLicenseId,
   AssetQuery,
   AssetRecord,
   Page,
 } from '../../core/assets/types';
 import { ASSET_KIND_LABELS, DEFAULT_ASSET_PAGE_SIZE } from '../../core/assets/types';
+import { LICENSES } from '../../core/assets/licenses';
 import { studioRegistry } from '../../core/studios';
 import { cn } from '../../lib/cn';
 import { formatCount, formatDate } from '../../lib/format';
 import { useForgeServices } from '../../state/forge-provider';
 import { usePreferences } from '../../state/hooks';
-import { Badge } from '../ui/badge';
+import { AssetStatusBadge } from './asset-status-badge';
 import { Button } from '../ui/button';
 import { SwatchRow } from '../ui/controls';
 import { Dialog, DialogContent } from '../ui/dialog';
@@ -32,6 +34,13 @@ import { EmptyState, ErrorState, InlineNote, SkeletonCard } from '../ui/states';
  * come from the adapter, so a remote catalogue can replace the bundled sample source without this
  * component changing. The catalogue's own notice (including "these are samples") is always shown.
  */
+
+/** Name for a licence filter that is still applied, even when nothing matches it any more. */
+function licenseName(id: string): string {
+  const license = LICENSES[id as AssetLicenseId] as AssetLicense | undefined;
+  return license?.name ?? id;
+}
+
 export function AssetCatalogue() {
   const { catalog, bus } = useForgeServices();
   const { preferences } = usePreferences();
@@ -63,8 +72,8 @@ export function AssetCatalogue() {
       ...(studioId === 'all' ? {} : { studioIds: [studioId] }),
     };
 
-    void Promise.all([catalog.query(assetQuery), catalog.facets(assetQuery)]).then(
-      ([pageResult, facetResult]) => {
+    void Promise.all([catalog.query(assetQuery), catalog.facets(assetQuery)])
+      .then(([pageResult, facetResult]) => {
         if (cancelled) return;
         if (!pageResult.ok) {
           setState({ status: 'error', message: pageResult.error.message });
@@ -80,8 +89,16 @@ export function AssetCatalogue() {
           total: pageResult.value.totalItems,
           page: pageResult.value.page,
         });
-      },
-    );
+      })
+      .catch((error: unknown) => {
+        // The bundled adapter always resolves, but a remote one might reject. Without this the
+        // catalogue would sit on its loading skeleton for ever, with nothing to explain why.
+        if (cancelled) return;
+        setState({
+          status: 'error',
+          message: error instanceof Error ? error.message : 'The catalogue could not be queried.',
+        });
+      });
 
     return () => {
       cancelled = true;
@@ -97,6 +114,10 @@ export function AssetCatalogue() {
     apply();
     setPage(1);
   };
+
+  /** Whether any filter is narrowing the list; drives the empty state's wording and its action. */
+  const hasFilters =
+    query.trim().length > 0 || kind !== 'all' || licenseId !== 'all' || studioId !== 'all';
 
   return (
     <div className="space-y-5">
@@ -142,6 +163,14 @@ export function AssetCatalogue() {
                       label: `${facet.label} (${String(facet.count)})`,
                     }))
                   : []),
+                // A licence that is still applied stays listed even when nothing matches it any more.
+                // Without this the control falls back to "Any licence" while the list is still
+                // filtered by that licence, which states something untrue about the results.
+                ...(licenseId !== 'all' &&
+                state.status === 'ready' &&
+                !state.facets.licenses.some((facet) => facet.value === licenseId)
+                  ? [{ value: licenseId, label: `${licenseName(licenseId)} (0)` }]
+                  : []),
               ]}
             />
           </Field>
@@ -178,7 +207,9 @@ export function AssetCatalogue() {
                     ? state.facets.total
                     : 0
                   : (facet?.count ?? 0);
-              if (value !== 'all' && count === 0) return null;
+              // The selected kind always stays listed, even when nothing matches it: a filter the
+              // reader cannot see is a filter they cannot undo.
+              if (value !== 'all' && count === 0 && kind !== value) return null;
               return (
                 <button
                   key={value}
@@ -232,20 +263,28 @@ export function AssetCatalogue() {
       ) : state.page.items.length === 0 ? (
         <EmptyState
           icon={<Search aria-hidden />}
-          title="No assets match those filters"
-          description="The bundled sample catalogue is deliberately small. Clear the filters to see every record it contains."
+          title={hasFilters ? 'No assets match those filters' : 'This catalogue is empty'}
+          description={
+            hasFilters
+              ? 'Nothing in the catalogue matches the current filters. Clear them to see every record it holds.'
+              : 'This build has no assets to browse. The notice above names the catalogue source it uses.'
+          }
           actions={
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setQuery('');
-                setKind('all');
-                setLicenseId('all');
-                setStudioId('all');
-              }}
-            >
-              Clear filters
-            </Button>
+            // The action only exists when there is something to clear: a button that resets filters
+            // that are already empty does nothing, and a dead control is worse than no control.
+            hasFilters ? (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setQuery('');
+                  setKind('all');
+                  setLicenseId('all');
+                  setStudioId('all');
+                }}
+              >
+                Clear filters
+              </Button>
+            ) : undefined
           }
         />
       ) : (
@@ -262,9 +301,9 @@ export function AssetCatalogue() {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <span className="text-fg text-base font-medium">{asset.name}</span>
-                    <Badge tone={asset.status === 'sample' ? 'planned' : 'neutral'}>
-                      {asset.status === 'sample' ? 'sample' : 'planned'}
-                    </Badge>
+                    {/* Same component as the studio pages use, so a record looks the same
+                        everywhere: a sample is available now, a planned record is not. */}
+                    <AssetStatusBadge status={asset.status} />
                   </div>
 
                   <AssetPreviewBlock asset={asset} />

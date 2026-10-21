@@ -598,7 +598,9 @@ export function topmostLayerAt(
 ): Layer | undefined {
   for (let index = scene.layers.length - 1; index >= 0; index -= 1) {
     const layer = scene.layers[index];
-    if (!layer || !layer.visible || layer.locked) continue;
+    // A layer that draws nothing cannot be picked: the renderer skips it, so a click has to fall
+    // through to whatever is actually visible underneath.
+    if (!layer || !layer.visible || layer.opacity <= 0 || layer.locked) continue;
     if (contains(layer, point)) return layer;
   }
   return undefined;
@@ -626,7 +628,14 @@ export function addAttribution(
     return Object.freeze(next);
   }
   const next = [...records, record];
-  return Object.freeze(next.slice(0, MAX_ATTRIBUTION_RECORDS));
+  // At the cap the *oldest* record goes, never the one just added: the record that was just written
+  // describes a graphic the document now contains, and dropping it would lose a licence obligation
+  // the export is meant to list. The order stays oldest first.
+  return Object.freeze(
+    next.length > MAX_ATTRIBUTION_RECORDS
+      ? next.slice(next.length - MAX_ATTRIBUTION_RECORDS)
+      : next,
+  );
 }
 
 export function findAttribution(

@@ -26,6 +26,8 @@ export type SceneImages = {
   readonly loading: boolean;
   /** Sources the browser refused to load. */
   readonly errors: readonly string[];
+  /** Sources that have not finished loading yet. */
+  readonly pending: readonly string[];
   /** Re-attempts every failed source; used by the "reload graphics" action. */
   readonly retry: () => void;
 };
@@ -35,6 +37,14 @@ export function useSceneImages(scene: Scene): SceneImages {
   // because the interface does render it. Both are only written from load callbacks.
   const loaded = useRef(new Map<string, HTMLImageElement>());
   const [status, setStatus] = useState<ReadonlyMap<string, ImageStatus>>(new Map());
+  /**
+   * Bumped by `retry` so the load effect runs again.
+   *
+   * The effect only starts a load when its dependencies change, so clearing a failed source on its
+   * own would leave it waiting forever for a request that is never made. The counter is what makes
+   * "Reload graphics" actually re-request the sources that failed.
+   */
+  const [attempt, setAttempt] = useState(0);
 
   const hrefs = useMemo(() => {
     const seen = new Set<string>();
@@ -67,7 +77,7 @@ export function useSceneImages(scene: Scene): SceneImages {
     return () => {
       cancelled = true;
     };
-  }, [hrefs]);
+  }, [hrefs, attempt]);
 
   /** Status for the current sources, with anything not yet attempted reported as loading. */
   const currentStatus = useMemo(() => {
@@ -89,16 +99,31 @@ export function useSceneImages(scene: Scene): SceneImages {
     [hrefs, currentStatus],
   );
 
+  const pendingSources = useMemo(
+    () => hrefs.filter((href) => currentStatus.get(href) === 'loading'),
+    [hrefs, currentStatus],
+  );
+
   const retry = useCallback(() => {
-    for (const href of hrefs) loaded.current.delete(href);
-    setStatus(new Map());
-  }, [hrefs]);
+    // Only the sources that failed are dropped: the ones that loaded keep their decoded image and
+    // their status, so a retry never turns a working graphic back into a loading one.
+    const failed = hrefs.filter((href) => status.get(href) === 'error');
+    if (failed.length === 0) return;
+    for (const href of failed) loaded.current.delete(href);
+    setStatus((previous) => {
+      const next = new Map(previous);
+      for (const href of failed) next.delete(href);
+      return next;
+    });
+    setAttempt((value) => value + 1);
+  }, [hrefs, status]);
 
   return {
     resolver,
     status: currentStatus,
-    loading: hrefs.some((href) => currentStatus.get(href) === 'loading'),
+    loading: pendingSources.length > 0,
     errors,
+    pending: pendingSources,
     retry,
   };
 }

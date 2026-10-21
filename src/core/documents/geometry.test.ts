@@ -75,15 +75,25 @@ describe('bleedBand', () => {
 });
 
 describe('gridLinePositions', () => {
-  it('spaces lines evenly inside the smaller dimension', () => {
+  it('spaces lines evenly inside the extent it is given', () => {
     // Lines are only produced strictly inside the canvas, so the 100px boundary is excluded.
-    expect(gridLinePositions({ width: 300, height: 100 }, 50)).toEqual([50]);
-    expect(gridLinePositions({ width: 300, height: 300 }, 100)).toEqual([100, 200]);
+    expect(gridLinePositions(100, 50)).toEqual([50]);
+    expect(gridLinePositions(300, 100)).toEqual([100, 200]);
   });
 
-  it('returns nothing for a non-positive step', () => {
-    expect(gridLinePositions({ width: 300, height: 300 }, 0)).toEqual([]);
-    expect(gridLinePositions({ width: 300, height: 300 }, Number.NaN)).toEqual([]);
+  it('covers a wide canvas along its whole width', () => {
+    // One list for both axes stopped at the smaller side, so a 1920 x 1080 canvas had no grid
+    // across its right-hand 840 pixels.
+    expect(gridLinePositions(1920, 100)).toEqual([
+      100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700,
+      1800, 1900,
+    ]);
+  });
+
+  it('returns nothing for a non-positive step or extent', () => {
+    expect(gridLinePositions(300, 0)).toEqual([]);
+    expect(gridLinePositions(300, Number.NaN)).toEqual([]);
+    expect(gridLinePositions(0, 50)).toEqual([]);
   });
 });
 

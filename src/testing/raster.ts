@@ -57,6 +57,21 @@ export function nodeCanvasFactory(): CanvasFactory {
           callback(null);
         }
       },
+      createSurface: (surfaceWidth, surfaceHeight) => {
+        const surface = createCanvas(
+          Math.max(1, Math.round(surfaceWidth)),
+          Math.max(1, Math.round(surfaceHeight)),
+        );
+        const surfaceContext = surface.getContext('2d');
+        return {
+          context: surfaceContext,
+          width: surface.width,
+          height: surface.height,
+          draw: (target, x, y, drawWidth, drawHeight) => {
+            target.drawImage(surface, x, y, drawWidth, drawHeight);
+          },
+        };
+      },
     };
     return adapter;
   };

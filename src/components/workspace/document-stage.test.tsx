@@ -58,6 +58,7 @@ function stageElement(canvas: Canvas, services?: TestForgeServices): React.React
     status: new Map(),
     loading: false,
     errors: [],
+    pending: [],
     retry: () => {
       /* nothing to retry in this fixture */
     },

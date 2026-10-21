@@ -12,6 +12,7 @@
  */
 
 import { applyDocumentPatch } from '../core/documents/factories';
+import { freezeDocument } from '../core/documents/freeze';
 import type { DocumentPatch } from '../core/documents/patch';
 import type { ForgeDocument } from '../core/documents/types';
 import { isDocumentStructurallySound } from '../core/documents/validation';
@@ -152,7 +153,9 @@ export class DocumentSession {
     }
     // Stepping back ends any continuous interaction: the next change must be its own entry.
     this.coalescing = null;
+    const before = this.history.getState();
     this.history.undo();
+    this.history.replaceCurrent(withMonotonicRevision(before, this.history.getState()));
     return this.persistToStore(false);
   }
 
@@ -161,7 +164,9 @@ export class DocumentSession {
       return err(forgeError('validation-failed', 'There is nothing to redo.'));
     }
     this.coalescing = null;
+    const before = this.history.getState();
     this.history.redo();
+    this.history.replaceCurrent(withMonotonicRevision(before, this.history.getState()));
     return this.persistToStore(false);
   }
 
@@ -182,8 +187,10 @@ export class DocumentSession {
       return err(saved.error);
     }
 
-    // The persisted value is authoritative (it may carry a normalised field).
-    if (saved.value !== document) this.history.reset(saved.value);
+    // The persisted value is authoritative (it may carry a normalised field). The *present* is
+    // replaced, but the history is not thrown away: `reset` would clear every undoable step, so a
+    // repository that normalises what it stores would silently take the user's history with it.
+    if (saved.value !== document) this.history.replaceCurrent(saved.value);
 
     const state: DocumentSessionState = {
       ...this.buildState(false),
@@ -219,6 +226,19 @@ export class DocumentSession {
     const error = this.store.getState().lastError;
     return error ? error.message : null;
   }
+}
+
+/**
+ * Keeps `revision` monotonic across an undo or a redo.
+ *
+ * `revision` is documented as a monotonic counter — it is what a future remote adapter would
+ * compare to spot a stale write — but an undo restores the *content* of an earlier state, whose
+ * revision is older. Undoing is still a new saved state, so it carries a fresh, higher revision
+ * instead of sending the counter backwards.
+ */
+function withMonotonicRevision(before: ForgeDocument, restored: ForgeDocument): ForgeDocument {
+  if (restored.revision > before.revision) return restored;
+  return freezeDocument({ ...restored, revision: before.revision + 1 });
 }
 
 /**

@@ -37,6 +37,13 @@ import type {
   ForgeDocument,
   GuideSettings,
 } from './types';
+import {
+  MAX_AUTHOR_LABEL_LENGTH,
+  MAX_DOCUMENT_TAGS,
+  MAX_NOTES_LENGTH,
+  MAX_SUMMARY_LENGTH,
+  MAX_TAG_LENGTH,
+} from './types';
 import { MAX_CANVAS_PX, MIN_CANVAS_PX } from './units';
 
 /** Branded-but-validated identifier: lowercase-ish slug ids such as `design.canvas`. */
@@ -81,12 +88,12 @@ export const guideSettingsSchema = z.object({
 }) satisfies z.ZodType<GuideSettings>;
 
 export const documentMetadataSchema = z.object({
-  authorLabel: z.string().max(80),
+  authorLabel: z.string().max(MAX_AUTHOR_LABEL_LENGTH),
   tags: z
-    .array(z.string().min(1).max(40))
-    .max(12, 'a document may carry at most 12 tags')
+    .array(z.string().min(1).max(MAX_TAG_LENGTH))
+    .max(MAX_DOCUMENT_TAGS, `a document may carry at most ${String(MAX_DOCUMENT_TAGS)} tags`)
     .readonly(),
-  notes: z.string().max(2000),
+  notes: z.string().max(MAX_NOTES_LENGTH),
 }) satisfies z.ZodType<DocumentMetadata>;
 
 /* -------------------------------------------------------------------------------------------- */
@@ -283,7 +290,7 @@ export const forgeDocumentSchema = z.object({
     .string()
     .min(1, 'a document needs a title')
     .max(120, 'title must be 120 characters or fewer'),
-  summary: z.string().max(400),
+  summary: z.string().max(MAX_SUMMARY_LENGTH),
   canvas: canvasSchema,
   guides: guideSettingsSchema,
   palette: z.array(hexColorSchema).max(12).readonly(),

@@ -94,7 +94,7 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     area: 'core',
     label: 'Project file export (.forge.json)',
     description:
-      'The document definition can be downloaded and read back. This is the only implemented export format.',
+      'The document definition can be downloaded and read back. PNG and JPEG export the rendered artwork; this format exports the model behind it.',
     status: 'implemented',
     verification: ['src/core/export/project-file.test.ts'],
   },
@@ -112,6 +112,8 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
       'src/core/export/raster.test.ts (real pixels through @napi-rs/canvas)',
       "e2e/export.spec.ts (the browser's own rasteriser writes the file)",
       'e2e/text-wrapping.spec.ts (the same wrapped lines at every zoom, read back from the artboard canvas)',
+      'e2e/graphics.spec.ts (a graphic appears on the artboard once it has decoded)',
+      'e2e/tint.spec.ts (a tinted graphic colours the artwork and leaves the background behind it alone)',
     ],
     gap: 'SVG, PDF, WebP and video output are still planned; the format registry keeps them labelled as such.',
   },
@@ -153,7 +155,7 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     area: 'shell',
     label: 'Local project library',
     description:
-      'Projects are created, listed, edited and deleted in this browser via a storage repository interface. Device-local only, and when the browser refuses storage the library says so instead of pretending to save.',
+      'Projects are created, listed, edited and deleted in this browser via a storage repository interface. Device-local only, and when the browser refuses storage the library says so instead of pretending to save. A record the app cannot read is reported and kept, never deleted, and an unreadable index does not stop the reader from working.',
     status: 'implemented',
     verification: [
       'src/core/persistence/document-repository.test.ts',

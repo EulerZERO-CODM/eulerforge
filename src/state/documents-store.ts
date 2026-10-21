@@ -238,11 +238,12 @@ export class DocumentsStore {
   public async health(): Promise<Result<{ count: number; skipped: number; bytes: number }>> {
     const result = await this.options.repository.list();
     if (!result.ok) return err(result.error);
-    const serialised = JSON.stringify(result.value.documents);
     return ok({
       count: result.value.documents.length,
       skipped: result.value.skipped.length,
-      bytes: serialised.length,
+      // The size of what is actually stored, not of the readable subset: a report that counted only
+      // the documents it could read would understate the footprint whenever something was skipped.
+      bytes: result.value.storedBytes,
     });
   }
 

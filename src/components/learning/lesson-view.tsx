@@ -3,11 +3,46 @@
 import { AlertTriangle, Info, Lightbulb, Route } from 'lucide-react';
 import Link from 'next/link';
 
-import type { LessonSection } from '../../core/learning/types';
+import type { GuidedExercise, LessonSection } from '../../core/learning/types';
 import { requireToolExplanation } from '../../core/learning/query';
 import { cn } from '../../lib/cn';
 import { InlineNote } from '../ui/states';
 import { ExerciseChecklist, LessonCompletionToggle } from './lesson-progress';
+
+/**
+ * The exercise a lesson gets when it declares none but ships a checklist section.
+ *
+ * The checklist already *is* the lesson's list of steps, so it becomes the tickable exercise instead
+ * of being repeated as an invented one. Two things are deliberately *not* invented here:
+ *
+ *   - a duration: the checklist heading states one, and a second, different number next to it would
+ *     be a contradiction the reader can see;
+ *   - a destination: the link comes from the checklist's own action entry, so the button names and
+ *     opens the screen the step actually points at.
+ */
+function checklistExercise(
+  slug: string,
+  sections: readonly LessonSection[],
+): GuidedExercise | null {
+  const checklist = sections.find((section) => section.type === 'checklist');
+  if (!checklist) return null;
+
+  const destination = checklist.items.find((item) => item.actionHref !== undefined);
+  const destinationLabel = destination?.actionLabel;
+
+  return {
+    id: `${slug}.exercise`,
+    title: 'Practice',
+    goal: `Work through ${String(checklist.items.length)} steps using only features that exist in this build.`,
+    steps: checklist.items.map((item) => ({
+      id: item.id,
+      label: item.label,
+      detail: item.why,
+    })),
+    workspaceHref: destination?.actionHref ?? null,
+    ...(destinationLabel === undefined ? {} : { workspaceLinkLabel: destinationLabel }),
+  };
+}
 
 /**
  * Lesson renderer.
@@ -19,12 +54,18 @@ export function LessonView({
   slug,
   sections,
   objectives,
+  exercise,
 }: {
   readonly slug: string;
   readonly sections: readonly LessonSection[];
   readonly objectives: readonly string[];
+  /**
+   * The lesson's own guided exercise. A lesson that declares one gets *that* exercise, so the
+   * exercise a card advertises is the exercise the page offers.
+   */
+  readonly exercise?: GuidedExercise;
 }) {
-  const exercise = sections.find((section) => section.type === 'checklist');
+  const effectiveExercise = exercise ?? checklistExercise(slug, sections);
 
   return (
     <div className="space-y-8">
@@ -52,22 +93,8 @@ export function LessonView({
         <SectionRenderer key={`${section.type}-${String(index)}`} section={section} />
       ))}
 
-      {exercise ? (
-        <ExerciseChecklist
-          lessonSlug={slug}
-          exercise={{
-            id: `${slug}.exercise`,
-            title: 'Practice',
-            goal: `Work through ${String(exercise.items.length)} steps using only features that exist in this build.`,
-            estimatedMinutes: 8,
-            steps: exercise.items.map((item) => ({
-              id: item.id,
-              label: item.label,
-              detail: item.why,
-            })),
-            workspaceHref: '/projects',
-          }}
-        />
+      {effectiveExercise ? (
+        <ExerciseChecklist lessonSlug={slug} exercise={effectiveExercise} />
       ) : null}
 
       <div className="border-line flex flex-wrap items-center gap-2 border-t pt-5">

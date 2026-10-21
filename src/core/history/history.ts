@@ -141,6 +141,18 @@ export class HistoryStack<TState> {
     this.current = state;
   }
 
+  /**
+   * Replaces the present state without recording a history entry.
+   *
+   * Used after an undo or a redo: the *content* comes from an earlier state, but the caller may
+   * need to adjust it before it is saved — a document, for example, has to carry a revision that
+   * does not go backwards. The undo and redo stacks are left exactly as they were, so the history
+   * still describes the same edits.
+   */
+  public replaceCurrent(state: TState): void {
+    this.current = state;
+  }
+
   public clear(): void {
     this.past = [];
     this.future = [];

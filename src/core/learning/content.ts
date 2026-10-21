@@ -1295,6 +1295,7 @@ export const LESSONS: readonly Lesson[] = [
         },
       ],
       workspaceHref: '/projects',
+      workspaceLinkLabel: 'Open your projects',
     },
     relatedLessonSlugs: ['canvas-and-units', 'export-readiness', 'how-your-projects-are-stored'],
     relatedAssetIds: ['template.square-promo', 'palette.graphite-ember'],
