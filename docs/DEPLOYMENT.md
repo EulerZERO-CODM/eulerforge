@@ -135,21 +135,28 @@ those variables are absent, the provider disclosure panel says that no model is 
 On the audit branch (`arena/83956338-eulerforge`) the production build succeeds locally
 (`npm run build`) and the full local gates (`npm run verify`) pass.
 
-A Vercel project named **`eulerforge-preview`** exists (`prj_lo9EFheigszfnWCZHN3iiYvuSuHL`) with
-`NEXT_PUBLIC_FORGE_ENVIRONMENT=preview` set for the preview and development targets. **No deployment
-exists**, so there is no preview URL, build log or smoke-test result to report:
+A Vercel project named **`eulerforge-preview`** exists (`prj_lo9EFheigszfnWCZHN3iiYvuSuHL`), and it is
+now connected to the repository:
 
-- the Vercel GitHub App is now installed for `EulerZERO-CODM/eulerforge`: a git-sourced deployment of
-  `arena/83956338-eulerforge` is accepted rather than refused with *“The provided GitHub repository
-  can't be found”*;
-- but the project has no Git repository linked and no **Production Branch** configured, so Vercel
-  resolves a branch deployment to `target: "production"`. A production deployment is not something
-  this work may create, so the two deployments that were accepted were deleted immediately (no alias
-  had been assigned) and the project lists zero deployments again. Nothing else was changed;
-- the remaining step is a dashboard setting, not code: **Project → Settings → Git → connect the
-  repository and set Production Branch to `main`.** Vercel then treats this branch as a preview branch
-  with the URL shape `eulerforge-preview-git-arena-83956338-eulerforge-euler-zero.vercel.app`.
-  `NEXT_PUBLIC_FORGE_SITE_URL` stays unset rather than pointed at a guessed URL.
+- **Git**: `github` → `EulerZERO-CODM/eulerforge` (repository id 1415088821);
+- **Production Branch**: `main`;
+- **Framework preset**: Next.js, install `npm ci`, build `npm run build`, output `.next`, root the
+  repository;
+- **Environment**: `NEXT_PUBLIC_FORGE_ENVIRONMENT=preview` and
+  `NEXT_PUBLIC_FORGE_SITE_URL=https://eulerforge-preview-git-arena-83956338-eulerforge-euler-zero.vercel.app`
+  for the `preview` target only. Nothing is set for `production`, no provider key or data directory is
+  set anywhere, and no secret is stored in the repository.
+
+Two rules follow from the safety constraints on this branch, and both are enforced rather than
+documented:
+
+- **only a preview may be created.** The deployment API accepts a git-sourced deployment of this branch
+  and reports it as `target: "production"`, whatever target is requested; a production deployment is
+  outside what this work may create, so such a deployment is deleted before it finishes initialising
+  and never reaches the production alias. The check is the `target` field of the created deployment,
+  not an assumption about the request;
+- **the branch is never the production branch.** It is deployed by the Git integration, which treats
+  every branch other than `main` as a preview.
 
 After the repository is connected and a preview deployment exists, the checks that matter are:
 
