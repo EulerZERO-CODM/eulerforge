@@ -150,9 +150,32 @@ The project `eulerforge-preview` (`prj_lo9EFheigszfnWCZHN3iiYvuSuHL`) is connect
 - **`gitProviderOptions.createDeployments` is `enabled`** as of the latest check, and the project has no
   production deployment.
 
-Enabling it did not change the result: a deployment requested through the API after the setting changed
-still came back `target: "production"` and was deleted. The Git webhook — the path the setting exists
-to control — is what remains to be observed.
+Enabling it did not change the result. After the setting changed, a deployment requested through the
+API *and* one triggered by the next push both still came back `target: "production"`; both were
+deleted. The Git webhook is therefore not the missing piece either.
+
+#### The actual cause: the first deployment of a project is always production
+
+Vercel documents that **“The first deployment in every newly created project is automatically promoted
+to production.”** This project has never had a deployment that outlives a check, because every one is
+deleted the moment it reports `production` — so it is permanently a project with *no* deployments, and
+every new attempt is again “the first deployment”, which is promoted regardless of branch or of the
+target that was requested. Current reports describe the same trap exactly: with zero prior
+deployments, Production Branch `main` and a non-production source branch, four independent paths
+(dashboard, Git push, CLI `--target=preview`, and the Create Deployment API with `target: preview`) all
+produced a production deployment, and deleting them keeps the loop closed.
+
+This makes the rule “never create a production deployment” and the goal “hosted preview” mutually
+exclusive on this project as configured, and the rule wins. **No preview can be produced without one
+deployment being allowed to persist as the production baseline** — at which point later pushes to this
+branch would be ordinary previews. That is a decision for the repository owner, not something to be
+done silently here.
+
+If that decision is made, the smallest safe form is one deployment left in place with deployment
+protection on (this project already sets `ssoProtection.deploymentType: all_except_custom_domains`, so
+its `*.vercel.app` URLs require Vercel authentication), no custom domain, and no production
+environment variables — this project sets none. Then push again and confirm the new deployment reports
+`target: "preview"`.
 
 That last pair is what blocks a preview. Every deployment requested for this branch has come back
 `target: "production"`, whichever way it was requested:
