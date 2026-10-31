@@ -10,6 +10,9 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
+import { getLesson } from '../../core/learning/query';
+import { studioRegistry } from '../../core/studios';
+
 export type NavItem = {
   readonly href: string;
   readonly label: string;
@@ -102,27 +105,44 @@ export const NAV_GROUPS: readonly NavGroup[] = [
 export const ALL_NAV_ITEMS: readonly NavItem[] = NAV_GROUPS.flatMap((group) => group.items);
 
 /**
- * Longest-prefix match so `/studios/design` still reports "Studios".
+ * Navigation destinations that really have child pages, and how to recognise one.
  *
- * Home matches the root path only. Treating `/` as a prefix of everything made every unknown route
- * claim to be Home, and the top bar then built a breadcrumb out of whatever the URL happened to be:
- * `/this-page-does-not-exist` rendered "/ this page does not exist". On a server-rendered 404 the
- * router reports the synthetic path `/_not-found` instead, so the two sides rendered different text
- * and React reported a hydration mismatch on every 404. An unknown route now has no section, which
- * is the truth, and both renders agree.
+ * The top bar and the sidebar may only claim a section for a URL the App Router actually serves.
+ * That is not pedantry: for an unknown URL Next.js answers with its prerendered `/_not-found`
+ * document, whose server render sees the synthetic path `/_not-found` while the browser sees the
+ * URL that was typed. A naive prefix match therefore rendered "Learn / not a lesson" in the browser
+ * and "Euler's Forge" in the server markup, and React reported a hydration error on every stale
+ * lesson link. Checking the child segment against the same registry that generated the route means
+ * both sides agree — the URL is not a lesson, so no section is claimed. Unknown paths under a
+ * destination, such as `/projects/abc` or `/settings/theme`, are treated the same way because no
+ * such route exists.
+ */
+const CHILD_ROUTES: Readonly<Record<string, (segment: string) => boolean>> = {
+  '/studios': (segment) => studioRegistry.bySlug(segment) !== undefined,
+  '/learn': (segment) => getLesson(segment) !== undefined,
+};
+
+/**
+ * The navigation item for a pathname, if the app actually serves that path.
+ *
+ * Home matches the root path only. A deeper path must be the item's own URL or a real child route;
+ * anything else has no section, which is the truth and keeps server and browser renders identical.
  */
 export function findNavItemForPath(pathname: string): NavItem | undefined {
-  const root = pathname === '/' ? ALL_NAV_ITEMS.find((item) => item.href === '/') : undefined;
-  const matches = ALL_NAV_ITEMS.filter(
-    (item) => item.href !== '/' && (pathname === item.href || pathname.startsWith(`${item.href}/`)),
-  );
-  return (
-    matches.sort((a, b) => b.href.length - a.href.length)[0] ??
-    (pathname === '/' ? root : undefined)
-  );
+  const exact = ALL_NAV_ITEMS.find((item) => item.href === pathname);
+  if (exact) return exact;
+
+  const parent = ALL_NAV_ITEMS.filter(
+    (item) => item.href !== '/' && pathname.startsWith(`${item.href}/`),
+  ).sort((a, b) => b.href.length - a.href.length)[0];
+  if (!parent) return undefined;
+
+  const remainder = pathname.slice(parent.href.length + 1);
+  if (remainder.length === 0 || remainder.includes('/')) return undefined;
+  const isChild = CHILD_ROUTES[parent.href];
+  return isChild?.(remainder) === true ? parent : undefined;
 }
 
 export function isNavItemActive(item: NavItem, pathname: string): boolean {
-  if (item.href === '/') return pathname === '/';
-  return pathname === item.href || pathname.startsWith(`${item.href}/`);
+  return findNavItemForPath(pathname)?.href === item.href;
 }
