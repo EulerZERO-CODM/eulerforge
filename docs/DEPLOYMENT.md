@@ -116,7 +116,7 @@ The project builds with the default Next.js preset; no `vercel.json` is needed. 
 - Framework preset: **Next.js**
 - Install command: `npm ci`
 - Build command: `npm run build`
-- Node.js version: **22.x**
+- Node.js version: **22.x** or **24.x** (CI verifies both; the linked project runs 24.x)
 - Output: the default `.next`
 
 Preview environment variables:
@@ -184,8 +184,9 @@ The same commit was built and served in preview configuration (`NEXT_PUBLIC_FORG
 `NEXT_PUBLIC_FORGE_SITE_URL` set to the branch alias, `VERCEL=1` so the server follows the serverless
 contract, `next start`), and exercised in Chromium:
 
-- `/`, `/studios`, all six studio routes, `/projects`, `/platform-status`, `/roadmap`, `/settings`,
-  `/assets`, `/learn`, `/create` answer 200; an unknown studio slug answers 404;
+- `/`, `/studios`, every studio route — the five implemented studios plus the 3D entry that is
+  marked exploratory — `/projects`, `/platform-status`, `/roadmap`, `/settings`, `/assets`, `/learn`,
+  `/create` answer 200; an unknown studio slug answers 404;
 - `/api/server/status` reports `available: false` with the "filesystem is not persistent" sentence,
   `/api/documents` answers 503 with the same sentence, `/api/auth/session` returns
   `account: null` with that sentence, `/api/catalogue` still serves the bundled sample, and
@@ -214,7 +215,7 @@ component reads them at request time while the client takes the value inlined at
 
 After the repository is connected and a preview deployment exists, the checks that matter are:
 
-1. `/studios` lists six studios and each route loads;
+1. `/studios` lists five implemented studios plus the exploratory 3D entry, and each route loads;
 2. Design: place a shape, save, reload the page, confirm the document is restored;
 3. Photo: import a PNG, move one adjustment, export, confirm the browser downloads a file;
 4. `/platform-status` and `/roadmap` render the ledger without a server;
