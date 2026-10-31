@@ -132,35 +132,89 @@ those variables are absent, the provider disclosure panel says that no model is 
 
 ### Status of the preview
 
-On the audit branch (`arena/83956338-eulerforge`) the production build succeeds locally
-(`npm run build`) and the full local gates (`npm run verify`) pass.
+**There is no preview deployment. The Vercel project cannot currently produce one, and this was
+verified rather than assumed.** The audit branch (`arena/83956338-eulerforge`) builds and passes its
+gates, and its build was verified in preview configuration locally (see below), but no hosted preview
+URL exists and none is claimed here.
 
-A Vercel project named **`eulerforge-preview`** exists (`prj_lo9EFheigszfnWCZHN3iiYvuSuHL`), and it is
-now connected to the repository:
+The project `eulerforge-preview` (`prj_lo9EFheigszfnWCZHN3iiYvuSuHL`) is connected correctly:
 
 - **Git**: `github` → `EulerZERO-CODM/eulerforge` (repository id 1415088821);
 - **Production Branch**: `main`;
 - **Framework preset**: Next.js, install `npm ci`, build `npm run build`, output `.next`, root the
-  repository;
+  repository, Node.js 24.x;
 - **Environment**: `NEXT_PUBLIC_FORGE_ENVIRONMENT=preview` and
   `NEXT_PUBLIC_FORGE_SITE_URL=https://eulerforge-preview-git-arena-83956338-eulerforge-euler-zero.vercel.app`
   for the `preview` target only. Nothing is set for `production`, no provider key or data directory is
-  set anywhere, and no secret is stored in the repository.
+  set anywhere, and no secret is stored in the repository;
+- **`gitProviderOptions.createDeployments` is `disabled`**, and the project has no production
+  deployment.
 
-Two rules follow from the safety constraints on this branch, and both are enforced rather than
-documented:
+That last pair is what blocks a preview. Three deployments of this branch were requested and every one
+came back `target: "production"`:
 
-- **only a preview may be created.** The deployment API accepts a git-sourced deployment of this branch
-  and reports it as `target: "production"`, whatever target is requested; a production deployment is
-  outside what this work may create, so such a deployment is deleted before it finishes initialising
-  and never reaches the production alias. The check is the `target` field of the created deployment,
-  not an assumption about the request;
-- **the branch is never the production branch.** It is deployed by the Git integration, which treats
-  every branch other than `main` as a preview.
+| Attempt | How | Returned | Outcome |
+| --- | --- | --- | --- |
+| 1 | deployment API, git source, no target | `production` | deleted before it initialised |
+| 2 | push to the branch (Git integration) | `production`, `PROMOTED`, aliases assigned | deleted, aliases removed |
+| 3 | deployment API, git source, `target: "preview"` | `production` | deleted before it initialised |
+
+The target field is not honoured for git-sourced deployments of this project, and because the project
+had no production deployment the first of them was promoted to the production alias. Deploying this
+branch therefore creates a production deployment, which is outside what this work is allowed to do, so
+the work stopped instead of retrying. The Git integration is *not* a safe preview path on this
+project: an earlier version of this document claimed non-`main` branches were deployed as previews, and
+that claim was wrong.
+
+What an operator can do to enable a real preview (none of it may be done automatically from this
+branch):
+
+1. In the Vercel dashboard open the project → **Settings → Git** and re-enable deployments for the
+   repository (this is the `createDeployments` setting above). With it disabled, Git only builds the
+   production branch and any requested deployment is treated as the production one.
+2. Confirm **Settings → Git → Production Branch** is still `main`, then push or re-run a deployment for
+   `arena/83956338-eulerforge`. The result must report `target: "preview"` and get a
+   `<branch>-<project>.vercel.app` alias.
+3. Check the deployment's *target* before using it. If it reports `production`, delete it: it does not
+   belong to this work.
+
+#### What was verified instead
+
+The same commit was built and served in preview configuration (`NEXT_PUBLIC_FORGE_ENVIRONMENT=preview`,
+`NEXT_PUBLIC_FORGE_SITE_URL` set to the branch alias, `VERCEL=1` so the server follows the serverless
+contract, `next start`), and exercised in Chromium:
+
+- `/`, `/studios`, all six studio routes, `/projects`, `/platform-status`, `/roadmap`, `/settings`,
+  `/assets`, `/learn`, `/create` answer 200; an unknown studio slug answers 404;
+- `/api/server/status` reports `available: false` with the "filesystem is not persistent" sentence,
+  `/api/documents` answers 503 with the same sentence, `/api/auth/session` returns
+  `account: null` with that sentence, `/api/catalogue` still serves the bundled sample, and
+  `/api/shared/<bad token>` answers 404;
+- the readiness suite (phone, narrowest phone, first visit, damaged storage, API unreachable) passes
+  6/6, as does the rest of the browser suite listed under *Browser verification*.
+
+This is evidence about the build, not about a hosted URL: nothing here proves the Vercel CDN serves
+those routes, because no deployment exists to serve them. Run the checklist below against the real
+preview URL the moment one exists.
+
+#### One configuration trap this caught
+
+Preview configuration exposed a real defect that CI could not: `src/config/env.ts` read the public
+variables by passing `process.env` into a parser as a value, so Next.js never inlined
+`NEXT_PUBLIC_*` into the client bundle. The browser fell back to the defaults
+(`development`, `http://localhost:3000`) while the server used the configured values, producing a
+React hydration mismatch on every page (`#418`) and a footer naming the wrong environment. With no
+`NEXT_PUBLIC_*` set — as in CI — both sides agreed on the default, so the defect was invisible. It is
+fixed by reading each variable through a literal `process.env.NEXT_PUBLIC_*` member expression, and
+`src/config/env.test.ts` guards both the values and the literal-reference contract.
+
+**Set these variables for the build as well as the runtime.** Vercel passes them to both, but a
+hand-rolled build that sets them only for `next start` renders a mismatched footer, because the server
+component reads them at request time while the client takes the value inlined at build time.
 
 After the repository is connected and a preview deployment exists, the checks that matter are:
 
-1. `/studios` lists five studios and each route loads;
+1. `/studios` lists six studios and each route loads;
 2. Design: place a shape, save, reload the page, confirm the document is restored;
 3. Photo: import a PNG, move one adjustment, export, confirm the browser downloads a file;
 4. `/platform-status` and `/roadmap` render the ledger without a server;

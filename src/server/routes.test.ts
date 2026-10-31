@@ -422,6 +422,30 @@ describe('registration, sessions and sign-out', () => {
     }
   });
 
+  it('names the real reason accounts are unavailable on a serverless host', async () => {
+    // The account panel renders this sentence verbatim. "The server is not reachable" is a false
+    // cause on Vercel: the server answered this request, and what it lacks is a persistent disk.
+    const previousVercel = process.env.VERCEL;
+    const previousDataDir = process.env.FORGE_DATA_DIR;
+    process.env.VERCEL = '1';
+    delete process.env.FORGE_DATA_DIR;
+    setServerDataDirForTests(null);
+    try {
+      const response = await sessionGET(request('/api/auth/session'));
+      expect(response.status).toBe(200);
+      const payload = await body<{ account: unknown; unavailable: string }>(response);
+      expect(payload.account).toBeNull();
+      expect(payload.unavailable).toMatch(/not persistent/i);
+      expect(payload.unavailable).not.toMatch(/not reachable/i);
+    } finally {
+      if (previousVercel === undefined) delete process.env.VERCEL;
+      else process.env.VERCEL = previousVercel;
+      if (previousDataDir === undefined) delete process.env.FORGE_DATA_DIR;
+      else process.env.FORGE_DATA_DIR = previousDataDir;
+      setServerDataDirForTests(directory);
+    }
+  });
+
   it('answers a malformed cookie with 401 instead of throwing', async () => {
     // `decodeURIComponent` throws on these; a cookie is client input and must not become a 500.
     for (const cookie of ['forge_session=%', 'forge_session=%E0%A4%A', 'forge_session=%%%']) {

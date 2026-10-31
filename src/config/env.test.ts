@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { readFile } from 'node:fs/promises';
+
+import { describe, expect, it, vi } from 'vitest';
 
 import { EnvironmentValidationError, parsePublicEnv } from './env';
 
@@ -75,5 +77,40 @@ describe('parsePublicEnv', () => {
       expect(report).toMatch(/NEXT_PUBLIC_FORGE_CATALOG_SOURCE/);
       expect(error.issues.length).toBeGreaterThanOrEqual(2);
     }
+  });
+});
+
+describe('the exported environment', () => {
+  const keys = [
+    'NEXT_PUBLIC_FORGE_SITE_URL',
+    'NEXT_PUBLIC_FORGE_CATALOG_SOURCE',
+    'NEXT_PUBLIC_FORGE_TELEMETRY',
+    'NEXT_PUBLIC_FORGE_ENVIRONMENT',
+  ] as const;
+
+  it('reflects the variables set at build time instead of falling back to defaults', async () => {
+    // Regression: `parsePublicEnv(process.env)` passed the whole object as a *value*, so Next.js
+    // could not inline the individual variables into the client bundle. The browser then saw none of
+    // them and used the defaults, while the server used the real values — a hydration mismatch on
+    // every page of a preview build, and a footer that named the wrong environment.
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_FORGE_ENVIRONMENT', 'preview');
+    vi.stubEnv('NEXT_PUBLIC_FORGE_SITE_URL', 'https://forge.example.com');
+    try {
+      const { env } = await import('./env');
+      expect(env.environment).toBe('preview');
+      expect(env.siteUrl).toBe('https://forge.example.com');
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
+  });
+
+  it('reads each public variable through a literal member expression, which is what Next inlines', async () => {
+    // A source-level guard on the compiler contract: `process.env[someName]` and `parsePublicEnv(
+    // process.env)` are both invisible to the inliner. This is the one assertion that would have
+    // failed when the bug above was introduced.
+    const source = await readFile('src/config/env.ts', 'utf8');
+    for (const key of keys) expect(source).toContain(`process.env.${key}`);
   });
 });

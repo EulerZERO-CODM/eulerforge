@@ -105,18 +105,3 @@ export async function requireAccount(request: Request): Promise<AccountLookup> {
   if (!session.ok || session.value === null) return { kind: 'anonymous' };
   return { kind: 'session', session: { account: session.value, store, tokenHash } };
 }
-
-export async function currentSession(request: Request): Promise<{
-  readonly store: ForgeStore;
-  readonly account: AccountView | null;
-  readonly tokenHash: string | null;
-}> {
-  const storeResult = await getStore();
-  if (!storeResult.ok) throw new Error(storeResult.error.message);
-  const store = storeResult.value;
-  const token = readCookie(request, SESSION_COOKIE);
-  if (token === null || !looksLikeToken(token)) return { store, account: null, tokenHash: null };
-  const tokenHash = hashToken(token);
-  const session = await store.resolveSession(tokenHash);
-  return { store, account: session.ok ? session.value : null, tokenHash };
-}
