@@ -81,10 +81,12 @@ timeouts, `retries: 0`:
 npx playwright test       84 passed
 ```
 
-The container cannot reach Playwright's browser CDN and has no system NSS, so the browser was a
-Chromium 153 build extracted from the `@sparticuz/chromium` package with NSPR and NSS compiled from
-source; nothing in the repository was changed to accommodate it beyond pointing Playwright's browser
-cache at that binary. The suite covers, among other things: project creation and reopening, layer
+The container cannot reach Playwright's browser CDN and has no system NSS, so the browser was the
+Chromium 153 binary shipped inside the `@sparticuz/chromium` package, with that package's own NSS/NSPR
+libraries and SwiftShader (without them the browser starts but has no WebGL2, and Photo Studio's
+GPU-parity tests fail honestly rather than silently); nothing in the repository was changed to
+accommodate it beyond pointing Playwright's browser cache at that binary. The suite covers, among
+other things: project creation and reopening, layer
 selection and pointer and keyboard transforms, undo and redo, snapping, text wrapping, PNG/JPEG/SVG/zip
 export with the downloaded bytes decoded again, Photo Studio's WebGL2 and CPU parity, Video Studio's
 import, scrubbing, frame export and recording, the assistant's multi-step tasks, and the honest
