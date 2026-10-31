@@ -70,13 +70,17 @@ export function SharedDocumentView({ token }: { readonly token: string }) {
   }
   if (error || !document) {
     return (
-      <InlineNote tone="warning" title="This link does not open">
-        <p>{error ?? 'That share link could not be opened.'}</p>
-        <p className="text-fg-subtle mt-1 text-xs">
-          Links expire, and the owner can revoke one at any time. Ask for a new link if this one was
-          meant to work.
-        </p>
-      </InlineNote>
+      <div className="space-y-4">
+        {/* A share link that cannot be opened is still a screen: it needs its own top-level heading. */}
+        <h1 className="text-fg text-2xl font-semibold">This link does not open</h1>
+        <InlineNote tone="warning">
+          <p>{error ?? 'That share link could not be opened.'}</p>
+          <p className="text-fg-subtle mt-1 text-xs">
+            Links expire, and the owner can revoke one at any time. Ask for a new link if this one
+            was meant to work.
+          </p>
+        </InlineNote>
+      </div>
     );
   }
 

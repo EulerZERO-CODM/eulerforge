@@ -137,6 +137,7 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
     return (
       <div className="mx-auto max-w-3xl p-4 sm:p-6">
         <ErrorState
+          titleAs="h1"
           title="The project library could not be read"
           description={library.error?.message ?? 'Local storage is unavailable in this browser.'}
           detail={library.error?.detail}
@@ -160,6 +161,9 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
       <div className="mx-auto max-w-3xl p-4 sm:p-6">
         <EmptyState
           icon={<ArrowLeft aria-hidden />}
+          // The address asked for a specific project and that project is gone: this is the screen,
+          // so it carries the heading. Without it the page had no `h1` at all.
+          titleAs="h1"
           title="Project not found"
           description="This project is not in this browser's storage. It may have been deleted, or it may live in a different browser profile on another device."
           actions={
