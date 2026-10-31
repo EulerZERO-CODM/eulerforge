@@ -61,7 +61,11 @@ export function Button({
 }: ButtonProps) {
   const isDisabled = Boolean(disabled) || loading;
   const classes = cn(
-    'relative inline-flex items-center justify-center rounded-sm font-medium whitespace-nowrap transition-colors',
+    'relative inline-flex items-center justify-center rounded-sm font-medium transition-colors',
+    // A button that fills a column may be narrower than its own label on a phone. Its label wraps
+    // there instead of spilling out of the button and giving the page a sideways scrollbar; a
+    // shrink-wrapped button keeps its label on one line, because that is what a toolbar needs.
+    fullWidth ? 'text-center' : 'whitespace-nowrap',
     'disabled:cursor-not-allowed aria-disabled:cursor-not-allowed',
     VARIANTS[variant],
     SIZES[size],

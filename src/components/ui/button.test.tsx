@@ -55,6 +55,19 @@ describe('Button', () => {
     expect(screen.getByText('Saving project')).toBeInTheDocument();
   });
 
+  it('only forces one line when the button is shrink-wrapped', () => {
+    // A full-width button can be narrower than its own label on a phone. If its label cannot wrap,
+    // the text spills past the button and gives the whole page a sideways scrollbar — which is what
+    // the Design Studio's inspector did at 320 px until this rule was split by width.
+    const { rerender } = render(<Button>Short label</Button>);
+    expect(screen.getByRole('button').className).toContain('whitespace-nowrap');
+
+    rerender(<Button fullWidth>Apply print-ready defaults (3 mm bleed, 12 mm margin)</Button>);
+    const wide = screen.getByRole('button');
+    expect(wide.className).not.toContain('whitespace-nowrap');
+    expect(wide.className).toContain('w-full');
+  });
+
   it('marks a disabled button as aria-disabled without inventing new semantics', () => {
     render(<Button disabled>Delete</Button>);
 
