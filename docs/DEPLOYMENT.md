@@ -158,7 +158,7 @@ That last pair is what blocks a preview. Every deployment requested for this bra
 | 1 | deployment API, git source, no target | `production` | deleted before it initialised |
 | 2 | push to the branch (Git integration) | `production`, `PROMOTED`, aliases assigned | deleted, aliases removed |
 | 3 | deployment API, git source, `target: "preview"` | `production` | deleted before it initialised |
-| 4–6 | pushes of later commits on this branch | `production`; one completed and was promoted before it could be deleted | deleted |
+| later | every later push of this branch | `production`; some finish and are promoted within about twenty seconds | deleted |
 
 Every push to this branch therefore creates one production-target deployment that has to be deleted
 again. That includes the pull request's own `Vercel` check, which reports `fail` because it points at a
