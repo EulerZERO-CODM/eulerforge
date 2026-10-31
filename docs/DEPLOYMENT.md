@@ -158,6 +158,12 @@ came back `target: "production"`:
 | 1 | deployment API, git source, no target | `production` | deleted before it initialised |
 | 2 | push to the branch (Git integration) | `production`, `PROMOTED`, aliases assigned | deleted, aliases removed |
 | 3 | deployment API, git source, `target: "preview"` | `production` | deleted before it initialised |
+| 4, 5 | pushes of later commits on this branch | `production`, caught while `BUILDING` | deleted while building |
+
+Every push to this branch therefore creates one production-target deployment that has to be deleted
+again. That includes the pull request's own `Vercel` check, which reports `fail` because it points at a
+deployment deleted by this rule — it is not a build failure, and it cannot go green until the project
+can produce a preview.
 
 The target field is not honoured for git-sourced deployments of this project, and because the project
 had no production deployment the first of them was promoted to the production alias. Deploying this
