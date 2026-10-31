@@ -109,9 +109,12 @@ Four scenarios are asserted in the browser rather than by hand:
    (390 × 844) navigates through the drawer, never scrolls sideways, and creates, edits, saves,
    reloads and exports a real 320 × 240 PNG; with **every API request failed at the network layer**
    the studios, saving, reopening and export still work and the account panel says "Working locally,
-   as designed"; and a **truncated saved index** is reported with the recovery step and a link to
+   as designed"; a **truncated saved index** is reported with the recovery step and a link to
    Settings › Local data, is not deleted behind the user's back, and leaves the product fully usable
-   after the deliberate reset.
+   after the deliberate reset; **every destination exists** — each lesson the hub links to opens with
+   one top-level heading, and a stale link is a real `404` with a heading, not a blank render; and the
+   **narrowest phone** (320 × 568) fits every destination and the Design workspace without a sideways
+   scroll.
 
 What is still *not* covered automatically, and therefore stays a manual check:
 

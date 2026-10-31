@@ -70,7 +70,7 @@ must not be presented as one.
 ## Browser verification
 
 The claims that only a real browser can settle — canvas pixels, pointer capture, real downloads, real
-decoding, WebGL2 fallback — are covered by the Playwright suite in `e2e/` (83 tests in 15 files), run
+decoding, WebGL2 fallback — are covered by the Playwright suite in `e2e/` (84 tests in 15 files), run
 against the production build by the `Browser (Chromium)` CI job.
 
 On the audit branch the suite was executed in the development container against this head's
@@ -78,7 +78,7 @@ production build, with the repository's own `playwright.config.ts` — no local 
 timeouts, `retries: 0`:
 
 ```
-npx playwright test       83 passed
+npx playwright test       84 passed
 ```
 
 The container cannot reach Playwright's browser CDN and has no system NSS, so the browser was a
@@ -90,7 +90,7 @@ export with the downloaded bytes decoded again, Photo Studio's WebGL2 and CPU pa
 import, scrubbing, frame export and recording, the assistant's multi-step tasks, and the honest
 reporting of a browser that refuses storage.
 
-`e2e/readiness.spec.ts` adds the three promises a first-time user relies on:
+`e2e/readiness.spec.ts` adds the promises a first-time user relies on:
 
 - **a phone-sized screen** (390 × 844): the drawer is the navigation, the page never scrolls
   sideways, and a project can be created, edited, saved, reloaded and exported to a real 320 × 240
@@ -100,7 +100,12 @@ reporting of a browser that refuses storage.
   designed"*;
 - **damaged saved data**: a truncated index produces a sentence with the recovery step (clear it in
   Settings › Local data) and a link to that screen, is not deleted behind the user's back, and the
-  product is fully usable again after the deliberate reset.
+  product is fully usable again after the deliberate reset;
+- **the narrowest phone** (320 × 568): every destination fits without a sideways scroll, and so does
+  the Design workspace with a real project open — the densest screen in the product;
+- **every destination exists**: each lesson the Learning hub links to is a page with one top-level
+  heading, and a stale or mistyped URL is a truthful `404` with a heading of its own rather than a
+  blank render.
 
 ## Vercel
 
