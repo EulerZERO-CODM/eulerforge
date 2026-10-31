@@ -563,6 +563,16 @@ is stated per range and at the document's eight-range limit, over the same 1280 
   catches preparing a range per pixel instead of once per render.
 - Measured in this sandbox: **≈9–16 ms median** for one range and **≈43–54 ms** for eight ranges. The
   test prints both numbers, so a CI log carries the measurement next to the assertion.
+- **Those ceilings are scaled by a machine factor.** The first real CI run of this suite measured
+  **159.9 ms** for one range on a Node 22 runner — a 6 % miss against a ceiling written on a machine
+  where the same code takes 11 ms — and failed. A budget that tight measures the runner, and
+  loosening it until the slowest runner passes would give away the margin the guard exists for: the
+  regression it is meant to catch (preparing a range per pixel) makes the code roughly twenty times
+  slower. So the test times a fixed arithmetic pass over a buffer of the same size, which never
+  touches the code under test, and multiplies every ceiling by how much slower this machine is than
+  the reference (`measured calibration ÷ 16 ms`, clamped to 1–25×). A code regression cannot inflate
+  the factor; a busy or slow machine raises it and keeps the guard meaningful. The ratio check is not
+  scaled, because both of its measurements are taken under the same load.
 
 `rasteriseMask` draws painted strokes on a canvas first and then unions the ranges in; range
 preparation (parsing a hex colour, computing a falloff width) happens once per render, not per pixel.

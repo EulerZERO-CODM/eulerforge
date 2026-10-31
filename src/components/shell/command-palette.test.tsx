@@ -64,16 +64,24 @@ describe('CommandPalette', () => {
     expect(screen.getByText('No matching actions')).toBeInTheDocument();
   });
 
-  it('navigates to a real route when a command runs', async () => {
-    const user = userEvent.setup();
-    const { onOpenChange } = renderPalette(services);
+  it(
+    'navigates to a real route when a command runs',
+    // A render of the whole palette plus a real click is well under a second on a quiet machine, but
+    // this suite runs with coverage on a shared CI runner, where the default 5 s (Vitest's timeout,
+    // and userEvent's own per-action budget) has been seen to expire before the click was delivered.
+    // Nothing asserted here is about speed.
+    { timeout: 20_000 },
+    async () => {
+      const user = userEvent.setup();
+      const { onOpenChange } = renderPalette(services);
 
-    await user.click(await screen.findByRole('button', { name: /roadmap/i }));
+      await user.click(await screen.findByRole('button', { name: /roadmap/i }));
 
-    expect(push).toHaveBeenCalledWith('/roadmap');
-    expect(isRoutable(appDir, '/roadmap', routes)).toBe(true);
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-  });
+      expect(push).toHaveBeenCalledWith('/roadmap');
+      expect(isRoutable(appDir, '/roadmap', routes)).toBe(true);
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    },
+  );
 
   it('routes every visible command to a destination that exists', async () => {
     const user = userEvent.setup();

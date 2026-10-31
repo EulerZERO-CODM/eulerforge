@@ -277,6 +277,15 @@ async function countBrightPixels(
   }, band);
 }
 
+/**
+ * Waits until the preview shows a decoded frame.
+ *
+ * This is a wait for the decoder, not a measurement: the clip is decoded by the browser in software
+ * on CI, and a shared runner has been observed taking longer than twenty seconds to produce the first
+ * picture — the same test passed on an identical run minutes earlier. A failure here still fails the
+ * test; only the time the decoder is allowed to take is a property of the machine, and the spec's own
+ * timeout (120 s) bounds the whole test.
+ */
 async function waitForPicture(page: Page): Promise<void> {
   await expect
     .poll(
@@ -284,7 +293,7 @@ async function waitForPicture(page: Page): Promise<void> {
         const samples = await samplePreview(page, SAMPLE_POINTS);
         return new Set(samples.map((entry) => entry.slice(0, 3).join(','))).size;
       },
-      { timeout: 20_000 },
+      { timeout: 45_000, message: 'the preview never decoded a frame' },
     )
     .toBeGreaterThan(1);
 }

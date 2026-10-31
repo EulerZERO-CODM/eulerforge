@@ -11,7 +11,9 @@
  *  - a deterministic 1280 × 853 source buffer and a painted map that is half-covered, so the
  *    already-painted early exit is exercised but does not dominate;
  *  - one warm-up pass, then three measured passes per case;
- *  - the median and worst case are asserted separately.
+ *  - the median and worst case are asserted separately;
+ *  - every ceiling is multiplied by a machine factor, measured in the same process from a workload
+ *    that never touches the code under test (see `currentMachineFactor`).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -24,12 +26,61 @@ const HEIGHT = 853;
 const PIXELS = WIDTH * HEIGHT;
 const SAMPLES = 3;
 
-/** One feathered luminance range over the preview cap. */
+/** One feathered luminance range over the preview cap, on the reference machine. */
 const ONE_RANGE_MEDIAN_MS = 150;
 const ONE_RANGE_WORST_MS = 400;
 /** The document limit: eight ranges of mixed kinds, the worst case a mask can describe. */
 const EIGHT_RANGES_MEDIAN_MS = 900;
 const EIGHT_RANGES_WORST_MS = 2000;
+
+/**
+ * Machine calibration.
+ *
+ * An absolute budget written in milliseconds assumes the machine it was written on. This suite also
+ * runs on shared CI runners, where the same code measured **160 ms** against the sandbox's 15 ms and
+ * failed a 150 ms ceiling — a measurement of the runner, not of a regression. Lowering the guard
+ * until the slowest runner passes would stop it catching anything: the regression it exists for
+ * (preparing a range per pixel instead of once) makes this code roughly twenty times slower, which is
+ * exactly the margin that would have been given away.
+ *
+ * So the ceilings are scaled by a factor measured from a fixed, independent workload: one arithmetic
+ * pass over a buffer of the same size. That workload is not the code under test, so a regression
+ * there cannot inflate the factor and hide itself, while a slow or busy machine raises the factor and
+ * keeps the guard meaningful. Both numbers are printed, so a CI log states what it measured.
+ */
+const CALIBRATION_REFERENCE_MS = 16;
+const CALIBRATION_SAMPLES = 5;
+/** A factor beyond this is not a slow machine but a broken one; do not turn the guard off. */
+const MAX_MACHINE_FACTOR = 25;
+
+function measureCalibration(): number {
+  const buffer = new Float64Array(PIXELS);
+  for (let index = 0; index < buffer.length; index += 1) buffer[index] = (index % 251) + 1;
+  const durations: number[] = [];
+  for (let run = 0; run < CALIBRATION_SAMPLES + 1; run += 1) {
+    const started = performance.now();
+    let total = 0;
+    for (let index = 0; index < buffer.length; index += 1) {
+      total += Math.sqrt(buffer[index] ?? 0) * 1.5 + ((buffer[index] ?? 0) % 7);
+    }
+    const elapsed = performance.now() - started;
+    // The sum is used, so no part of the loop can be optimised away.
+    if (!Number.isFinite(total) || total <= 0) throw new Error('the calibration produced no work');
+    if (run > 0) durations.push(elapsed); // run 0 is the warm-up
+  }
+  return median(durations);
+}
+
+let machineFactor: number | undefined;
+
+/** How many times slower this machine is than the one the budgets were written on. */
+function currentMachineFactor(): number {
+  machineFactor ??= Math.min(
+    MAX_MACHINE_FACTOR,
+    Math.max(1, measureCalibration() / CALIBRATION_REFERENCE_MS),
+  );
+  return machineFactor;
+}
 /** Preparing a range must not happen per pixel: eight ranges may not cost twenty times one. */
 const SCALING_RATIO = 20;
 
@@ -98,14 +149,15 @@ describe('range selection performance', () => {
     'evaluates one range over the preview cap inside the documented budget',
     { timeout: 120_000 },
     () => {
+      const factor = currentMachineFactor();
       const durations = measure([LUMINANCE]);
       const p50 = median(durations);
       const worst = Math.max(...durations);
       console.log(
-        `range selection: ${PIXELS.toLocaleString()} px, 1 range — median ${p50.toFixed(0)} ms, worst ${worst.toFixed(0)} ms over ${String(SAMPLES)} runs`,
+        `range selection: ${PIXELS.toLocaleString()} px, 1 range — median ${p50.toFixed(0)} ms, worst ${worst.toFixed(0)} ms over ${String(SAMPLES)} runs (machine factor ${factor.toFixed(2)}×, so the ceiling is ${(ONE_RANGE_MEDIAN_MS * factor).toFixed(0)} ms)`,
       );
-      expect(p50).toBeLessThanOrEqual(ONE_RANGE_MEDIAN_MS);
-      expect(worst).toBeLessThanOrEqual(ONE_RANGE_WORST_MS);
+      expect(p50).toBeLessThanOrEqual(ONE_RANGE_MEDIAN_MS * factor);
+      expect(worst).toBeLessThanOrEqual(ONE_RANGE_WORST_MS * factor);
     },
   );
 
@@ -113,15 +165,18 @@ describe('range selection performance', () => {
     'evaluates the eight-range limit inside the documented budget and scales sub-quadratically',
     { timeout: 120_000 },
     () => {
+      const factor = currentMachineFactor();
       const single = median(measure([LUMINANCE]));
       const eight = measure(EIGHT);
       const p50 = median(eight);
       const worst = Math.max(...eight);
       console.log(
-        `range selection: 8 ranges — median ${p50.toFixed(0)} ms, worst ${worst.toFixed(0)} ms, 1 range median ${single.toFixed(0)} ms`,
+        `range selection: 8 ranges — median ${p50.toFixed(0)} ms, worst ${worst.toFixed(0)} ms, 1 range median ${single.toFixed(0)} ms (machine factor ${factor.toFixed(2)}×, so the ceiling is ${(EIGHT_RANGES_MEDIAN_MS * factor).toFixed(0)} ms)`,
       );
-      expect(p50).toBeLessThanOrEqual(EIGHT_RANGES_MEDIAN_MS);
-      expect(worst).toBeLessThanOrEqual(EIGHT_RANGES_WORST_MS);
+      expect(p50).toBeLessThanOrEqual(EIGHT_RANGES_MEDIAN_MS * factor);
+      expect(worst).toBeLessThanOrEqual(EIGHT_RANGES_WORST_MS * factor);
+      // Not scaled: both measurements are taken under the same load, so the ratio is the one number
+      // a busy machine cannot flake.
       expect(p50).toBeLessThan(single * SCALING_RATIO);
     },
   );
