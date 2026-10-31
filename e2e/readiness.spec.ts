@@ -243,9 +243,18 @@ test.describe('a first visit', () => {
     await expect(page.getByRole('link', { name: 'Browse studios' })).toBeVisible();
 
     // A share link that cannot resolve explains itself instead of showing a broken document.
-    await page.goto('/shared/not-a-real-token');
-    await expect(page.getByText('This link does not open')).toBeVisible();
+    const shared = await page.goto('/shared/not-a-real-token');
+    expect(shared?.status(), '/shared/not-a-real-token').toBe(200);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('This link does not open');
     await expect(page.getByText(/Links expire/)).toBeVisible();
+
+    // A project link whose project is gone — a bookmark from another profile, or a deleted
+    // project — names the problem and offers both ways forward, under a heading of its own.
+    await page.goto('/workspace/project-that-was-deleted');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Project not found');
+    await expect(page.getByText(/not in this browser's storage/)).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Browse projects' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Create a new project' })).toBeVisible();
 
     // The static pages that make the product's claims render without a server.
     for (const route of ['/roadmap', '/platform-status', '/learn', '/assets', '/settings']) {
@@ -253,6 +262,31 @@ test.describe('a first visit', () => {
       expect(response?.status(), route).toBe(200);
       await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible();
     }
+
+    // Every lesson the hub offers is a screen of its own, reachable and titled.
+    await page.goto('/learn');
+    const lessonLinks = await page
+      .locator('a[href^="/learn/"]')
+      .evaluateAll((links) =>
+        [...new Set(links.map((link) => link.getAttribute('href') ?? ''))].filter((href) =>
+          /^\/learn\/[a-z0-9-]+$/.test(href),
+        ),
+      );
+    expect(lessonLinks.length).toBeGreaterThanOrEqual(10);
+    for (const href of lessonLinks) {
+      const response = await page.goto(href);
+      expect(response?.status(), href).toBe(200);
+      await expect(page.getByRole('heading', { level: 1 }).first(), href).toBeVisible();
+    }
+
+    // A stale lesson link is a truthful 404: real status, one heading, and no breadcrumb claiming
+    // a section the URL does not belong to (which used to be a hydration error as well).
+    const stale = await page.goto('/learn/not-a-lesson');
+    expect(stale?.status()).toBe(404);
+    const notFoundHeading = page.getByRole('heading', { level: 1 });
+    await expect(notFoundHeading).toHaveCount(1);
+    await expect(notFoundHeading).toHaveText('That page does not exist');
+    await expect(page.locator('header').first()).not.toContainText('not a lesson');
 
     expect(crashes).toEqual([]);
   });
@@ -288,5 +322,43 @@ test.describe('every studio on a phone', () => {
       await page.goto(route);
       await expectNoHorizontalOverflow(page);
     }
+  });
+});
+
+test.describe('the narrowest phone', () => {
+  test.use({ viewport: { width: 320, height: 568 } });
+
+  test('fits every destination, and the busiest workspace, without a sideways scroll', async ({
+    page,
+  }) => {
+    const crashes = watchForCrashes(page);
+
+    // 320 px is the narrowest screen this app claims to support. A destination that scrolls
+    // sideways here hides its own controls off-screen, which is how the studio details page and the
+    // platform status page used to fail: one long file path in an unbreakable table cell.
+    for (const route of [
+      '/',
+      '/projects',
+      '/studios',
+      '/studios/design',
+      '/platform-status',
+      '/settings',
+      '/learn',
+      '/roadmap',
+    ]) {
+      await page.goto(route);
+      await expect(page.getByRole('heading', { level: 1 }).first(), route).toBeVisible();
+      await expectNoHorizontalOverflow(page);
+    }
+
+    // The Design workspace is the densest screen in the product: a canvas, a layer list and an
+    // inspector rail, one of whose full-width buttons has a label longer than the rail at this
+    // width. It has to wrap, not widen the page.
+    await page.goto('/studios/design');
+    await createProject(page, { title: 'Narrowest phone', width: 320, height: 240 });
+    await expect(studioSurface(page, 'design')).toBeVisible({ timeout: 20_000 });
+    await expectNoHorizontalOverflow(page);
+
+    expect(crashes).toEqual([]);
   });
 });
