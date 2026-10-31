@@ -147,8 +147,12 @@ The project `eulerforge-preview` (`prj_lo9EFheigszfnWCZHN3iiYvuSuHL`) is connect
   `NEXT_PUBLIC_FORGE_SITE_URL=https://eulerforge-preview-git-arena-83956338-eulerforge-euler-zero.vercel.app`
   for the `preview` target only. Nothing is set for `production`, no provider key or data directory is
   set anywhere, and no secret is stored in the repository;
-- **`gitProviderOptions.createDeployments` is `disabled`**, and the project has no production
-  deployment.
+- **`gitProviderOptions.createDeployments` is `enabled`** as of the latest check, and the project has no
+  production deployment.
+
+Enabling it did not change the result: a deployment requested through the API after the setting changed
+still came back `target: "production"` and was deleted. The Git webhook — the path the setting exists
+to control — is what remains to be observed.
 
 That last pair is what blocks a preview. Every deployment requested for this branch has come back
 `target: "production"`, whichever way it was requested:
@@ -177,7 +181,9 @@ branch):
 
 1. In the Vercel dashboard open the project → **Settings → Git** and re-enable deployments for the
    repository (this is the `createDeployments` setting above). With it disabled, Git only builds the
-   production branch and any requested deployment is treated as the production one.
+   production branch and any requested deployment is treated as the production one. It is now enabled,
+   but deployments requested through the API are still reported as `production`, so a push has to be
+   observed before this step can be called done.
 2. Confirm **Settings → Git → Production Branch** is still `main`, then push or re-run a deployment for
    `arena/83956338-eulerforge`. The result must report `target: "preview"` and get a
    `<branch>-<project>.vercel.app` alias.
