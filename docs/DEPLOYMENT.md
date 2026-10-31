@@ -137,15 +137,19 @@ On the audit branch (`arena/83956338-eulerforge`) the production build succeeds 
 
 A Vercel project named **`eulerforge-preview`** exists (`prj_lo9EFheigszfnWCZHN3iiYvuSuHL`) with
 `NEXT_PUBLIC_FORGE_ENVIRONMENT=preview` set for the preview and development targets. **No deployment
-succeeded**, so there is no preview URL, build log or smoke-test result to report:
+exists**, so there is no preview URL, build log or smoke-test result to report:
 
-- creating a deployment from the GitHub branch is refused by Vercel with *“The provided GitHub
-  repository can't be found”*, which means the Vercel GitHub App is not installed for
-  `EulerZERO-CODM/eulerforge` (or the repository is not connected to that account). Connecting the
-  repository in Vercel's dashboard is a one-time external step that cannot be done through the API
-  from here;
-- without a deployment, the project has no environment values for a preview host, so
-  `NEXT_PUBLIC_FORGE_SITE_URL` is deliberately unset rather than pointed at a guessed URL.
+- the Vercel GitHub App is now installed for `EulerZERO-CODM/eulerforge`: a git-sourced deployment of
+  `arena/83956338-eulerforge` is accepted rather than refused with *“The provided GitHub repository
+  can't be found”*;
+- but the project has no Git repository linked and no **Production Branch** configured, so Vercel
+  resolves a branch deployment to `target: "production"`. A production deployment is not something
+  this work may create, so the two deployments that were accepted were deleted immediately (no alias
+  had been assigned) and the project lists zero deployments again. Nothing else was changed;
+- the remaining step is a dashboard setting, not code: **Project → Settings → Git → connect the
+  repository and set Production Branch to `main`.** Vercel then treats this branch as a preview branch
+  with the URL shape `eulerforge-preview-git-arena-83956338-eulerforge-euler-zero.vercel.app`.
+  `NEXT_PUBLIC_FORGE_SITE_URL` stays unset rather than pointed at a guessed URL.
 
 After the repository is connected and a preview deployment exists, the checks that matter are:
 
