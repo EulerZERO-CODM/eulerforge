@@ -146,6 +146,29 @@ that does not exist yet, which is a feature decision, not a deployment step.
 
 There is no `DATABASE_URL` or other secret in the repository, and `.env` is git-ignored.
 
+### Deploying it
+
+`scripts/deploy-antideploy.sh` does the whole documented flow: it packs the project, checks the
+archive against the platform's ceilings (28 MB / 4 000 files), runs the device-flow login when there
+is no token, creates the application and saves its id to `.antideploy.json`, pushes the archive with
+the environment below, and watches the build until it is live or fails, printing the deploy's own
+`summary` sentence.
+
+```
+scripts/deploy-antideploy.sh               # deploy; create the application on the first run
+scripts/deploy-antideploy.sh --subdomain eulerforge
+scripts/deploy-antideploy.sh --dry-run     # pack and check the limits, send nothing
+```
+
+It reuses `~/.antideploy/config.json` (0600, written by redirect, never printed) and an existing
+`.antideploy.json`, so running it twice does not create two applications. A rejected token is
+reported rather than retried. `--dry-run` needs no network.
+
+The flow was verified end to end against canned API responses — login, application creation, deploy,
+watch, the live summary, the second run reusing both, the revoked-token path, and the unreachable-host
+path (exit 2 with the message the platform asks for) — because the real host cannot be reached from
+here. Packaging for this repository measures 1.1 MB in 449 files, well inside both ceilings.
+
 ### Status
 
 **Not deployed.** This environment blocks outbound requests to `antideploy.com` (and to
