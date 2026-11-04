@@ -43,11 +43,27 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     ...devices['Desktop Chrome'],
+    // The full Chromium build rather than the headless shell: real video decoding needs it, and
+    // Photo Studio's WebGL2 path does too.
+    //
+    // The GL implementation is deliberately *not* forced here. Playwright already passes
+    // `--enable-unsafe-swiftshader`, so a machine without a GPU gets software WebGL2 by itself — and
+    // leaving the choice to the browser keeps the page on its normal compositing path. Forcing
+    // `--use-gl=angle --use-angle=swiftshader` for the whole suite (as Phase 4 did) sends every
+    // repaint through software Vulkan: the benchmark's own control measured idle frames at 16.7 ms
+    // and drag frames at 66 ms on a runner where the same code had been at 16.7 ms throughout
+    // Phase 2. The one spec whose subject *is* the software GPU path opts in for itself.
+    channel: 'chromium',
     // A wide window keeps the whole stage and the inspector rail on screen, so the pointer maths in
     // the specs never has to scroll the artboard into view.
     viewport: { width: 1440, height: 960 },
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'], channel: 'chromium' },
+    },
+  ],
   webServer: {
     // `next start` serves the production build (`npm run build` runs first in CI).
     command: `npm run start -- --hostname 127.0.0.1 --port ${PORT}`,

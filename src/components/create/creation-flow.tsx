@@ -9,6 +9,7 @@ import { SAMPLE_ASSETS } from '../../core/assets/data';
 import { DEFAULT_GUIDES } from '../../core/documents/factories';
 import { aspectRatioLabel, megapixelLabel } from '../../core/documents/geometry';
 import { CANVAS_PRESETS, getCanvasPreset } from '../../core/documents/presets';
+import { getDocumentType } from '../../core/documents/document-types';
 import { getLayoutStarter } from '../../core/documents/starters';
 import {
   CANVAS_PRESET_CATEGORY_LABELS,
@@ -16,7 +17,10 @@ import {
   type CanvasPresetCategory,
   type GuideSettings,
 } from '../../core/documents/types';
-import { DEFAULT_DOCUMENT_TYPE_ID } from '../../core/documents/document-types';
+import {
+  documentTypesForStudio,
+  ILLUSTRATION_ARTBOARD_ID,
+} from '../../core/documents/document-types';
 import { LENGTH_UNITS, LENGTH_UNIT_LABELS, formatLength } from '../../core/documents/units';
 import { validateCanvas, validateGuides, validateTitle } from '../../core/documents/validation';
 import { studioRegistry } from '../../core/studios';
@@ -130,14 +134,25 @@ export function CreationFlow() {
 
   const stepIndex = STEPS.findIndex((candidate) => candidate.id === step);
 
+  // The studio decides the document type. A studio whose only type is still planned cannot create
+  // anything, so the flow refuses instead of silently writing a design canvas.
+  const availableTypes = documentTypesForStudio(studioId).filter(
+    (type) => type.availability === 'available',
+  );
+  const documentType = availableTypes[0];
+
   async function handleCreate() {
     setSubmitError(null);
+    if (!documentType) {
+      setSubmitError(`${studioRegistry.require(studioId).name} has no document type yet.`);
+      return;
+    }
     setSubmitting(true);
     const result = await documents.create({
       title,
       summary: summary.trim(),
       studioId,
-      documentTypeId: DEFAULT_DOCUMENT_TYPE_ID,
+      documentTypeId: documentType.id,
       canvas,
       guides,
       palette: paletteColors,
@@ -218,9 +233,9 @@ export function CreationFlow() {
               Choose a studio
             </h2>
             <p className="text-fg-muted text-sm">
-              A studio decides which tools and export formats the project will use. Only Design
-              Studio can create documents in this build — the rest are visible so you can see what
-              is coming.
+              A studio decides which tools and export formats the project will use. The studios with
+              a working editor can create documents; the others are visible so you can see what is
+              coming.
             </p>
             <ul className="grid gap-3 sm:grid-cols-2">
               {studios.map((studio) => {
@@ -254,8 +269,11 @@ export function CreationFlow() {
                           </span>
                         ) : (
                           <span className="text-fg-subtle mt-2 block text-xs">
-                            Creates {studio.documentTypes.length} document type
-                            {studio.documentTypes.length === 1 ? '' : 's'}.
+                            {studio.documentTypes
+                              .map((id) => getDocumentType(id)?.label)
+                              .filter((label): label is string => label !== undefined)
+                              .join(', ')}
+                            .
                           </span>
                         )}
                       </span>
@@ -563,6 +581,10 @@ export function CreationFlow() {
                   { label: 'Name', value: title.trim() || '—' },
                   { label: 'Studio', value: studioRegistry.require(studioId).name },
                   {
+                    label: 'Document type',
+                    value: documentType ? documentType.label : 'none available yet',
+                  },
+                  {
                     label: 'Canvas',
                     value: `${canvas.width} × ${canvas.height} ${canvas.unit}`,
                     mono: true,
@@ -632,12 +654,41 @@ export function CreationFlow() {
             ) : null}
 
             <InlineNote tone="tip" icon={<Sparkles aria-hidden />}>
-              <p>
-                After creating, the workspace lets you add text, rectangle and ellipse layers,
-                select, move and resize them, edit typography and shape settings, undo anything you
-                change, and export PNG, JPEG or the project file. Vector drawing and Bezier paths
-                are not part of this build — the roadmap shows when they arrive.
-              </p>
+              {documentType?.id === 'video.timeline' ? (
+                <p>
+                  After creating, the workspace opens Video Studio: import local video and audio
+                  files, place and trim clips on tracks, split at the playhead, add titles, set
+                  levels, play and scrub with real decoders, undo anything, then export a PNG frame
+                  sequence or record a real-time WebM take.
+                </p>
+              ) : documentType?.id === 'motion.scene' ? (
+                <p>
+                  After creating, the workspace opens Motion Studio: add text and shapes, keyframe
+                  position, scale or opacity at the playhead, shape the timing with presets or a
+                  custom curve, scrub and play the composition, undo anything, and export a real PNG
+                  frame sequence with a manifest in a zip.
+                </p>
+              ) : documentType?.id === 'photo.image' ? (
+                <p>
+                  After creating, the workspace opens Photo Studio: import a PNG, JPEG or WebP,
+                  build an ordered adjustment stack, paint brush or lasso masks, clone and heal,
+                  undo anything, and export a real PNG, JPEG or WebP at the stored working size.
+                </p>
+              ) : documentType?.id === ILLUSTRATION_ARTBOARD_ID ? (
+                <p>
+                  After creating, the workspace opens a vector artboard: draw paths with the pen,
+                  place shapes, edit nodes and Bezier handles, set real fills and strokes, combine
+                  shapes with boolean operations, undo any edit, and import or export SVG — plus an
+                  icon-set export for several objects at once.
+                </p>
+              ) : (
+                <p>
+                  After creating, the workspace lets you add text, rectangle and ellipse layers,
+                  select, move and resize them, edit typography and shape settings, undo anything
+                  you change, and export PNG, JPEG or the project file. Vector drawing lives in the
+                  Illustration Studio.
+                </p>
+              )}
             </InlineNote>
           </section>
         ) : null}

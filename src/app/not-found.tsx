@@ -8,6 +8,7 @@ export default function NotFound() {
   return (
     <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
       <EmptyState
+        titleAs="h1"
         title="That page does not exist"
         description="The link may be outdated, or the studio or lesson may not have shipped yet. Nothing here is a dead end — pick a destination below."
         actions={

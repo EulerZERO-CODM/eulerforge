@@ -28,6 +28,7 @@ import {
   updateLayer,
   updateLayers,
   updateLayerSettings,
+  updatePathGeometry,
   type ReorderTarget,
 } from '../documents/layer-operations';
 import { unionRects } from '../documents/geometry';
@@ -40,11 +41,13 @@ import {
 import type {
   AttributionRecord,
   ImageSettings,
+  Layer,
   LayerId,
   LayerType,
   ShapeSettings,
   TextSettings,
 } from '../documents/layer-types';
+import { matrixBetweenBoxes, transformPath, type VectorBox } from '../vector';
 import { LAYER_TYPE_LABELS } from '../documents/layer-types';
 import type { DocumentPatch } from '../documents/patch';
 import type { ForgeDocument } from '../documents/types';
@@ -68,9 +71,18 @@ function freezePatch(patch: DocumentPatch): DocumentPatch {
 /* Creating                                                                                      */
 /* -------------------------------------------------------------------------------------------- */
 
+/**
+ * Toolbar-creatable layer types.
+ *
+ * `path` is excluded because a path layer is created by drawing with a tool, not by pressing
+ * "add a blank path": an empty vector layer with a frame and no geometry is not something a user can
+ * do anything with, and offering the button would be a control that does not do what it says.
+ */
+export type CreatableLayerType = Exclude<LayerType, 'path'>;
+
 export function addLayerCommand(
   document: ForgeDocument,
-  type: LayerType,
+  type: CreatableLayerType,
   generateId?: () => string,
 ): Result<SceneCommand> {
   const frame = defaultFrameFor(type, document.canvas);
@@ -461,6 +473,14 @@ export function setLayerOpacityCommand(
   return setLayersOpacityCommand(document, [id], opacity);
 }
 
+/**
+ * Applies a new bounding box to one layer.
+ *
+ * A vector layer's frame is derived from its nodes, so the box is applied *to the geometry*: the
+ * outline is transformed from where it is now to where the box says it goes. Patching the stored
+ * frame instead would leave a path layer whose frame and outline disagree, which is exactly what the
+ * document schema refuses on load.
+ */
 export function setLayerFrameCommand(
   document: ForgeDocument,
   id: LayerId | string,
@@ -473,13 +493,13 @@ export function setLayerFrameCommand(
     width: Math.max(1, Math.round(frame.width * 100) / 100),
     height: Math.max(1, Math.round(frame.height * 100) / 100),
   };
-  const changed = updateLayer(document.scene, id, { frame: trimmed });
-  if (!changed.ok) return err(changed.error);
-
   const layerName = document.scene.layers.find((layer) => String(layer.id) === String(id))?.name;
   if (layerName === undefined) {
     return err(forgeError('not-found', 'That layer is no longer in the document.'));
   }
+
+  const changed = updateLayer(document.scene, id, { frame: trimmed });
+  if (!changed.ok) return err(changed.error);
   return ok({
     label: label ?? `Resize “${layerName}”`,
     patch: freezePatch({ scene: changed.value }),
@@ -494,22 +514,76 @@ export function setLayerFramesCommand(
   if (frames.length === 0) {
     return err(forgeError('validation-failed', 'No layers were changed.', { retryable: false }));
   }
-  const changed = updateLayers(
-    document.scene,
-    frames.map((entry) => ({
+
+  const round = (value: number): number => Math.round(value * 100) / 100;
+
+  let scene = document.scene;
+  const textual: { readonly id: LayerId | string; readonly patch: { readonly frame: Rect } }[] = [];
+  const vector: {
+    readonly layer: Extract<Layer, { type: 'path' }>;
+    readonly from: Rect;
+    readonly to: Rect;
+  }[] = [];
+
+  for (const entry of frames) {
+    const layer = document.scene.layers.find(
+      (candidate) => String(candidate.id) === String(entry.id),
+    );
+    if (!layer) {
+      return err(
+        forgeError('not-found', 'A layer being transformed is no longer in the document.'),
+      );
+    }
+    if (layer.type === 'path') {
+      vector.push({ layer, from: layer.frame, to: entry.frame });
+      continue;
+    }
+    textual.push({
       id: entry.id,
       patch: {
-        frame: {
-          x: Math.round(entry.frame.x * 100) / 100,
-          y: Math.round(entry.frame.y * 100) / 100,
-          width: Math.max(1, Math.round(entry.frame.width * 100) / 100),
-          height: Math.max(1, Math.round(entry.frame.height * 100) / 100),
-        },
+        frame: createRect(
+          round(entry.frame.x),
+          round(entry.frame.y),
+          Math.max(1, round(entry.frame.width)),
+          Math.max(1, round(entry.frame.height)),
+        ),
       },
-    })),
-  );
-  if (!changed.ok) return err(changed.error);
-  return ok({ label, patch: freezePatch({ scene: changed.value }) });
+    });
+  }
+
+  // Vector layers are transformed through their geometry first, then the frame-valued layers are
+  // patched in one batch, so a mixed selection still moves as one history entry either way.
+  for (const entry of vector) {
+    const matrix = matrixBetweenBoxes(boxOf(entry.from), boxOf(entry.to));
+    if (!matrix) {
+      return err(
+        forgeError(
+          'validation-failed',
+          `“${entry.layer.name}” cannot be transformed to an empty box.`,
+          { retryable: false },
+        ),
+      );
+    }
+    const changed = updatePathGeometry(
+      scene,
+      entry.layer.id,
+      transformPath(entry.layer.vector.path, matrix),
+    );
+    if (!changed.ok) return err(changed.error);
+    scene = changed.value;
+  }
+
+  if (textual.length > 0) {
+    const changed = updateLayers(scene, textual);
+    if (!changed.ok) return err(changed.error);
+    scene = changed.value;
+  }
+
+  return ok({ label, patch: freezePatch({ scene }) });
+}
+
+function boxOf(rect: Rect): VectorBox {
+  return { minX: rect.x, minY: rect.y, maxX: rect.x + rect.width, maxY: rect.y + rect.height };
 }
 
 /**

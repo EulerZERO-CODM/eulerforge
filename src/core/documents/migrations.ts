@@ -13,9 +13,10 @@ import { err, forgeError, ok, type Result } from '../result';
 import { freezeDocument } from './freeze';
 import { formatIssues, forgeDocumentSchema } from './schema';
 import type { ForgeDocument } from './types';
+import { defaultStudioPayload } from './payload';
 import { SCREEN_DPI } from './units';
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 export type Migration = {
   readonly from: number;
@@ -105,7 +106,94 @@ const migrateV1ToV2: Migration = {
   },
 };
 
-export const MIGRATIONS: readonly Migration[] = [migrateV0ToV1, migrateV1ToV2];
+/**
+ * v2 → v3: documents can hold vector path layers.
+ *
+ * Nothing has to be rewritten: a v2 document simply has no path layers, and every field it carries
+ * means the same thing. The version is still bumped, because a v3 *writer* can produce documents a
+ * v2 build cannot read, and the rule in ADR-0005 is that a reader must be able to tell. Stamping an
+ * explicit step here means the migration chain is complete and testable rather than implicit.
+ */
+const migrateV2ToV3: Migration = {
+  from: 2,
+  to: 3,
+  description: 'Documents may contain vector path layers; existing content is preserved unchanged.',
+  migrate: (raw) => ({ ...raw, schemaVersion: 3 }),
+};
+
+/**
+ * v4 → v5: vector styles can carry gradient or pattern paint.
+ *
+ * A v4 document's flat `fill`/`stroke` mean exactly what they meant before, so nothing is rewritten:
+ * the optional `fillPaint`/`strokePaint` keys are simply absent, which the schema reads as "solid".
+ * The version is bumped because a v5 *writer* can produce a document a v4 build would open with the
+ * paint fields silently dropped — and ADR-0005 makes silent field loss the one thing a reader must be
+ * able to detect. Stamping the step also keeps the migration chain complete and testable.
+ */
+const migrateV4ToV5: Migration = {
+  from: 4,
+  to: 5,
+  description:
+    'Vector styles may carry gradient or pattern paint; existing flat fills are unchanged.',
+  migrate: (raw) => ({ ...raw, schemaVersion: 5 }),
+};
+
+/**
+ * v5 → v6: a photo mask may carry source-pixel range selections.
+ *
+ * The key is optional, so a v5 mask keeps meaning exactly what it did: painted strokes only. The
+ * version is bumped for the usual reason (ADR-0005): a v6 writer can produce a document a v5 build
+ * would open with the ranges silently stripped.
+ */
+const migrateV5ToV6: Migration = {
+  from: 5,
+  to: 6,
+  description:
+    'Photo masks may carry luminance or colour range selections; existing masks are unchanged.',
+  migrate: (raw) => ({ ...raw, schemaVersion: 6 }),
+};
+
+/**
+ * v6 → v7: a vector path can carry text laid along its own contour.
+ *
+ * Optional, so a v6 document keeps meaning exactly what it did. The version is bumped for ADR-0005's
+ * usual reason: a v7 writer produces a key a v6 build would strip while reporting a clean load.
+ */
+const migrateV6ToV7: Migration = {
+  from: 6,
+  to: 7,
+  description: 'Vector paths may carry text on their contour; existing paths are unchanged.',
+  migrate: (raw) => ({ ...raw, schemaVersion: 7 }),
+};
+
+/**
+ * v3 → v4: documents gained a studio payload for Photo, Motion and Video.
+ *
+ * Existing projects are design canvases and vector artboards, which carry no payload, so the honest
+ * migration is `null`. A v3 file that already names one of the payload document types (created by a
+ * development build) gets the empty payload for its type instead of failing validation.
+ */
+const migrateV3ToV4: Migration = {
+  from: 3,
+  to: 4,
+  description: 'Added the studio payload block used by Photo, Motion and Video documents.',
+  migrate: (raw) => ({
+    ...raw,
+    schemaVersion: 4,
+    studioPayload:
+      raw.studioPayload ?? defaultStudioPayload(stringOr(raw.documentTypeId, 'design.canvas')),
+  }),
+};
+
+export const MIGRATIONS: readonly Migration[] = [
+  migrateV0ToV1,
+  migrateV1ToV2,
+  migrateV2ToV3,
+  migrateV3ToV4,
+  migrateV4ToV5,
+  migrateV5ToV6,
+  migrateV6ToV7,
+];
 
 export function readSchemaVersion(raw: unknown): number | undefined {
   const record = asRecord(raw);
@@ -124,6 +212,22 @@ export function isSupportedSchemaVersion(version: number): boolean {
  * Migrates untrusted JSON to the current schema version and validates it.
  * @returns the validated document, or a `ForgeError` describing why it cannot be loaded.
  */
+/**
+ * Whether a version-less record has anything a pre-versioning project always had.
+ *
+ * Records written before versioning were flat: a title and a canvas size. Treating *any* object as
+ * version 0 would turn a corrupted or foreign record into a blank project that looks saved — a
+ * silent replacement of someone's work — so a legacy record has to look like one.
+ */
+function looksLikeLegacyDocument(record: Record<string, unknown>): boolean {
+  return (
+    typeof record.title === 'string' ||
+    typeof record.width === 'number' ||
+    typeof record.height === 'number' ||
+    typeof record.background === 'string'
+  );
+}
+
 export function migrateDocument(raw: unknown): Result<ForgeDocument> {
   const record = asRecord(raw);
   if (!record) {
@@ -132,7 +236,27 @@ export function migrateDocument(raw: unknown): Result<ForgeDocument> {
     );
   }
 
+  const declared = record.schemaVersion;
+  if (
+    declared !== undefined &&
+    !(typeof declared === 'number' && Number.isInteger(declared) && declared >= 0)
+  ) {
+    return err(
+      forgeError(
+        'storage-corrupt',
+        'A stored project record declares an unreadable schema version and was skipped.',
+      ),
+    );
+  }
+
   const version = readSchemaVersion(record) ?? 0;
+  if (version === 0 && !looksLikeLegacyDocument(record)) {
+    return err(
+      forgeError('storage-corrupt', 'A stored project record is not a document and was skipped.', {
+        detail: 'It has neither a schema version nor the fields a pre-versioning project had.',
+      }),
+    );
+  }
   if (!isSupportedSchemaVersion(version)) {
     return err(
       forgeError(

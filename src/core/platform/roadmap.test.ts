@@ -17,15 +17,17 @@ describe('roadmap data', () => {
     expect(statuses.has('exploratory')).toBe(true);
   });
 
-  it('marks Phase 1 complete and keeps later phases unfinished', () => {
-    const phase1 = ROADMAP.find((phase) => phase.id === 'phase-1');
-    expect(phase1?.status).toBe('complete');
-    expect(phase1?.items.length).toBeGreaterThan(0);
-    expect(phase1?.items.every((item) => item.status === 'done')).toBe(true);
+  it('marks a phase complete only when every item in it is done', () => {
+    // Phase 1 and Phase 5 have all of their own items finished; the later phases do not, and a
+    // phase that still has planned work must not claim to be complete.
+    const completed = ROADMAP.filter((phase) => phase.status === 'complete').map(
+      (phase) => phase.id,
+    );
+    expect(completed).toEqual(['phase-1', 'phase-5']);
 
     for (const phase of ROADMAP) {
-      if (phase.id === 'phase-1') continue;
-      expect(phase.status, phase.id).not.toBe('complete');
+      const allDone = phase.items.every((item) => item.status === 'done');
+      expect(phase.status === 'complete', phase.id).toBe(allDone);
     }
   });
 

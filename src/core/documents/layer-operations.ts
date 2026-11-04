@@ -13,8 +13,17 @@
 
 import { err, forgeError, ok, type Result } from '../result';
 import { brand } from '../types/brand';
+import {
+  boundsOfPath,
+  freezePath,
+  nodeCount,
+  normaliseVectorStyle,
+  MAX_NODES_TOTAL,
+  type VectorPath,
+  type VectorStyle,
+} from '../vector';
 import { createRect, type Rect } from './geometry';
-import { asLayerId } from './layer-types';
+import { asLayerId, normalisePathText } from './layer-types';
 import type {
   AttributionRecord,
   EllipseLayer,
@@ -23,11 +32,14 @@ import type {
   Layer,
   LayerId,
   LayerType,
+  PathLayer,
   RectLayer,
   Scene,
+  PathText,
   ShapeSettings,
   TextLayer,
   TextSettings,
+  VectorContent,
 } from './layer-types';
 import { MAX_ATTRIBUTION_RECORDS, MAX_LAYERS, MAX_LAYER_NAME_LENGTH } from './layer-types';
 import { DEFAULT_LAYER_OPACITY, defaultNameFor, layerDefaultsFor } from './layer-defaults';
@@ -86,7 +98,56 @@ export function freezeLayer(layer: Layer): Layer {
         frame: Object.freeze(layer.frame),
         image: Object.freeze(layer.image),
       });
+    case 'path':
+      return Object.freeze({
+        ...layer,
+        frame: Object.freeze(layer.frame),
+        vector: freezeVectorContent(layer.vector),
+      });
   }
+}
+
+/** Deep-frozen path + style, so no caller can mutate geometry that is already in a document. */
+export function freezeVectorContent(content: VectorContent): VectorContent {
+  return Object.freeze({
+    path: freezePath(content.path),
+    style: Object.freeze({
+      ...content.style,
+      dashArray: Object.freeze([...content.style.dashArray]),
+    }),
+    // Text is part of the content, so it is frozen with it: a caller that mutated a committed
+    // layer's run would change the document behind the history's back.
+    text: content.text ? Object.freeze({ ...content.text }) : null,
+  });
+}
+
+/**
+ * The frame a path layer's geometry implies.
+ *
+ * Path geometry is stored in document coordinates, so the frame is *derived*: it is the bounding box
+ * of the artwork, kept in sync by every operation that changes the geometry. A degenerate path (a
+ * horizontal line, a single node) legitimately has a zero-height box, and the schema allows that for
+ * path layers only.
+ */
+export function pathFrameOf(path: VectorPath, fallback: Rect): Rect {
+  const bounds = boundsOfPath(path);
+  if (!bounds)
+    return createRect(
+      fallback.x,
+      fallback.y,
+      Math.max(0, fallback.width),
+      Math.max(0, fallback.height),
+    );
+  return createRect(bounds.minX, bounds.minY, bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+}
+
+/** A path layer with its frame recomputed. The single place the frame invariant is maintained. */
+export function withFrozenVector(layer: PathLayer): PathLayer {
+  return Object.freeze({
+    ...layer,
+    frame: pathFrameOf(layer.vector.path, layer.frame),
+    vector: freezeVectorContent(layer.vector),
+  });
 }
 
 export type CreateLayerOptions = {
@@ -135,6 +196,16 @@ export type NewLayerInput =
       readonly type: 'image';
       readonly frame: Rect;
       readonly image: Partial<ImageSettings> & { href: string };
+    }
+  | {
+      readonly type: 'path';
+      readonly frame: Rect;
+      readonly vector: {
+        readonly path: VectorPath;
+        readonly style?: Partial<VectorStyle> | undefined;
+        /** Text laid along the path, for a conversion that carries a run rather than drawing one. */
+        readonly text?: PathText | null | undefined;
+      };
     };
 
 /**
@@ -190,6 +261,32 @@ export function createLayer(input: NewLayerInput, options: CreateLayerOptions = 
         },
       };
       return finalise(layer, 'image', options);
+    }
+    case 'path': {
+      if (nodeCount(input.vector.path) > MAX_NODES_TOTAL) {
+        return err(
+          forgeError(
+            'validation-failed',
+            `That artwork has more than ${String(MAX_NODES_TOTAL)} nodes, which is the limit for one layer.`,
+            { retryable: false },
+          ),
+        );
+      }
+      const vector: VectorContent = {
+        path: input.vector.path,
+        style: normaliseVectorStyle(input.vector.style ?? defaults.vectorStyle),
+        text: input.vector.text ? normalisePathText(input.vector.text) : null,
+      };
+      const layer: PathLayer = {
+        ...base,
+        id: brand<'LayerId'>('pending'),
+        name: '',
+        type: 'path',
+        vector,
+        // The frame follows the geometry rather than the caller's guess.
+        frame: pathFrameOf(vector.path, base.frame),
+      };
+      return finalise(layer, 'path', options);
     }
   }
 }
@@ -262,25 +359,21 @@ export type LayerPatch = {
   readonly text?: TextSettings;
   readonly shape?: ShapeSettings;
   readonly image?: ImageSettings;
+  /** Path geometry and paint. The frame is recomputed from the geometry, so it is not patched here. */
+  readonly vector?: VectorContent;
 };
 
 /** Settings a patch may carry, checked against the layer's type before the patch is applied. */
-const PATCH_PROPERTY_TYPES = {
-  text: 'text',
-  shape: 'shape',
-  image: 'image',
-} as const;
-
 function patchMatchesLayerType(layer: Layer, patch: LayerPatch): boolean {
-  for (const property of ['text', 'shape', 'image'] as const) {
-    if (patch[property] === undefined) continue;
-    const expects = PATCH_PROPERTY_TYPES[property];
-    if (property === 'shape') {
-      if (layer.type !== 'rect' && layer.type !== 'ellipse') return false;
-      continue;
-    }
-    if (layer.type !== expects) return false;
-  }
+  if (patch.text !== undefined && layer.type !== 'text') return false;
+  if (patch.image !== undefined && layer.type !== 'image') return false;
+  if (patch.shape !== undefined && layer.type !== 'rect' && layer.type !== 'ellipse') return false;
+  if (patch.vector !== undefined && layer.type !== 'path') return false;
+  if (patch.vector !== undefined && nodeCount(patch.vector.path) > MAX_NODES_TOTAL) return false;
+  // A path layer's frame is derived from its outline, so patching the frame directly would leave the
+  // two disagreeing. Moving or resizing vector artwork transforms its *nodes* instead.
+  if (patch.frame !== undefined && layer.type === 'path' && patch.vector === undefined)
+    return false;
   return true;
 }
 
@@ -306,7 +399,15 @@ export function updateLayer(scene: Scene, id: LayerId | string, patch: LayerPatc
     );
   }
 
-  const merged = { ...existing, ...patch } as Layer;
+  const mergedBase = { ...existing, ...patch } as Layer;
+  // A path layer's frame *is* its geometry's bounding box, so a geometry patch recomputes it here.
+  // This is the only place that recalculation happens, which is what makes the invariant impossible
+  // to break from a caller: the schema refuses a stored path layer whose frame has drifted, so a
+  // patch that skipped this step would produce a document that no longer loads.
+  const merged: Layer =
+    mergedBase.type === 'path' && patch.vector !== undefined
+      ? withFrozenVector(mergedBase)
+      : mergedBase;
 
   // The layer is re-checked *after* the merge, so a patch can never leave the scene in a state the
   // schema would refuse. A gesture that would do so (dragging a layer to an impossible coordinate)
@@ -345,6 +446,7 @@ export function updateLayerSettings(
     readonly text?: Partial<TextSettings> | undefined;
     readonly shape?: Partial<ShapeSettings> | undefined;
     readonly image?: Partial<ImageSettings> | undefined;
+    readonly style?: Partial<VectorStyle> | undefined;
   },
 ): Result<Scene> {
   const existing = scene.layers.find((layer) => layer.id === id);
@@ -353,7 +455,8 @@ export function updateLayerSettings(
   const mismatched =
     (patch.text !== undefined && existing.type !== 'text') ||
     (patch.image !== undefined && existing.type !== 'image') ||
-    (patch.shape !== undefined && existing.type !== 'rect' && existing.type !== 'ellipse');
+    (patch.shape !== undefined && existing.type !== 'rect' && existing.type !== 'ellipse') ||
+    (patch.style !== undefined && existing.type !== 'path');
   if (mismatched) {
     return err(
       forgeError('validation-failed', 'That setting does not apply to this layer type.', {
@@ -377,7 +480,79 @@ export function updateLayerSettings(
       return patch.image
         ? updateLayer(scene, id, { image: { ...existing.image, ...patch.image } })
         : ok(scene);
+    case 'path':
+      return patch.style
+        ? updateLayer(scene, id, {
+            vector: {
+              path: existing.vector.path,
+              style: normaliseVectorStyle({ ...existing.vector.style, ...patch.style }),
+              text: existing.vector.text ?? null,
+            },
+          })
+        : ok(scene);
   }
+}
+
+/**
+ * Replaces the text laid along a path layer's contour.
+ *
+ * The text is part of the path, not a layer of its own: it moves with the geometry, it is saved with
+ * the document and it undoes with the same command as the colour it uses. Passing `null` removes it.
+ */
+export function updatePathText(
+  scene: Scene,
+  id: LayerId | string,
+  text: PathText | null,
+): Result<Scene> {
+  const existing = scene.layers.find((layer) => layer.id === id);
+  if (!existing) return err(forgeError('not-found', 'That layer is no longer in the document.'));
+  if (existing.type !== 'path') {
+    return err(
+      forgeError(
+        'validation-failed',
+        `Layer "${existing.name}" is a ${existing.type} layer, not a vector path.`,
+        { retryable: false },
+      ),
+    );
+  }
+  return updateLayer(scene, id, {
+    vector: {
+      path: existing.vector.path,
+      style: existing.vector.style,
+      text: text === null ? null : normalisePathText(text),
+    },
+  });
+}
+
+/**
+ * Replaces a path layer's geometry, keeping its frame truthful.
+ *
+ * Any edit that moves nodes, applies a transform or runs a boolean operation goes through here, so
+ * there is exactly one place where "the frame is the geometry's bounding box" is maintained.
+ */
+export function updatePathGeometry(
+  scene: Scene,
+  id: LayerId | string,
+  path: VectorPath,
+): Result<Scene> {
+  const existing = scene.layers.find((layer) => layer.id === id);
+  if (!existing) return err(forgeError('not-found', 'That layer is no longer in the document.'));
+  if (existing.type !== 'path') {
+    return err(
+      forgeError(
+        'validation-failed',
+        `Layer "${existing.name}" is a ${existing.type} layer, not a vector path.`,
+        {
+          retryable: false,
+        },
+      ),
+    );
+  }
+  // Text is laid parametrically on the outline, so it follows a geometry edit rather than being
+  // detached from it; dropping it here would silently delete the user's words on every node drag.
+  return updateLayer(scene, id, {
+    vector: { path, style: existing.vector.style, text: existing.vector.text ?? null },
+  });
 }
 
 export function deleteLayer(scene: Scene, id: LayerId | string): Result<Scene> {
@@ -679,6 +854,17 @@ export function defaultFrameFor(
     case 'rect':
     case 'ellipse': {
       const size = Math.round(Math.max(80, shortest * 0.33));
+      return createRect(
+        Math.round((canvas.width - size) / 2),
+        Math.round((canvas.height - size) / 2),
+        size,
+        size,
+      );
+    }
+    case 'path': {
+      // An empty path layer has no geometry to take a frame from, so it starts as a centred square
+      // that the first stroke replaces.
+      const size = Math.round(Math.max(64, shortest * 0.25));
       return createRect(
         Math.round((canvas.width - size) / 2),
         Math.round((canvas.height - size) / 2),

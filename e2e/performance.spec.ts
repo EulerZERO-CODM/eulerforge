@@ -44,10 +44,15 @@ import {
   describeDistribution,
   installPerfRecorder,
   measureFrames,
+  measureIdleCadence,
   measureInteraction,
   percentile,
   resetPerfRecorder,
+  describePointerPacing,
+  describeScriptCosts,
+  takeLongFrames,
   takeObserved,
+  takePointerMoves,
   throttleCpu,
   type FrameStats,
   type InteractionSample,
@@ -1047,6 +1052,13 @@ async function runPhase(
       }
 
       const observed = await takeObserved(page);
+      /* Attribution: which scripts ran inside frames that missed 50ms, and how the pointer events
+         were paced. Both are drained whatever the verdict, so the numbers describe the run rather
+         than only its failures. */
+      const longFrames = await takeLongFrames(page);
+      const moves = await takePointerMoves(page);
+      const scriptCosts = describeScriptCosts(longFrames);
+      const movePacing = describePointerPacing(moves);
       const longTasks = observed.filter((entry) => entry.kind === 'longtask');
       const slowEvents = observed.filter((entry) => entry.kind === 'slow-event');
       const worst = (values: readonly number[]): number =>
@@ -1116,7 +1128,7 @@ async function runPhase(
       });
       if (missed) {
         report.note(
-          `${phase} ${scenario.name}: frame gaps ${describeDistribution(gaps)} with ${(slowShare * 100).toFixed(0)}% over 50 ms.`,
+          `${phase} ${scenario.name}: frame gaps ${describeDistribution(gaps)} with ${(slowShare * 100).toFixed(0)}% over 50 ms; ${String(moves.length)} pointer events ${movePacing}. Long animation frames: ${String(longFrames.length)} (worst ${worst(longFrames.map((frame) => frame.duration)).toFixed(0)} ms, blocking ${worst(longFrames.map((frame) => frame.blocking)).toFixed(0)} ms). Scripts inside them: ${scriptCosts}.`,
         );
       }
       if (frozen) {
@@ -1152,6 +1164,37 @@ function environment(): {
     // report naming the merge commit would not say which branch state was measured.
     commit: process.env.GITHUB_HEAD_SHA ?? process.env.GITHUB_SHA ?? 'local',
   };
+}
+
+/**
+ * What the browser under the benchmark actually is, read from inside it.
+ *
+ * A timing without the canvas it painted and the renderer that painted it cannot be compared with
+ * another run — and two headless configurations that both say "Chromium" can differ by several times
+ * in cost. The synthetic figure is a fixed loop of identical instructions, so it reports the speed of
+ * the machine and the browser's JIT, not of the application, which is what makes "the runner was
+ * slow" a measurement rather than an excuse.
+ */
+async function browserFacts(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="artboard"] canvas');
+    const gl = document.createElement('canvas').getContext('webgl2');
+    const debug: { UNMASKED_RENDERER_WEBGL: number } | null = gl
+      ? gl.getExtension('WEBGL_debug_renderer_info')
+      : null;
+    const start = performance.now();
+    let sink = 0;
+    for (let index = 0; index < 6_000_000; index += 1) sink = (sink + Math.sqrt(index)) % 9973;
+    const synthetic = performance.now() - start;
+    const navigatorFacts = navigator as unknown as { deviceMemory?: number };
+    return [
+      `canvas ${canvas ? `${String(canvas.width)}x${String(canvas.height)} px at dpr ${String(window.devicePixelRatio)}` : 'not found'}`,
+      `WebGL2 ${gl ? 'available' : 'unavailable'}${debug && gl ? ` (${String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL))})` : ''}`,
+      `${String(navigator.hardwareConcurrency)} logical cores reported, deviceMemory ${String(navigatorFacts.deviceMemory ?? 'unknown')}`,
+      `fixed synthetic workload ${synthetic.toFixed(1)} ms`,
+      `sink ${String(sink > 0)}`,
+    ].join('; ');
+  });
 }
 
 test.describe('a thirty-layer document in a real browser', () => {
@@ -1202,6 +1245,7 @@ test.describe('a thirty-layer document in a real browser', () => {
       ...environment(),
       browser: `Chromium ${page.context().browser()?.version() ?? 'unknown'} (Playwright)`,
     });
+    report.note(`Browser under test: ${await browserFacts(page)}.`);
     report.note(
       `Gated phase: CDP \`Emulation.setCPUThrottlingRate: ${String(THROTTLE_RATE)}\`, ${String(SAMPLES.throttled.interaction)} interaction samples and ${String(SAMPLES.throttled.frames)} drag samples per scenario, after one unrecorded warm-up pass.`,
     );
@@ -1214,6 +1258,17 @@ test.describe('a thirty-layer document in a real browser', () => {
 
     const broken = new Set<string>();
     try {
+      /* Controls, at the same throttle the gate uses. The idle cadence says how fast this machine
+         can produce frames with the workspace open and nobody touching it; the interaction control
+         says how long the browser takes to show a change that costs the application nothing (a
+         window resize, which does not touch the document). Without them a red run cannot separate
+         the editor's cost from the environment's, and with them it does not have to guess. */
+      await throttleCpu(page, THROTTLE_RATE);
+      const idle = await measureIdleCadence(page, 1_000);
+      report.note(
+        `Control — idle frame cadence at the gate's ${String(THROTTLE_RATE)}x throttle, workspace open, no interaction: ${String(idle.frames)} frames in 1 s, p50 ${idle.p50.toFixed(1)} ms, p95 ${idle.p95.toFixed(1)} ms, worst ${idle.max.toFixed(1)} ms, ${String(idle.over50)} gaps over 50 ms. A drag cannot paint faster than this frame source.`,
+      );
+      await throttleCpu(page, 1);
       await runPhase(page, 'throttled', report, broken);
       await runPhase(page, 'unthrottled', report, broken);
     } finally {

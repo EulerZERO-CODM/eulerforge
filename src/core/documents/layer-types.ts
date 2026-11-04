@@ -12,11 +12,12 @@
  */
 
 import { brand, type Branded } from '../types/brand';
+import type { VectorPath, VectorStyle } from '../vector';
 import type { Rect } from './geometry';
 
 export type LayerId = Branded<string, 'LayerId'>;
 
-export const LAYER_TYPES = ['text', 'rect', 'ellipse', 'image'] as const;
+export const LAYER_TYPES = ['text', 'rect', 'ellipse', 'image', 'path'] as const;
 export type LayerType = (typeof LAYER_TYPES)[number];
 
 export const LAYER_TYPE_LABELS: Readonly<Record<LayerType, string>> = {
@@ -24,6 +25,7 @@ export const LAYER_TYPE_LABELS: Readonly<Record<LayerType, string>> = {
   rect: 'Rectangle',
   ellipse: 'Ellipse',
   image: 'Graphic',
+  path: 'Vector path',
 };
 
 /**
@@ -173,7 +175,142 @@ export type ImageLayer = BaseLayerFields & {
   readonly image: ImageSettings;
 };
 
-export type Layer = TextLayer | RectLayer | EllipseLayer | ImageLayer;
+/**
+ * A vector path on the artboard.
+ *
+ * Geometry is stored in **document coordinates**, not relative to `frame`: a node drag, a boolean
+ * operation and an import all work in the space the user sees, and the frame is recomputed from the
+ * geometry rather than being the thing that positions it. `frame` therefore always equals the
+ * bounds of `path` (the schema checks this), which keeps selection, hit testing, reordering and the
+ * layer tree working exactly as they do for the other layer types.
+ */
+export type PathLayer = BaseLayerFields & {
+  readonly type: 'path';
+  readonly vector: VectorContent;
+};
+
+/**
+ * Text laid along a path's own contour.
+ *
+ * The path is the baseline: nothing here stores glyph positions, so text stays correct when the
+ * geometry is edited, resized or re-flattened, and the SVG file can describe it as a `textPath`
+ * instead of a list of positioned outlines. `null`/absent means the path carries no text, which is
+ * exactly what every document written before this field existed says.
+ */
+export type PathText = {
+  readonly content: string;
+  /** Glyph size in document units. */
+  readonly fontSize: number;
+  /** Extra advance between glyphs, in document units; may be negative. */
+  readonly letterSpacing: number;
+  /** Where the run starts, as a fraction of the contour's length (0–1). */
+  readonly startOffset: number;
+  readonly baseline: PathTextBaseline;
+  readonly colour: string;
+  readonly fontStackId: FontStackId;
+};
+
+export const PATH_TEXT_BASELINES = ['above', 'centre', 'below'] as const;
+export type PathTextBaseline = (typeof PATH_TEXT_BASELINES)[number];
+
+export const PATH_TEXT_BASELINE_LABELS: Readonly<Record<PathTextBaseline, string>> = {
+  above: 'Above the line',
+  centre: 'Centred on the line',
+  below: 'Below the line',
+};
+
+/** The CSS family each stack maps to in an SVG file; the importer maps it back to a stack. */
+export const PATH_TEXT_FONT_FAMILIES: Readonly<Record<FontStackId, string>> = {
+  sans: 'sans-serif',
+  serif: 'serif',
+  mono: 'monospace',
+};
+
+export const PATH_TEXT_LIMITS = Object.freeze({
+  maxContentLength: 240,
+  minFontSize: 4,
+  maxFontSize: 512,
+  minLetterSpacing: -20,
+  maxLetterSpacing: 200,
+});
+
+export const DEFAULT_PATH_TEXT: PathText = Object.freeze({
+  content: 'Text on a path',
+  fontSize: 28,
+  letterSpacing: 0,
+  startOffset: 0,
+  baseline: 'above' as const,
+  colour: '#f4f4f5',
+  fontStackId: 'sans' as const,
+});
+
+const PATH_TEXT_HEX = /^#[0-9a-f]{6}$/i;
+
+function clampBetween(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * Clamps untrusted text settings into the documented ranges.
+ *
+ * Invalid numbers become the default rather than throwing: a stored document with a NaN font size is
+ * a corrupt field, not a reason to refuse the file, and normalising it keeps the editor usable.
+ */
+export function normalisePathText(input: Partial<PathText>): PathText {
+  const content = (input.content ?? DEFAULT_PATH_TEXT.content).slice(
+    0,
+    PATH_TEXT_LIMITS.maxContentLength,
+  );
+  const colour =
+    input.colour && PATH_TEXT_HEX.test(input.colour)
+      ? input.colour.toLowerCase()
+      : DEFAULT_PATH_TEXT.colour;
+  const fontStackId =
+    input.fontStackId && FONT_STACKS.includes(input.fontStackId)
+      ? input.fontStackId
+      : DEFAULT_PATH_TEXT.fontStackId;
+  const baseline =
+    input.baseline && PATH_TEXT_BASELINES.includes(input.baseline)
+      ? input.baseline
+      : DEFAULT_PATH_TEXT.baseline;
+  return {
+    content,
+    fontSize: clampBetween(
+      input.fontSize ?? DEFAULT_PATH_TEXT.fontSize,
+      PATH_TEXT_LIMITS.minFontSize,
+      PATH_TEXT_LIMITS.maxFontSize,
+    ),
+    letterSpacing: clampBetween(
+      input.letterSpacing ?? DEFAULT_PATH_TEXT.letterSpacing,
+      PATH_TEXT_LIMITS.minLetterSpacing,
+      PATH_TEXT_LIMITS.maxLetterSpacing,
+    ),
+    startOffset: clampBetween(input.startOffset ?? DEFAULT_PATH_TEXT.startOffset, 0, 1),
+    baseline,
+    colour,
+    fontStackId,
+  };
+}
+
+/** True when the text would paint at least one glyph. */
+export function pathTextHasContent(text: PathText | null | undefined): boolean {
+  return Boolean(text && text.content.trim().length > 0);
+}
+
+/** CSS `font` shorthand for path text, matching what both canvases expect. */
+export function pathTextFontString(text: PathText): string {
+  return `${String(text.fontSize)}px ${FONT_STACKS_INFO[text.fontStackId].css}`;
+}
+
+export type VectorContent = {
+  readonly path: VectorPath;
+  readonly style: VectorStyle;
+  /** Optional so documents written before text-on-path keep their exact meaning. */
+  readonly text?: PathText | null | undefined;
+};
+
+export type Layer = TextLayer | RectLayer | EllipseLayer | ImageLayer | PathLayer;
 
 /**
  * The ordered scene. Index 0 is the bottom-most layer.
@@ -227,6 +364,10 @@ export function isShapeLayer(layer: Layer): layer is RectLayer | EllipseLayer {
 
 export function isImageLayer(layer: Layer): layer is ImageLayer {
   return layer.type === 'image';
+}
+
+export function isPathLayer(layer: Layer): layer is PathLayer {
+  return layer.type === 'path';
 }
 
 /** Narrowing helper used by the shape inspector, which treats rectangles specially. */

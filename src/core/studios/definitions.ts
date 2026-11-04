@@ -130,38 +130,42 @@ export const PHOTO_STUDIO: StudioDefinition = {
   id: createStudioId('photo'),
   slug: createStudioSlug('photo'),
   name: 'Photo Studio',
-  tagline: 'Adjust, retouch, mask and composite photographs.',
+  tagline: 'Adjust, retouch, mask and export photographs.',
   purpose:
-    'Photo Studio will handle tonal and colour adjustment, non-destructive edit stacks, selections, masks, healing and multi-image compositing. It needs a GPU compositor and a large-image pipeline, so it is scheduled after the shared document, history and asset foundations are proven by Design Studio.',
+    'Photo Studio edits a single photograph with a non-destructive stack: tonal and colour adjustments stay editable and reorderable, brush and lasso masks decide where the stack applies, and clone/heal strokes retouch the rendered pixels. The working copy is embedded in the project so it reopens without the original file. Multiple image layers and EXIF-aware orientation are still to come.',
   icon: 'aperture',
   accent: 'ember',
-  availability: 'planned',
-  maturityNote: 'Not started. The document model and history layer already anticipate it.',
+  availability: 'available',
+  maturityNote:
+    'Working in this browser: PNG/JPEG/WebP import with a capped working copy, a 12-entry adjustment stack with bypass and reordering, brush/lasso/erase masks with inversion, clone and heal retouch, undo/redo, autosave and real PNG/JPEG/WebP export. Not implemented: multiple image layers, blend modes, curves, EXIF orientation and colour-managed output.',
   produces: [
     'Corrected and colour-graded photographs',
     'Retouched portraits and product shots',
-    'Background removals and cut-outs',
-    'Multi-layer composites',
+    'Masked local adjustments',
+    'PNG, JPEG and WebP exports at the stored working size',
   ],
   documentTypes: [documentType('photo.image')],
   capabilities: [
     {
       id: 'adjust.stack',
       label: 'Non-destructive adjustment stack',
-      status: 'planned',
-      detail: 'Exposure, contrast, curves, colour balance and sharpening that stay editable.',
+      status: 'available',
+      detail:
+        'Twelve tonal and colour adjustments applied in order, each bypassable, movable and undoable; the imported pixels are never overwritten.',
     },
     {
       id: 'select.mask',
       label: 'Selections and masks',
-      status: 'planned',
-      detail: 'Brush, lasso and luminance/colour range selection with feathered masks.',
+      status: 'available',
+      detail:
+        'Brush, lasso and erase strokes with a hardness edge and mask inversion, drawn with the pointer or from the keyboard, plus up to eight luminance or colour range selections measured from the source pixels.',
     },
     {
       id: 'retouch.heal',
       label: 'Retouching tools',
-      status: 'planned',
-      detail: 'Clone, heal and patch with sampled-source overlays.',
+      status: 'available',
+      detail:
+        'Clone stamp with a sampled source offset and a heal brush that blends towards a blurred local copy.',
     },
     {
       id: 'composite.layers',
@@ -177,17 +181,18 @@ export const PHOTO_STUDIO: StudioDefinition = {
     },
   ],
   engine: {
-    renderer: 'WebGL2 compositor with a Canvas2D fallback for low-end devices',
+    renderer: 'WebGL2 fragment-pass renderer with a Canvas 2D reference fallback',
     pipeline:
-      'Image decoding (createImageBitmap), GPU shader passes, tiled caching for large files',
-    integrationPoint: 'src/studios/photo with an engine package under src/engines/raster',
+      'createImageBitmap decode → capped working copy → one pass per adjustment (GPU) or the shared CPU pipeline → mask mix → Canvas 2D retouch → the browser’s own PNG/JPEG/WebP encoder',
+    integrationPoint:
+      'src/core/photo (stack, commands, export plan) and src/lib/browser/photo-engine.ts',
     rationale:
-      'Per-pixel editing needs the GPU; DOM cannot express blend maths or kernels at interactive rates. Keeping the engine behind the Forge Core document/history interfaces means photo work never depends on DOM-specific assumptions.',
+      'Per-pixel editing is faster on the GPU, but the fallback is the reference implementation: the shader mirrors `applyPhotoPipeline` and both are exercised, so a device without WebGL2 still edits and exports the same document. The renderer stays behind the shared document/history interfaces, so photo work never depends on DOM-specific assumptions in core.',
   },
-  entry: { route: null, label: 'Photo Studio' },
+  entry: { route: '/studios/photo', label: 'Open Photo Studio' },
   learningSlugs: ['what-adjustments-actually-do'],
   consumesFrom: [DESIGN_STUDIO.id],
-  definitionVersion: 1,
+  definitionVersion: 2,
 };
 
 export const VIDEO_STUDIO: StudioDefinition = {
@@ -196,12 +201,12 @@ export const VIDEO_STUDIO: StudioDefinition = {
   name: 'Video Studio',
   tagline: 'Cut, arrange and export video with audio.',
   purpose:
-    'Video Studio will be a timeline editor: importing clips, trimming, arranging tracks, adding titles, transitions and audio, then exporting. It depends on media decoding and encoding that the browser only exposes reliably through newer APIs, so its entry point comes after the raster foundation.',
+    'Video Studio is a timeline editor: import local video and audio files, trim and arrange clips on tracks, split at the playhead, add titles, set per-clip levels, scrub and play the composition with real decoders, then export a PNG frame sequence or record a real-time WebM take.',
   icon: 'film',
   accent: 'plum',
-  availability: 'planned',
+  availability: 'available',
   maturityNote:
-    'Not started. Timeline data model and playback technology are still being evaluated.',
+    'Available and covered by browser tests. It decodes with the browser’s own media elements, so it edits exactly the codecs this browser can play; it records WebM in real time and exports frame sequences, but it does not encode MP4 and does not claim to.',
   produces: [
     'Short-form social edits',
     'Promo and explainer cuts',
@@ -213,14 +218,16 @@ export const VIDEO_STUDIO: StudioDefinition = {
     {
       id: 'timeline.multitrack',
       label: 'Multi-track timeline',
-      status: 'planned',
-      detail: 'Video, audio, title and overlay tracks with trimming and ripple edits.',
+      status: 'available',
+      detail:
+        'Video, audio and title tracks with trimming, splitting and overwrite editing; a track holds at most one clip at any position. Ripple and roll edits are not implemented.',
     },
     {
       id: 'media.import',
-      label: 'Media import and proxies',
-      status: 'planned',
-      detail: 'Import local files, generate lightweight proxies for smooth scrubbing.',
+      label: 'Media import',
+      status: 'available',
+      detail:
+        'Import local MP4, WebM, MOV, MP3, WAV, M4A and Ogg files; the browser decodes them and the bytes stay on this device in IndexedDB. No proxies are generated.',
     },
     {
       id: 'transitions',
@@ -230,26 +237,29 @@ export const VIDEO_STUDIO: StudioDefinition = {
     },
     {
       id: 'audio.mix',
-      label: 'Audio levels and fades',
-      status: 'planned',
-      detail: 'Per-clip gain, fades, ducking and a simple master bus.',
+      label: 'Audio levels',
+      status: 'available',
+      detail:
+        'Per-clip gain and mute, mixed into playback and into a real-time capture. Fades, ducking and a master bus are not implemented.',
     },
     {
       id: 'export.video',
       label: 'Video export',
-      status: 'planned',
-      detail: 'MP4/WebM export via browser encoders where available, with a documented fallback.',
+      status: 'available',
+      detail:
+        'A deterministic PNG frame sequence with a manifest, and a real-time WebM capture through MediaRecorder. No other container or codec is produced by this build.',
     },
   ],
   engine: {
-    renderer: 'Timeline view (DOM) plus a decoded-frame preview surface',
+    renderer: 'Timeline view (DOM) plus a 2D canvas compositing the decoded video elements',
     pipeline:
-      'WebCodecs decode/encode where supported; demux/mux layer; frame-accurate scrub cache',
-    integrationPoint: 'src/studios/video with src/engines/media for decode/encode',
+      'Browser media elements decode; a 2D canvas composites picture and titles; PNG frames are zipped, and MediaRecorder captures a real-time take with the audio graph mixed in',
+    integrationPoint:
+      'src/core/video for the timeline, src/lib/browser/video-engine for decode and export',
     rationale:
-      'Video cannot share the raster engine: it is a time-based model with different caching, memory and determinism requirements. It shares only Forge Core concepts (documents, assets, history, export interface).',
+      'Video cannot share the raster engine: it is a time-based model with different caching, memory and determinism requirements. It shares the document model, history, media storage and the download boundary, and it reuses the project’s zip writer for its frame archives.',
   },
-  entry: { route: null, label: 'Video Studio' },
+  entry: { route: '/studios/video', label: 'Video Studio' },
   learningSlugs: ['timeline-basics'],
   consumesFrom: [PHOTO_STUDIO.id, DESIGN_STUDIO.id],
   definitionVersion: 1,
@@ -261,11 +271,12 @@ export const MOTION_STUDIO: StudioDefinition = {
   name: 'Motion Studio',
   tagline: 'Keyframes, animation and motion graphics.',
   purpose:
-    'Motion Studio will animate the same visual vocabulary as Design Studio: shapes, text and imported artwork placed on a timeline with keyframes, easing and expressions. Because it evaluates a scene graph at a given time, it can share the vector rendering path and stay deterministic for export.',
+    'Motion Studio animates the same visual vocabulary as Design Studio: shapes and text placed on a timeline with per-property keyframes, easing curves and a graph editor. A pure evaluator drives both the preview and the frame export, so the same timestamp produces the same picture in both.',
   icon: 'keyframe',
   accent: 'teal',
-  availability: 'planned',
-  maturityNote: 'Not started. Depends on the vector scene model from the Illustration work.',
+  availability: 'available',
+  maturityNote:
+    'Working in this browser: text, rectangle and ellipse layers, keyframes for position, scale and opacity, linear/eased/held and custom cubic easing with a draggable graph, a timeline you can scrub and drag keyframes on, playback with frame stepping, undo/redo, autosave and a real PNG frame sequence with a JSON manifest in a zip. Not implemented: video-file export (a codec is a different promise), masks, transitions, imported artboards and expressions.',
   produces: [
     'Animated titles and lower thirds',
     'Logo reveals and stingers',
@@ -277,20 +288,23 @@ export const MOTION_STUDIO: StudioDefinition = {
     {
       id: 'keyframes',
       label: 'Keyframes with easing',
-      status: 'planned',
-      detail: 'Animate any property with linear, eased and stepped interpolation.',
+      status: 'available',
+      detail:
+        'Animate position, scale and opacity with linear, eased, held and custom cubic interpolation; every edit is one undoable command.',
     },
     {
       id: 'graph.editor',
       label: 'Value graph editor',
-      status: 'planned',
-      detail: 'Fine-tune timing by dragging curves instead of typing easing values.',
+      status: 'available',
+      detail:
+        'Drag the two control points of a segment’s cubic curve, or type the four values; presets convert to a custom curve as soon as a handle moves.',
     },
     {
       id: 'scene.vector',
       label: 'Vector scene composition',
       status: 'planned',
-      detail: 'Shapes, paths and text shared with the Illustration Studio model.',
+      detail:
+        'Text, rectangle and ellipse layers already share the Design Studio document model and renderer; imported illustration artboards, path layers and true vector masks are not yet offered in the motion workspace.',
     },
     {
       id: 'expressions',
@@ -301,22 +315,24 @@ export const MOTION_STUDIO: StudioDefinition = {
     {
       id: 'export.frames',
       label: 'Frame-accurate export',
-      status: 'planned',
-      detail: 'Deterministic frame rendering to video or image sequences.',
+      status: 'available',
+      detail:
+        'A deterministic PNG sequence plus a JSON manifest, zipped by the project’s own writer. Not a video codec: the studio says frame sequence rather than pretending otherwise.',
     },
   ],
   engine: {
     renderer: 'SVG/Canvas2D scene view with a deterministic evaluator',
     pipeline:
       'Pure-function scene evaluation at time t; the same evaluator drives preview and export',
-    integrationPoint: 'src/studios/motion with src/engines/vector shared with Illustration Studio',
+    integrationPoint:
+      'src/core/motion (evaluator, commands, export plan) and src/lib/browser/motion-engine.ts',
     rationale:
-      'Motion graphics are usually vector and text driven, so a resolution-independent evaluator gives crisper output and easier export than a raster-first engine. Determinism (same input → same frame) is a hard requirement for trustworthy export.',
+      'Motion graphics are usually vector and text driven, so a resolution-independent evaluator gives crisper output and easier export than a raster-first engine. Determinism (same input → same frame) is a hard requirement for trustworthy export, and the evaluator is pure so the tests can assert it directly.',
   },
-  entry: { route: null, label: 'Motion Studio' },
+  entry: { route: '/studios/motion', label: 'Open Motion Studio' },
   learningSlugs: ['keyframes-explained'],
   consumesFrom: [DESIGN_STUDIO.id, PHOTO_STUDIO.id],
-  definitionVersion: 1,
+  definitionVersion: 2,
 };
 
 export const ILLUSTRATION_STUDIO: StudioDefinition = {
@@ -325,11 +341,12 @@ export const ILLUSTRATION_STUDIO: StudioDefinition = {
   name: 'Illustration Studio',
   tagline: 'Vector drawing, paths and illustration.',
   purpose:
-    'Illustration Studio will cover bezier drawing, shape building, strokes and fills, and asset-friendly SVG output. Its path model is the piece Motion Studio reuses for animated vector graphics, which is why the two disciplines are scheduled to share one vector engine.',
+    'Illustration Studio is the vector discipline: a pen tool for Bezier drawing, shape tools, node editing, real fills and strokes, boolean combination and asset-friendly SVG output. Its path model is the piece Motion Studio will reuse for animated vector graphics, which is why the two disciplines share one vector engine and one document model.',
   icon: 'pen',
   accent: 'violet',
-  availability: 'planned',
-  maturityNote: 'Not started. Path model and boolean operations are still being designed.',
+  availability: 'available',
+  maturityNote:
+    'A working vector workspace: pen and shape tools, node and handle editing with keyboard access, fill/stroke/dash/cap/join controls, gradient and pattern paint for either slot, union/subtract/intersect/exclude, SVG import and export, icon-set export, interchange with the Design Studio, and image tracing that turns a PNG, JPEG or WebP into editable filled paths. Not implemented: blur and image filters, per-node pressure or variable-width strokes, text outlining, multi-artboard documents, and rotation of a whole shape (the document model has no rotation). Tracing is colour-region geometry, not curve fitting: expect staircase edges at low detail.',
   produces: [
     'Icons and pictograms',
     'Logos and marks',
@@ -341,42 +358,91 @@ export const ILLUSTRATION_STUDIO: StudioDefinition = {
     {
       id: 'paths.drawing',
       label: 'Bezier path drawing',
-      status: 'planned',
-      detail: 'Pen, curve and corner tools with precise handle control.',
+      status: 'available',
+      detail:
+        'A pen tool that places corner nodes and drags smooth Bezier handles, a node tool for moving nodes and handles, and keyboard access to both.',
+    },
+    {
+      id: 'shapes.basics',
+      label: 'Rectangle, ellipse and star shapes',
+      status: 'available',
+      detail:
+        'Drag shapes out on the artboard, or convert a design rectangle or ellipse into the same outline as editable paths.',
     },
     {
       id: 'shapes.boolean',
       label: 'Shape building and booleans',
-      status: 'planned',
-      detail: 'Union, subtract, intersect and pathfinder-style combination.',
+      status: 'available',
+      detail:
+        'Union, subtract, intersect and exclude on two or more shapes, validating the result for topological consistency. Curves are flattened at a documented tolerance, so a combined shape is polygonal rather than curved — the panel reports the segment counts after every operation.',
     },
     {
       id: 'strokes.fills',
-      label: 'Strokes, fills and gradients',
-      status: 'planned',
-      detail: 'Pressure, variable width, dashes and gradient fills.',
+      label: 'Strokes, fills and dashes',
+      status: 'available',
+      detail:
+        'Solid fill and stroke colours, fill rule, stroke width, opacity, line cap, line join and dash patterns — all stored in the document and written to every export.',
     },
     {
-      id: 'svg.output',
-      label: 'Clean SVG output',
-      status: 'planned',
-      detail: 'Readable, optimised markup suitable for production websites.',
+      id: 'gradients.fills',
+      label: 'Gradient and pattern fills',
+      status: 'available',
+      detail:
+        'Fill or stroke either slot with a linear gradient, a radial gradient or a repeating motif pattern (stripes, dots, grid or checks). Stops, direction, centre, radius, tile scale, background and rotation are editable and undoable; the canvas preview and the SVG export resolve the same geometry from the shape bounds, and a re-import restores the paint exactly.',
     },
     {
-      id: 'trace.exploratory',
-      label: 'Auto-trace',
-      status: 'exploratory',
-      detail: 'Converting bitmap art to paths; quality and tooling are unresolved.',
+      id: 'text.on-path',
+      label: 'Text on a path',
+      status: 'available',
+      detail:
+        'Lay one editable run along a path’s own contour: content, size, letter spacing, start offset, baseline side, colour and font stack. The letters follow the curve when its nodes move, the run is saved with the layer, and the SVG boundary writes it as a real <text> with a <textPath> reference — and reads that same form back, without resolving anything outside the file.',
+    },
+    {
+      id: 'filters.fills',
+      label: 'Blur and image filters',
+      status: 'planned',
+      detail:
+        'Filter effects are not part of the document model; imported filter references are reported rather than imitated.',
+    },
+    {
+      id: 'svg.io',
+      label: 'SVG import and export',
+      status: 'available',
+      detail:
+        'A deterministic serialiser writes the artboard as SVG — including gradients, patterns and text laid on a path as a real <textPath> — and an importer brings paths, rectangles, ellipses, polygons, lines and that same text form back as editable geometry. Scripts, event handlers, foreignObject and external references are refused rather than ignored.',
+    },
+    {
+      id: 'export.icon-set',
+      label: 'Icon-set export',
+      status: 'available',
+      detail:
+        'Every selected visible vector layer becomes one SVG, plus a sprite and a manifest, packaged into a single zip download. Unselected, hidden and non-path layers are never included; the panel states the exact count before the export and names anything it could not carry.',
+    },
+    {
+      id: 'interchange.design',
+      label: 'Interchange with the Design Studio',
+      status: 'available',
+      detail:
+        'Rectangles and ellipses become equivalent paths in both directions, and layers that cannot make the trip are listed by name instead of being dropped.',
+    },
+    {
+      id: 'trace.image',
+      label: 'Image tracing',
+      status: 'available',
+      detail:
+        'Choose a PNG, JPEG or WebP and get one filled, editable path layer per palette colour, with holes kept as inner contours and specks below a chosen area dropped. Palette size (1–16), detail and the minimum area are adjustable, the trace lands fitted and centred on the canvas, and the whole trace is one undoable step. Boundaries are simplified staircase polygons, not fitted Bézier curves, and transparent pixels are not traced.',
     },
   ],
   engine: {
-    renderer: 'SVG view layer over a framework-free path model',
-    pipeline: 'Path/geometry kernel shared with Motion Studio; boolean ops and hit-testing in core',
-    integrationPoint: 'src/studios/illustration with src/engines/vector',
+    renderer:
+      'Canvas 2D artboard painted through the shared renderer, with DOM overlays for nodes and handles (ADR-0017)',
+    pipeline:
+      'Framework-free path/geometry kernel in src/core/vector, serialised by src/core/svg; booleans and hit-testing in core, downloads in the browser adapter',
+    integrationPoint: 'src/components/illustration with src/core/vector',
     rationale:
-      'A vector document is a geometry problem, not a pixel problem. Keeping the model independent of SVG lets the same artboard be exported as SVG, rendered to canvas for animation, or rasterised for print.',
+      'A vector document is a geometry problem, not a pixel problem. Keeping the model independent of SVG lets the same artboard be exported as SVG, rendered to canvas for animation, or rasterised for print — and it lets the whole editing surface be tested without a browser.',
   },
-  entry: { route: null, label: 'Illustration Studio' },
+  entry: { route: '/studios/illustration', label: 'Open Illustration Studio' },
   learningSlugs: ['vector-versus-raster'],
   consumesFrom: [DESIGN_STUDIO.id],
   definitionVersion: 1,

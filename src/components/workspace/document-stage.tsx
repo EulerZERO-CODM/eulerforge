@@ -6,6 +6,7 @@ import {
   ImagePlus,
   Magnet,
   Maximize2,
+  PenTool,
   Ruler,
   Square,
   Type,
@@ -350,6 +351,10 @@ function iconFor(type: LayerType): React.ReactNode {
       return <Circle aria-hidden />;
     case 'image':
       return <ImagePlus aria-hidden />;
+    case 'path':
+      // A vector layer has no "add" button — it is created by drawing — but the layer tree, the
+      // inspector and this switch all name the same type, so the glyph is here for them to share.
+      return <PenTool aria-hidden />;
   }
 }
 

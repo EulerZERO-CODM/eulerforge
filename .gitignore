@@ -45,3 +45,6 @@ yarn-error.log*
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+
+# optional account server data (see docs/SERVER.md)
+/.data/

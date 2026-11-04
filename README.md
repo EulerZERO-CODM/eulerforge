@@ -6,24 +6,40 @@ Euler's Forge is a browser-first creative platform: one place to make design, ph
 and illustration work, with the learning material built into the same environment instead of
 scattered across tutorials.
 
-This repository contains **Phase 1: the engineering foundation and the platform shell**, plus a
-working **Phase 2: Design Studio editing** surface. In plain terms:
+This repository contains the engineering foundation, the platform shell, and **five working
+studios**:
 
-- A working, tested, type-checked application shell: navigation, home, project library, creation
-  flow, studio discovery, learning hub, asset catalogue, settings, roadmap and a capability ledger.
-- **Design Studio** is an editor, not a mockup: canvas setup (units, presets, guides, palette,
-  metadata), an ordered layer scene of **text, rectangle, ellipse and placed graphic** layers,
-  selection from the artboard or the layer tree, move and resize with visible handles, snapping to
-  guides, grid lines and sibling edges, inspectable typography and shape settings, undo/redo with
-  labels, local-first saving, and a real **PNG or JPEG export** rendered from the same scene as the
-  artboard. `.forge.json` project files round-trip the whole document, layers included.
-- Studio **definitions** exist for Photo, Video, Motion, Illustration and 3D, each with honest
-  availability flags, planned capabilities and the engine boundary it will plug into. None of them
-  pretends to be usable.
+- **Design Studio** — canvas setup (units, presets, guides, palette, metadata), an ordered layer
+  scene of text, rectangle, ellipse and placed graphic layers, selection from the artboard or the
+  layer tree, move/resize with snapping, typography and shape settings, undo/redo with labels,
+  local-first saving, and a real PNG or JPEG export rendered from the same scene as the artboard.
+  `.forge.json` project files round-trip the whole document, layers included.
+- **Photo Studio** — a WebGL2 raster pipeline with a Canvas 2D reference fallback, an ordered
+  twelve-entry adjustment stack with bypass and reordering, brush/lasso/erase masks, clone and heal
+  retouching, and a real PNG/JPEG/WebP export re-rendered at the stored size.
+- **Video Studio** — import local video and audio, place/trim/split clips on tracks with overwrite
+  editing, add titles, set per-clip levels, scrub and play with the browser's own decoders, then
+  export a deterministic PNG frame sequence or record a real-time WebM take.
+- **Motion Studio** — keyframes for position, scale and opacity with eased or custom cubic curves, a
+  timeline and graph editor, playback, and a PNG frame sequence that a browser test compares with the
+  preview pixel for pixel.
+- **Illustration Studio** — a framework-free vector kernel: pen paths, Bézier node editing, boolean
+  operations with validated results, deterministic SVG import/export with an explicit report,
+  text on a path, a selection-scoped icon-set ZIP, and image tracing that turns a PNG/JPEG/WebP into
+  editable filled paths (palette, detail and speck threshold adjustable; one undoable step).
 
-Nothing in this repository claims cloud sync, accounts, collaboration, vector export, video or AI
-features. The places those will live are marked as interfaces, planned items, or unavailable — never
-as working buttons. Capabilities that only exist in a browser (a download, a real canvas raster) are
+An **AI Creative Assistant** panel is mounted in Design, Photo and Illustration. It is a typed tool
+registry with a deterministic native planner, an executor that applies the studios' own commands and
+exporters, per-step verification and a checkpoint that can resume an interrupted run. It works with
+no model and no key; a deployment may optionally point it at an OpenAI-compatible endpoint through
+server-only environment variables, and every plan — native or model-written — is validated against
+the registry before anything touches a document. It is not a chatbot and it does not claim tools it
+does not have: Motion and Video show a refusal that names the missing tool.
+
+**3D Studio** is the one remaining planned studio; its definition records the renderer decision
+instead of a choice. Nothing here claims cloud sync, accounts, collaboration, 3D or AI features, and
+the video encoder this build does not have (MP4) is labelled as missing rather than faked. Capabilities
+that only exist in a browser — a real download, a real canvas raster, a real WebM recording — are
 verified by a Chromium suite that runs in CI, and whatever even that cannot reach is listed as a
 manual check in `docs/ROADMAP.md` rather than assumed.
 
@@ -109,11 +125,21 @@ verifies it. A summary:
 
 **Not implemented — stated as such in the UI**
 
-- Any editing tool (no brushes, shapes, layers, selections, filters, timeline or 3D viewport).
-- Rasterisation/rendering, so PNG, JPEG, WebP, SVG, PDF, MP4, WebM and glTF export are **blocked**
-  in the export panel with the reason shown, not silently broken.
-- Accounts, cloud sync, sharing, teams, billing and telemetry (all rejected at the schema level).
-- A remote asset catalogue adapter, and an AI tutor.
+- Multiple artboards per document, per-run text styling, custom font upload, reusable styles,
+  templates and brand kits, PDF output, curve-exact booleans, and shape rotation in the design
+  model.
+- MP4 encoding and offline (faster-than-real-time) video export; video proxies, transitions, fades
+  and ducking. The three-minute export criterion is partly met: the frame-sequence cap is 1 800
+  frames, so a three-minute range exports in one piece only at a reduced frame step (`docs/ROADMAP.md`
+  states the exact numbers).
+- Motion masks, imported illustration artboards inside motion documents, transitions and expressions.
+- Photo blend modes beyond the documented adjustment stack, and a 12 MP/16 ms guarantee (the
+  working copy and the measured budgets are stated in `docs/PERFORMANCE.md`, not assumed).
+- Real-time collaboration, presence, teams and roles; email verification, password reset, OAuth and
+  multi-factor authentication. The account server is optional, single-process and off by default.
+- Billing, payments and telemetry (rejected at the schema level).
+- A remote asset catalogue adapter, an AI tutor, and any assistant tool that does not exist in the
+  registry.
 
 ## Project layout
 
@@ -159,18 +185,31 @@ Rules that keep this maintainable:
   refuses to become.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — layers, data flow, extension conventions.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — implemented / planned / exploratory, with exit criteria.
-- [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision records (ADR-0001 … ADR-0018).
+- [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision records (ADR-0001 … ADR-0032).
+- [`docs/SERVER.md`](docs/SERVER.md) — the optional account/sync server: endpoints, data layout,
+  migrations, local setup, tests and deployment limits.
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — host requirements, environment variables, the
+  serverless storage refusal and what a Vercel preview must be checked for.
 - [`AGENTS.md`](AGENTS.md) — conventions for humans and coding agents working in this repository.
 
 ## Status and limitations
 
-One discipline — Design Studio — can create real artwork end to end: shapes, text and placed
-graphics, edited on the artboard, saved locally, reopened, and exported as PNG or JPEG. Everything
-is stored in one browser profile on one device, so exporting a project file is the only backup.
+Five studios can create real work end to end, saved locally and reopened: Design (PNG/JPEG), Photo
+(PNG/JPEG/WebP), Video (PNG sequence and a real-time WebM take), Motion (PNG sequence) and
+Illustration (SVG and icon-set ZIP). Everything is stored in one browser profile on one device, so
+exporting a project file is the only backup; video media bytes also stay in that browser's IndexedDB,
+so moving a video project to another machine asks for the files again.
+
+There is also an **optional, self-hosted server** (Phase 7): accounts with scrypt-hashed passwords,
+revision-checked document sync with explicit conflict decisions, revocable read-only share links and
+a paginated catalogue endpoint. It is off unless you run it, nothing in the app requires it, and its
+storage is a single-process JSON file store documented in [`docs/SERVER.md`](docs/SERVER.md) — not a
+deployment claim.
 
 What is not implemented, and is labelled as such in the interface: multiple artboards per document,
-per-run text styling, custom fonts, reusable styles, templates and brand kits, vector (SVG/PDF)
-output, WebP and video, and every other studio. Pointer capture, the browser's own canvas output and
+per-run text styling, custom fonts, reusable styles, templates and brand kits, PDF output, MP4
+encoding, video proxies and transitions, photo range selections and blend modes, motion masks and
+imported artboards, 3D, real-time collaboration, and any billing or payments. Pointer capture, the browser's own canvas output and
 file downloads are covered by `e2e/**`, a Playwright suite that drives the production build in a real
 Chromium in CI; `docs/ROADMAP.md` lists what it still does not reach.
 

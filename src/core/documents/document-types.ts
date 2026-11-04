@@ -3,7 +3,8 @@
  *
  * A document type describes *what kind of thing* a project is (a design canvas, an image, a
  * timeline …), independent of the studio that owns it. Studios reference these ids; the workspace
- * router uses them to pick a renderer. Only `design.canvas` has a working renderer in Phase 1.
+ * router uses them to pick a renderer: `design.canvas` gets the design workspace and
+ * `illustration.artboard` gets the vector workspace. Every other type is still planned.
  */
 
 import type { DocumentTypeId } from './types';
@@ -42,17 +43,18 @@ export const DOCUMENT_TYPES: readonly DocumentTypeDefinition[] = [
     description: 'Single raster image with a non-destructive adjustment stack.',
     studioId: 'photo',
     unit: 'px',
-    availability: 'planned',
-    renderer: 'WebGL2 / WebGPU raster compositor',
+    availability: 'available',
+    renderer: 'WebGL2 fragment-pass compositor with a Canvas 2D reference fallback (implemented)',
   },
   {
     id: typeId('video.timeline'),
     label: 'Video timeline',
-    description: 'Time-based sequence with tracks, clips, transitions and audio.',
+    description: 'Time-based sequence with video, audio and title tracks.',
     studioId: 'video',
     unit: 's',
-    availability: 'planned',
-    renderer: 'Timeline model + decoded frame preview (WebCodecs where available)',
+    availability: 'available',
+    renderer:
+      'Timeline model + decoded <video> elements composited onto a 2D canvas; MediaRecorder for a real-time capture',
   },
   {
     id: typeId('motion.scene'),
@@ -60,8 +62,8 @@ export const DOCUMENT_TYPES: readonly DocumentTypeDefinition[] = [
     description: 'Keyframed composition of shapes, text and imported artwork.',
     studioId: 'motion',
     unit: 's',
-    availability: 'planned',
-    renderer: 'Scene graph evaluated per frame; SVG/Canvas2D preview, frame-accurate export later',
+    availability: 'available',
+    renderer: 'Scene evaluated per frame with the shared render plan; PNG frame sequence export',
   },
   {
     id: typeId('illustration.artboard'),
@@ -69,8 +71,9 @@ export const DOCUMENT_TYPES: readonly DocumentTypeDefinition[] = [
     description: 'Resolution-independent paths, strokes and fills.',
     studioId: 'illustration',
     unit: 'px',
-    availability: 'planned',
-    renderer: 'Path model with SVG view layer and boolean operations',
+    availability: 'available',
+    renderer:
+      'Canvas 2D artboard painted through the shared renderer, with DOM node/handle overlays and a framework-free path kernel (implemented)',
   },
   {
     id: typeId('three.scene'),
@@ -98,3 +101,18 @@ export function documentTypesForStudio(studioId: string): readonly DocumentTypeD
 }
 
 export const DEFAULT_DOCUMENT_TYPE_ID = typeId('design.canvas');
+
+/** The vector artboard type, used by the workspace router to pick the vector editing surface. */
+export const ILLUSTRATION_ARTBOARD_ID = typeId('illustration.artboard');
+
+/**
+ * The document type a studio creates projects with.
+ *
+ * A studio may eventually own several document types (a design canvas and a multi-artboard print
+ * document, say), so the creation flow asks for the *studio's* type rather than assuming one. Today
+ * every available studio has exactly one, and a studio with none returns `undefined` so a caller can
+ * refuse instead of inventing a document.
+ */
+export function primaryDocumentTypeForStudio(studioId: string): DocumentTypeDefinition | undefined {
+  return documentTypesForStudio(studioId)[0];
+}

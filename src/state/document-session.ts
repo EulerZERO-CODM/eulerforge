@@ -238,6 +238,9 @@ function contentSignature(document: ForgeDocument): string {
     attribution: document.attribution,
     metadata: document.metadata,
     status: document.status,
+    // Studio payloads are document content: an adjustment, a mask stroke or a keyframe is an edit,
+    // and leaving them out of the signature made every studio command a silent no-op.
+    studioPayload: document.studioPayload,
   });
 }
 

@@ -64,43 +64,58 @@ describe('CommandPalette', () => {
     expect(screen.getByText('No matching actions')).toBeInTheDocument();
   });
 
-  it('navigates to a real route when a command runs', async () => {
-    const user = userEvent.setup();
-    const { onOpenChange } = renderPalette(services);
+  it(
+    'navigates to a real route when a command runs',
+    // A render of the whole palette plus a real click is well under a second on a quiet machine, but
+    // this suite runs with coverage on a shared CI runner, where the default 5 s (Vitest's timeout,
+    // and userEvent's own per-action budget) has been seen to expire before the click was delivered.
+    // Nothing asserted here is about speed.
+    { timeout: 20_000 },
+    async () => {
+      const user = userEvent.setup();
+      const { onOpenChange } = renderPalette(services);
 
-    await user.click(await screen.findByRole('button', { name: /roadmap/i }));
+      await user.click(await screen.findByRole('button', { name: /roadmap/i }));
 
-    expect(push).toHaveBeenCalledWith('/roadmap');
-    expect(isRoutable(appDir, '/roadmap', routes)).toBe(true);
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-  });
+      expect(push).toHaveBeenCalledWith('/roadmap');
+      expect(isRoutable(appDir, '/roadmap', routes)).toBe(true);
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    },
+  );
 
-  it('routes every visible command to a destination that exists', async () => {
-    const user = userEvent.setup();
-    renderPalette(services);
+  it(
+    'routes every visible command to a destination that exists',
+    // This walks every command and delivers one real click per visible one, so its cost is a
+    // multiple of the single-click test above — and it timed out at the default 5 s on a shared CI
+    // runner under coverage. Nothing asserted here is about speed; the assertions are the same.
+    { timeout: 30_000 },
+    async () => {
+      const user = userEvent.setup();
+      renderPalette(services);
 
-    for (const command of createShellCommands()) {
-      // Commands are hidden when their availability predicate fails; only visible ones can be
-      // clicked, and each of those must land on a route the App Router serves.
-      if (
-        command.isAvailable &&
-        !command.isAvailable({ hasDocuments: false, documentCount: 0, pathname })
-      ) {
-        expect(
-          screen.queryByRole('button', { name: new RegExp(escapeRegExp(command.title), 'i') }),
-        ).toBeNull();
-        continue;
+      for (const command of createShellCommands()) {
+        // Commands are hidden when their availability predicate fails; only visible ones can be
+        // clicked, and each of those must land on a route the App Router serves.
+        if (
+          command.isAvailable &&
+          !command.isAvailable({ hasDocuments: false, documentCount: 0, pathname })
+        ) {
+          expect(
+            screen.queryByRole('button', { name: new RegExp(escapeRegExp(command.title), 'i') }),
+          ).toBeNull();
+          continue;
+        }
+        push.mockClear();
+        await user.click(
+          await screen.findByRole('button', { name: new RegExp(escapeRegExp(command.title), 'i') }),
+        );
+        const target = push.mock.calls[0]?.[0];
+        if (typeof target === 'string') {
+          expect(isRoutable(appDir, target, routes), `${command.id} → ${target}`).toBe(true);
+        }
       }
-      push.mockClear();
-      await user.click(
-        await screen.findByRole('button', { name: new RegExp(escapeRegExp(command.title), 'i') }),
-      );
-      const target = push.mock.calls[0]?.[0];
-      if (typeof target === 'string') {
-        expect(isRoutable(appDir, target, routes), `${command.id} → ${target}`).toBe(true);
-      }
-    }
-  });
+    },
+  );
 
   it('only offers the contextual help command inside a workspace', async () => {
     const user = userEvent.setup();

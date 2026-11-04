@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import type { ForgeDocument } from '../../core/documents/types';
 import type { Layer, LayerId, Scene } from '../../core/documents/layer-types';
@@ -115,6 +115,69 @@ export function Artboard({
   // the gesture the last keydown produced, whatever React has re-rendered in between.
   const keyResizeRef = useRef<{ gesture: GestureState; point: Point } | null>(null);
 
+  /*
+   * Pointer moves are coalesced to one state update per animation frame.
+   *
+   * A pointer can report at 120 Hz or more while a display repaints at 60: applying every event
+   * re-resolved snapping, re-rendered the workspace and repainted thirty layers two or three times
+   * per visible frame. That is invisible to the user but doubles or triples the cost of a drag, and
+   * it is exactly the number the browser benchmark measures. One update per frame keeps the picture
+   * following the pointer at display rate, and the pointer-up path below flushes the last pending
+   * point before it decides what to commit, so no movement is lost.
+   */
+  const pendingMoveRef = useRef<{
+    readonly kind: 'gesture' | 'marquee';
+    readonly point: Point;
+    readonly modifiers: GestureModifiers;
+  } | null>(null);
+  const moveFrameRef = useRef<number | null>(null);
+  // A resize handle sits inside the capture surface and both listen for pointer events, so one
+  // pointer-up reaches this component twice. The interaction must end once: the first call commits,
+  // the second must not commit a second, stale frame from the render it was queued with.
+  const endedPointerRef = useRef<number | null>(null);
+
+  const cancelPendingMove = useCallback((): void => {
+    if (moveFrameRef.current !== null) {
+      cancelAnimationFrame(moveFrameRef.current);
+      moveFrameRef.current = null;
+    }
+    pendingMoveRef.current = null;
+  }, []);
+
+  /** Reads the last unapplied pointer position and stops waiting for a frame. */
+  function flushPendingMove(): typeof pendingMoveRef.current {
+    const pending = pendingMoveRef.current;
+    cancelPendingMove();
+    return pending;
+  }
+
+  function scheduleMove(
+    kind: 'gesture' | 'marquee',
+    point: Point,
+    modifiers: GestureModifiers,
+  ): void {
+    pendingMoveRef.current = { kind, point, modifiers };
+    if (moveFrameRef.current !== null) return;
+    moveFrameRef.current = requestAnimationFrame(() => {
+      moveFrameRef.current = null;
+      const pending = pendingMoveRef.current;
+      pendingMoveRef.current = null;
+      if (!pending) return;
+      if (pending.kind === 'gesture') {
+        setGesture((current) =>
+          current ? updateGesture(current, pending.point, pending.modifiers) : current,
+        );
+        return;
+      }
+      setMarquee((current) =>
+        current ? { from: current.from, to: pending.point, additive: current.additive } : current,
+      );
+    });
+  }
+
+  // A drag has no meaning after unmount; the frame callback must not outlive the component.
+  useEffect(() => () => cancelPendingMove(), [cancelPendingMove]);
+
   /**
    * Device pixel ratio to rasterise at.
    *
@@ -221,6 +284,8 @@ export function Artboard({
   };
 
   function beginPointer(event: React.PointerEvent<HTMLElement>): void {
+    endedPointerRef.current = null;
+    cancelPendingMove();
     const point = toDocument(event);
     // Two questions, one hit test: what can be transformed here, and what is *visibly* on top?
     // A locked layer on top means "nothing happens", not "empty space", so a click on it must not
@@ -281,25 +346,34 @@ export function Artboard({
   function movePointer(event: React.PointerEvent<HTMLElement>): void {
     const point = toDocument(event);
     if (marquee) {
-      setMarquee({ from: marquee.from, to: point, additive: marquee.additive });
+      scheduleMove('marquee', point, NO_MODIFIERS);
       return;
     }
     if (!gesture) {
-      // Hover feedback: the cursor says whether a handle or a layer is under the pointer.
+      // Hover feedback: the cursor says whether a handle or a layer is under the pointer. It costs a
+      // hit test but no repaint, so it stays per event rather than per frame.
       const hovered = hitTestScene(doc.scene, point, { includeLocked: true });
       setHint(hovered === null ? null : hovered.locked ? `${hovered.name} — locked` : hovered.name);
       return;
     }
-    setGesture(updateGesture(gesture, point, modifiersOf(event)));
+    scheduleMove('gesture', point, modifiersOf(event));
   }
 
   function endPointer(event: React.PointerEvent<HTMLElement>): void {
+    if (endedPointerRef.current === event.pointerId) return;
+    endedPointerRef.current = event.pointerId;
+
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
 
+    // The pointer-up may be the newest thing that happened: apply its point before deciding
+    // anything, so the last few pixels of a fast drag are not thrown away.
+    const pending = flushPendingMove();
+
     if (marquee) {
-      const rect = rectFromPoints(marquee.from, marquee.to);
+      const last = pending?.kind === 'marquee' ? pending.point : marquee.to;
+      const rect = rectFromPoints(marquee.from, last);
       // A click without a drag leaves the selection as it was (the non-additive case already
       // cleared it on pointer-down); a drag selects what it covers, adding when modified.
       if (rect.width > 2 || rect.height > 2) {
@@ -325,12 +399,27 @@ export function Artboard({
       return;
     }
 
-    if (gestureChangedSomething(gesture, preview)) {
+    const finalGesture =
+      pending?.kind === 'gesture'
+        ? updateGesture(gesture, pending.point, pending.modifiers)
+        : gesture;
+    const finalPreview =
+      finalGesture === gesture
+        ? preview
+        : resolveGesture(finalGesture, {
+            scene: doc.scene,
+            canvas: doc.canvas,
+            targets,
+            snapEnabled: snapping,
+            snapThreshold: snapThresholdForZoom(zoom),
+          });
+
+    if (gestureChangedSomething(finalGesture, finalPreview)) {
       onCommitFrames(
-        gestureLabel(gesture, doc.scene),
-        gesture.start.frames.map((entry) => ({
+        gestureLabel(finalGesture, doc.scene),
+        finalGesture.start.frames.map((entry) => ({
           id: entry.id,
-          frame: frameFromScene(preview.scene, entry.id) ?? entry.frame,
+          frame: frameFromScene(finalPreview.scene, entry.id) ?? entry.frame,
         })),
       );
     } else if (collapseOnRelease) {
@@ -345,14 +434,15 @@ export function Artboard({
    * Escape or a cancelled pointer drops the preview: no commit, no history entry, no half-applied
    * document. The selection is whatever the gesture's first click established, never a stale one.
    */
-  function cancelGesture(): void {
+  const cancelGesture = useCallback((): void => {
     keyResizeRef.current = null;
+    cancelPendingMove();
     setGesture(null);
     setMarquee(null);
     setHint(null);
     setCollapseOnRelease(null);
     setSelectingOnly(false);
-  }
+  }, [cancelPendingMove]);
 
   // A gesture can be cancelled from anywhere: while a pointer is captured the keyboard focus may sit
   // on a handle or an inspector field, so the listener is global but only active mid-interaction.
@@ -366,7 +456,7 @@ export function Artboard({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [interactionActive]);
+  }, [cancelGesture, interactionActive]);
 
   /** Moves the transformable selection by whole document pixels — the keyboard path for a move. */
   function nudgeSelection(dx: number, dy: number): void {
@@ -394,6 +484,7 @@ export function Artboard({
    */
   function startResize(event: React.PointerEvent<HTMLElement>, handle: TransformHandle): void {
     event.stopPropagation();
+    endedPointerRef.current = null;
     const targets = transformTargets(doc.scene, selection);
     if (targets.length === 0) return;
     const point = toDocument(event);
