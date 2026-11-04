@@ -422,6 +422,38 @@ describe('registration, sessions and sign-out', () => {
     }
   });
 
+  it('honours an operator saying this host replaces its disk on deploy', async () => {
+    // Container hosts look like ordinary servers: without a flag the store opens, visitors create
+    // accounts, and the next deploy erases them. The flag has to close the whole surface, not just
+    // one route.
+    const previousFlag = process.env.FORGE_DISABLE_SERVER;
+    process.env.FORGE_DISABLE_SERVER = '1';
+    setServerDataDirForTests(null);
+    try {
+      const status = await statusGET();
+      expect(status.status).toBe(200);
+      const parsed = await body<{ available: boolean; unavailable: string }>(status);
+      expect(parsed.available).toBe(false);
+      expect(parsed.unavailable).toMatch(/not persistent/i);
+
+      const documents = await documentsGET(request('/api/documents'));
+      expect(documents.status).toBe(503);
+      const failure = await body<{ error: { kind: string; message: string } }>(documents);
+      expect(failure.error.kind).toBe('unavailable');
+      expect(failure.error.message).toMatch(/not persistent/i);
+
+      const session = await body<{ account: unknown; unavailable: string }>(
+        await sessionGET(request('/api/auth/session')),
+      );
+      expect(session.account).toBeNull();
+      expect(session.unavailable).toMatch(/not persistent/i);
+    } finally {
+      if (previousFlag === undefined) delete process.env.FORGE_DISABLE_SERVER;
+      else process.env.FORGE_DISABLE_SERVER = previousFlag;
+      setServerDataDirForTests(directory);
+    }
+  });
+
   it('names the real reason accounts are unavailable on a serverless host', async () => {
     // The account panel renders this sentence verbatim. "The server is not reachable" is a false
     // cause on Vercel: the server answered this request, and what it lacks is a persistent disk.

@@ -30,17 +30,29 @@ export function serverDataDir(): string {
  * account server is therefore *explicitly unavailable* on such a host unless the operator points
  * `FORGE_DATA_DIR` at a real persistent volume; the app itself stays fully local-first either way.
  */
+const UNPERSISTED_STORAGE_PROBLEM =
+  'Accounts and cloud documents are unavailable on this deployment: its filesystem is not ' +
+  'persistent. Everything else works and stays in this browser. To enable accounts, run the ' +
+  'server on a host with a persistent volume and set FORGE_DATA_DIR to it (docs/SERVER.md).';
+
+/**
+ * Explains why the file store must not be used here, or `null` when it may.
+ *
+ * Two things can make the disk untrustworthy. A serverless platform is detectable from inside the
+ * process (`VERCEL`, a Lambda name). A container platform that replaces the container on every
+ * deploy is not: it looks exactly like a server, writes succeed, and the data disappears with the
+ * next deploy — so the operator has to say so with `FORGE_DISABLE_SERVER=1`. The explicit flag
+ * beats everything else, including `FORGE_DATA_DIR`: it is the loudest possible statement that this
+ * host's storage must not be offered to visitors as if it were durable.
+ */
 export function serverlessStorageProblem(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): string | null {
+  if (env.FORGE_DISABLE_SERVER === '1') return UNPERSISTED_STORAGE_PROBLEM;
   const serverless = env.VERCEL !== undefined || env.AWS_LAMBDA_FUNCTION_NAME !== undefined;
   if (!serverless) return null;
   if (env.FORGE_DATA_DIR !== undefined && env.FORGE_DATA_DIR.trim().length > 0) return null;
-  return (
-    'Accounts and cloud documents are unavailable on this deployment: its filesystem is not ' +
-    'persistent. Everything else works and stays in this browser. To enable accounts, run the ' +
-    'server on a host with a persistent volume and set FORGE_DATA_DIR to it (docs/SERVER.md).'
-  );
+  return UNPERSISTED_STORAGE_PROBLEM;
 }
 
 /** Test-only seam: point the API at a temporary directory and forget any cached store. */

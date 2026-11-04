@@ -109,7 +109,63 @@ reporting of a browser that refuses storage.
   heading, and a stale or mistyped URL is a truthful `404` with a heading of its own rather than a
   blank render.
 
-## Vercel
+## Antideploy
+
+The owner asked for this project to be deployed on [Antideploy](https://antideploy.com), whose agent
+instructions are at <https://antideploy.com/agent.md>. Everything below is readiness for that host; no
+deployment exists yet, because this sandbox cannot reach `antideploy.com` (see *Status* at the end of
+this section).
+
+What the platform expects, and how this project meets it:
+
+| Requirement | This project |
+| --- | --- |
+| A start command that listens on the platform's port | `npm run start` → `next start`, which reads `PORT` and binds `0.0.0.0` (verified with `PORT=3210`) |
+| A build command | `npm ci && npm run build` (Node ≥ 22.12; `.nvmrc` pins 22.22.3) |
+| The application's own address in the environment | The platform sets `NEXT_PUBLIC_APP_URL` / `NEXT_PUBLIC_SITE_URL` / `APP_URL`; set `NEXT_PUBLIC_FORGE_SITE_URL` to the same address for the metadata |
+| Disk that survives a deploy | **None.** Antideploy replaces the container on every deploy, so the account store must stay off |
+
+Because the disk is recreated on every deploy, this project must run there with
+
+```
+FORGE_DISABLE_SERVER=1
+NEXT_PUBLIC_FORGE_ENVIRONMENT=production
+NEXT_PUBLIC_FORGE_SITE_URL=https://<application-address>
+```
+
+`FORGE_DISABLE_SERVER=1` is what keeps the deployment honest: without it the file store opens (no
+`VERCEL` marker is present on a container), a visitor can create an account, and the next deploy
+silently erases it. With it, `/api/server/status` reports `available: false`, the account routes
+answer 503 with the "filesystem is not persistent" sentence, and the studios, local saving, reopening
+and exporting work exactly as they do anywhere else, because they never needed a server. See
+`docs/SERVER.md`.
+
+No database, file bucket, sign-in or email service is requested from the platform: the product is
+local-first and stores work in the browser. Adding one of those would mean implementing an adapter
+that does not exist yet, which is a feature decision, not a deployment step.
+
+There is no `DATABASE_URL` or other secret in the repository, and `.env` is git-ignored.
+
+### Status
+
+**Not deployed.** This environment blocks outbound requests to `antideploy.com` (and to
+`api.antideploy.app`): `curl` fails the TLS handshake there while `github.com`, `registry.npmjs.org`
+and `pypi.org` succeed, which is an allowlist on the container's egress, not a site problem. Per the
+platform's own instructions that is the one condition that stops the job, and it must not be routed
+around: no mirror, no credential and no hand-run commands help, because the code to deploy is inside
+this container.
+
+To finish, either add `antideploy.com` to this environment's allowed domains and ask for the
+deployment again, or run it on a machine with ordinary network access — the project needs no changes
+first. `.antideploy.json` (the application id) is the only file the deploy adds, and it holds no
+secret.
+
+## Vercel (superseded by Antideploy)
+
+The owner has asked for Antideploy from here on, so this section is history: it records what was
+learned on the Vercel project, which is still linked to the repository and may still build when a
+branch is pushed.
+
 
 The project builds with the default Next.js preset; no `vercel.json` is needed. Suggested settings:
 

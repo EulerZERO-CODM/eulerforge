@@ -159,6 +159,23 @@ to it. A single-process JSON store still needs exactly one writer, so this is a 
 hatch for a self-hosted container with a volume — not a recommendation for a horizontally scaled
 deployment. A database adapter remains unimplemented and unclaimed.
 
+### Container platforms that rebuild on every deploy
+
+A container host is the harder case: it looks like an ordinary server, so no `VERCEL` marker is
+present, the store opens, a visitor creates an account, and the next deploy replaces the container and
+the account with it. There is nothing to detect from inside the process, so the operator states it:
+
+```
+FORGE_DISABLE_SERVER=1
+```
+
+With that set, every server route answers exactly as on a serverless host — 503 with the
+"filesystem is not persistent" sentence, `/api/server/status` reporting `available: false` — while the
+studios, local saving, reopening and exporting keep working, because they never needed the server.
+The flag beats `FORGE_DATA_DIR` too, so a stray directory variable cannot quietly turn storage back
+on. Running the server properly is still the same recipe: a volume, `FORGE_DATA_DIR` pointing at it,
+and no flag.
+
 Not implemented, and not claimed: multiple instances, a real database, email delivery (verification,
 password reset), OAuth, multi-factor authentication, team roles, real-time collaboration, presence,
 billing or payments. The learn/Learning hub, studios and exports do not need any of it.

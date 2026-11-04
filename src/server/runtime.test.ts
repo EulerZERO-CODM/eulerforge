@@ -42,6 +42,20 @@ describe('serverlessStorageProblem', () => {
     expect(serverlessStorageProblem({ VERCEL: '1', FORGE_DATA_DIR: '/mnt/forge' })).toBeNull();
     expect(serverlessStorageProblem({ VERCEL: '1', FORGE_DATA_DIR: '   ' })).not.toBeNull();
   });
+
+  it('refuses the store when the operator says this host replaces its disk on deploy', () => {
+    // A container platform gives every deploy a fresh filesystem but looks like an ordinary server
+    // from inside the process: no VERCEL, no Lambda name, and writes that succeed. Only the
+    // operator knows, so the flag has to be honoured without any other signal present.
+    expect(serverlessStorageProblem({ FORGE_DISABLE_SERVER: '1' })).toMatch(/not persistent/i);
+  });
+
+  it('lets the explicit refusal win over a data directory, so a mistake cannot quietly store data', () => {
+    expect(
+      serverlessStorageProblem({ FORGE_DISABLE_SERVER: '1', FORGE_DATA_DIR: '/mnt/forge' }),
+    ).toMatch(/not persistent/i);
+    expect(serverlessStorageProblem({ FORGE_DISABLE_SERVER: '0' })).toBeNull();
+  });
 });
 
 describe('getStore on a serverless host', () => {
