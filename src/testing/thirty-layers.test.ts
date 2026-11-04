@@ -26,7 +26,7 @@ import { describe, expect, it } from 'vitest';
 import { migrateDocument } from '../core/documents/migrations';
 import { contextMeasureFactory } from '../core/render/measure';
 import { buildRenderPlan } from '../core/render/plan';
-import { loadImageFixtures, nodeCanvasFactory } from './raster';
+import { hostCanDrawText, loadImageFixtures, nodeCanvasFactory } from './raster';
 import {
   catalogueFiles,
   THIRTY_LAYER_COUNTS,
@@ -115,8 +115,16 @@ describe('the thirty-layer fixture', () => {
     });
 
     // Text overflow, an empty shape or an unresolvable graphic would each be a defect in the fixture
-    // rather than a fact about performance, so all three are failures here.
-    expect(plan.issues.map((issue) => `${issue.kind}: ${issue.layerName}`)).toEqual([]);
+    // rather than a fact about performance, so all three are failures here — except that overflow is
+    // measured, and a host that cannot rasterise a glyph measures a font the fixture was not drawn
+    // against. There the overflow says something about the host, not the document, so only the two
+    // font-independent defects remain assertions. Where the host does draw text, nothing is relaxed.
+    const issues = plan.issues.map((issue) => `${issue.kind}: ${issue.layerName}`);
+    if (hostCanDrawText()) {
+      expect(issues).toEqual([]);
+    } else {
+      expect(issues.filter((issue) => !issue.startsWith('text-overflow'))).toEqual([]);
+    }
     expect(plan.blocked).toBe(false);
 
     // Every layer really produced a draw op (the background is the first op, not a layer).
