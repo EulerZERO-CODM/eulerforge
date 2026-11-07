@@ -4,7 +4,8 @@ import { Check, CircleAlert, Download, Info, XCircle } from 'lucide-react';
 import { useState } from 'react';
 
 import { buildExportChecklist, type CheckStatus } from '../../core/export/checklist';
-import { downloadBlob } from '../../lib/browser/download';
+import { svgExportPayload } from '../../core/export/svg-export';
+import { downloadBlob, downloadText } from '../../lib/browser/download';
 import { EXPORT_FORMATS, PROJECT_FILE_FORMAT_ID, getExportFormat } from '../../core/export/formats';
 import { projectFilePayload } from '../../core/export/project-file';
 import {
@@ -22,7 +23,7 @@ import { createBrowserCanvas, canRasteriseHere } from '../../lib/browser/canvas'
 import { cn } from '../../lib/cn';
 import { useForgeServices } from '../../state/forge-provider';
 import { Button } from '../ui/button';
-import { Field, Select } from '../ui/field';
+import { Checkbox, Field, Select } from '../ui/field';
 import { InlineNote } from '../ui/states';
 import type { SceneImages } from './use-scene-images';
 import type { WorkspaceApi } from './workspace-api';
@@ -67,12 +68,25 @@ export function ExportPanel({
   const [jpegBackground, setJpegBackground] = useState<JpegBackground>('white');
   const [busy, setBusy] = useState(false);
   const [lastExport, setLastExport] = useState<RasterExport | null>(null);
+  const [lastSvg, setLastSvg] = useState<{
+    readonly fileName: string;
+    readonly bytes: number;
+    readonly omitted: number;
+  } | null>(null);
+  const [allowPartial, setAllowPartial] = useState(false);
 
   const selected = getExportFormat(formatId);
   const isRaster = selected?.kind === 'raster';
+  const isVector = selected?.kind === 'vector';
+  // Built from the document, so the readiness checks and the download agree about what the file
+  // will contain: the panel offers the partial export only after the checks have named the layers.
+  const svgPayload = isVector ? svgExportPayload(api.doc, { allowPartial }) : null;
   const rasteriserAvailable = canRasteriseHere();
   const checklist = buildExportChecklist(api.doc, formatId, {
     rasteriserAvailable,
+    // The user's own choice about a lossy SVG is part of what the checks describe: the same document
+    // is blocked by default and a named warning once the omission is deliberate.
+    allowPartialSvg: allowPartial,
     scale,
     jpegBackground,
     // A graphic the browser could not decode blocks the export: it would otherwise be missing from
@@ -82,6 +96,44 @@ export function ExportPanel({
       blocking: true,
     })),
   });
+  // The opt-in has to survive being used. It is shown whenever the *document* has layers SVG cannot
+  // hold, not only while the payload is refused — otherwise ticking it would remove the control that
+  // ticks it, and the choice could not be undone.
+  const svgGap = isVector
+    ? checklist.checks.find(
+        (candidate) => candidate.id === 'svg-support' && candidate.status !== 'pass',
+      )
+    : undefined;
+
+  const runSvg = (): void => {
+    if (!svgPayload?.ok) {
+      if (svgPayload) {
+        toasts.error('The SVG was not written', svgPayload.error.message);
+      }
+      return;
+    }
+    const payload = svgPayload.value;
+    const started = downloadText(payload.contents, payload.fileName, payload.mimeType);
+    if (!started) {
+      setLastSvg(null);
+      toasts.error(
+        'The file could not be handed to the browser',
+        'The SVG was generated, but this environment has nowhere to save it.',
+      );
+      return;
+    }
+    setLastSvg({
+      fileName: payload.fileName,
+      bytes: payload.bytes,
+      omitted: payload.unsupported.length,
+    });
+    toasts.success(
+      'SVG exported',
+      payload.unsupported.length > 0
+        ? `${payload.fileName} — ${formatBytes(payload.bytes)}. ${String(payload.unsupported.length)} layer(s) were left out.`
+        : `${payload.fileName} — ${formatBytes(payload.bytes)}.`,
+    );
+  };
 
   const runRaster = async () => {
     if (!selected || !isRaster) return;
@@ -205,6 +257,28 @@ export function ExportPanel({
         </div>
       ) : null}
 
+      {svgGap ? (
+        <InlineNote
+          tone="warning"
+          icon={<CircleAlert aria-hidden />}
+          title="SVG would leave layers out"
+        >
+          <p>{svgGap.detail}</p>
+          <Checkbox
+            className="mt-1.5"
+            label="Export the rest anyway and name what was left out"
+            checked={allowPartial}
+            data-testid="export-allow-partial"
+            onChange={(event) => {
+              setAllowPartial(event.target.checked);
+            }}
+          />
+          {svgPayload && !svgPayload.ok && allowPartial ? (
+            <p className="text-2xs">{svgPayload.error.message}</p>
+          ) : null}
+        </InlineNote>
+      ) : null}
+
       {selected ? (
         <InlineNote
           tone={selected.status === 'available' ? 'tip' : 'neutral'}
@@ -289,6 +363,10 @@ export function ExportPanel({
               }
               return;
             }
+            if (isVector) {
+              runSvg();
+              return;
+            }
             void runRaster();
           }}
         >
@@ -319,6 +397,26 @@ export function ExportPanel({
             <div className="flex justify-between gap-2">
               <dt>Scale</dt>
               <dd>{lastExport.scale}x</dd>
+            </div>
+          </dl>
+        ) : null}
+
+        {lastSvg ? (
+          <dl
+            data-testid="last-svg-export"
+            className="text-fg-subtle forge-numeric border-line-subtle text-2xs space-y-0.5 rounded-sm border px-2.5 py-2"
+          >
+            <div className="flex justify-between gap-2">
+              <dt>File</dt>
+              <dd className="truncate">{lastSvg.fileName}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt>Size</dt>
+              <dd>{formatBytes(lastSvg.bytes)} of SVG text</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt>Layers left out</dt>
+              <dd>{String(lastSvg.omitted)}</dd>
             </div>
           </dl>
         ) : null}

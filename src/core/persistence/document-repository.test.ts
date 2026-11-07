@@ -178,6 +178,71 @@ describe('LocalDocumentRepository', () => {
     expect(report.value.skipped[0]?.reason).toMatch(/skipped/i);
   });
 
+  it('keeps a record it cannot read when saving something else', async () => {
+    // A project written by a newer build cannot be migrated here, but saving an unrelated project
+    // must not delete it: that would be silent data loss with no error and no undo.
+    const storage = new MemoryStorage();
+    const future = { id: 'doc-future', schemaVersion: 99, title: 'From a newer build' };
+    storage.set(
+      DOCUMENTS_KEY,
+      JSON.stringify({
+        schemaVersion: 1,
+        savedAt: '2026-01-01T00:00:00.000Z',
+        documents: [
+          { ...makeDocument('doc-kept', 'Readable'), schemaVersion: CURRENT_SCHEMA_VERSION },
+          future,
+        ],
+      }),
+    );
+    const repository = new LocalDocumentRepository(storage);
+
+    const before = await repository.list();
+    if (!before.ok) throw new Error('list should succeed');
+    expect(before.value.skipped).toHaveLength(1);
+
+    const saved = await repository.save({
+      ...makeDocument('doc-new', 'Fresh'),
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+    });
+    expect(saved.ok).toBe(true);
+
+    const raw = storage.get(DOCUMENTS_KEY);
+    if (!raw.ok || raw.value === null) throw new Error('storage should hold the envelope');
+    const stored = JSON.parse(raw.value) as {
+      documents: { id?: string; schemaVersion?: number }[];
+    };
+    expect(stored.documents.map((entry) => entry.id).sort()).toEqual([
+      'doc-future',
+      'doc-kept',
+      'doc-new',
+    ]);
+    expect(stored.documents.find((entry) => entry.id === 'doc-future')).toEqual(future);
+  });
+
+  it('keeps unreadable records when one document is deleted', async () => {
+    const storage = new MemoryStorage();
+    const future = { id: 'doc-future', schemaVersion: 99, title: 'From a newer build' };
+    storage.set(
+      DOCUMENTS_KEY,
+      JSON.stringify({
+        schemaVersion: 1,
+        savedAt: '2026-01-01T00:00:00.000Z',
+        documents: [
+          { ...makeDocument('doc-old', 'Delete me'), schemaVersion: CURRENT_SCHEMA_VERSION },
+          future,
+        ],
+      }),
+    );
+    const repository = new LocalDocumentRepository(storage);
+    const removed = await repository.remove(brand<'DocumentId'>('doc-old'));
+    expect(removed.ok).toBe(true);
+
+    const raw = storage.get(DOCUMENTS_KEY);
+    if (!raw.ok || raw.value === null) throw new Error('storage should hold the envelope');
+    const stored = JSON.parse(raw.value) as { documents: { id?: string }[] };
+    expect(stored.documents).toEqual([future]);
+  });
+
   it('reports a corrupt index instead of throwing', async () => {
     const storage = new MemoryStorage();
     storage.set(DOCUMENTS_KEY, '{ this is not json');
@@ -185,7 +250,15 @@ describe('LocalDocumentRepository', () => {
 
     const report = await repository.list();
     expect(report.ok).toBe(false);
-    if (!report.ok) expect(report.error.code).toBe('storage-corrupt');
+    if (!report.ok) {
+      expect(report.error.code).toBe('storage-corrupt');
+      // A person who cannot save anything needs the message to say how to recover, and to say that
+      // nothing was destroyed on the way to the error.
+      expect(report.error.message).toMatch(/nothing was deleted/i);
+      expect(report.error.message).toMatch(/settings/i);
+    }
+    // Reading must not rewrite the damaged value: it is the only copy of whatever was there.
+    expect(storage.get(DOCUMENTS_KEY)).toEqual(ok('{ this is not json'));
   });
 
   it('surfaces a full-storage failure when saving', async () => {

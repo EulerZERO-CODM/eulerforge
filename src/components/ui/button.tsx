@@ -17,7 +17,10 @@ const VARIANTS: Record<ButtonVariant, string> = {
   outline:
     'border border-line-strong bg-transparent text-fg hover:border-ink-600 hover:bg-ink-900 active:bg-ink-850 disabled:text-fg-subtle',
   quiet: 'bg-transparent text-fg-muted hover:bg-ink-850 hover:text-fg active:bg-ink-800',
-  danger: 'bg-rose-600 text-ink-50 hover:bg-rose-400 hover:text-ink-1000 active:bg-rose-600',
+  // Destructive actions carry light text at 12 px, so both states must clear 4.5:1 against it:
+  // rose-700 measures 5.76:1 and rose-800 7.35:1. Hover darkens rather than lightens — a lighter
+  // red would drop the label back under the threshold exactly while it is being pointed at.
+  danger: 'bg-rose-700 text-ink-50 hover:bg-rose-800 active:bg-rose-700',
   link: 'bg-transparent px-0 text-fg underline decoration-line-strong decoration-1 underline-offset-4 hover:decoration-accent',
 };
 
@@ -61,7 +64,11 @@ export function Button({
 }: ButtonProps) {
   const isDisabled = Boolean(disabled) || loading;
   const classes = cn(
-    'relative inline-flex items-center justify-center rounded-sm font-medium whitespace-nowrap transition-colors',
+    'relative inline-flex items-center justify-center rounded-sm font-medium transition-colors',
+    // A button that fills a column may be narrower than its own label on a phone. Its label wraps
+    // there instead of spilling out of the button and giving the page a sideways scrollbar; a
+    // shrink-wrapped button keeps its label on one line, because that is what a toolbar needs.
+    fullWidth ? 'text-center' : 'whitespace-nowrap',
     'disabled:cursor-not-allowed aria-disabled:cursor-not-allowed',
     VARIANTS[variant],
     SIZES[size],

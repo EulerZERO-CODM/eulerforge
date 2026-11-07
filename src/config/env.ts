@@ -92,4 +92,25 @@ export function parsePublicEnv(
   });
 }
 
-export const env: PublicEnv = parsePublicEnv();
+/**
+ * The `NEXT_PUBLIC_*` values, read through literal member expressions.
+ *
+ * Next.js inlines `process.env.NEXT_PUBLIC_X` in a client bundle by rewriting that exact member
+ * expression at build time. Passing `process.env` *as a value* (`parsePublicEnv(process.env)`)
+ * defeats that rewrite: the compiler cannot see which variables are wanted, so the browser gets a
+ * runtime `process.env` shim that contains none of them and every setting silently falls back to its
+ * default. That is how a preview build rendered `v0.1.0 · development` in the browser while the
+ * server rendered `v0.1.0 · preview` — a hydration mismatch on every page, invisible in CI because
+ * CI sets none of these variables and both sides then agreed on the default.
+ *
+ * These four lines are therefore load-bearing and must stay literal. `parsePublicEnv` keeps taking
+ * an explicit source so tests can validate arbitrary input.
+ */
+const buildTimeEnv: Record<string, string | undefined> = {
+  NEXT_PUBLIC_FORGE_SITE_URL: process.env.NEXT_PUBLIC_FORGE_SITE_URL,
+  NEXT_PUBLIC_FORGE_CATALOG_SOURCE: process.env.NEXT_PUBLIC_FORGE_CATALOG_SOURCE,
+  NEXT_PUBLIC_FORGE_TELEMETRY: process.env.NEXT_PUBLIC_FORGE_TELEMETRY,
+  NEXT_PUBLIC_FORGE_ENVIRONMENT: process.env.NEXT_PUBLIC_FORGE_ENVIRONMENT,
+};
+
+export const env: PublicEnv = parsePublicEnv(buildTimeEnv);

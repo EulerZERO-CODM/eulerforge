@@ -33,7 +33,13 @@ import {
   sceneOf,
   textLayer,
 } from '../../testing/layers';
-import { loadImageFixtures, nodeCanvasFactory, pixelCanvas, rgbaAt } from '../../testing/raster';
+import {
+  hostCanDrawText,
+  loadImageFixtures,
+  nodeCanvasFactory,
+  pixelCanvas,
+  rgbaAt,
+} from '../../testing/raster';
 
 const createCanvas = nodeCanvasFactory();
 
@@ -426,7 +432,7 @@ describe('exportRasterImage — real pixels', () => {
     expect(rgbaAt(decoded, 100, 100)[3]).toBe(255);
   });
 
-  it.skipIf(!hasFonts())('places text inside its frame at the requested scale', async () => {
+  it.skipIf(!hostCanDrawText())('places text inside its frame at the requested scale', async () => {
     const document = squareDocument({
       scene: sceneOf(
         textLayer('lyr-title', {
@@ -455,12 +461,6 @@ describe('exportRasterImage — real pixels', () => {
     expect(inkIn(decoded, 0, 0, 200, 40)).toBe(0);
   });
 });
-
-function hasFonts(): boolean {
-  const probe = pixelCanvas(40, 20);
-  probe.context.font = '16px sans-serif';
-  return probe.context.measureText('Forge').width > 0.5;
-}
 
 /** Counts pixels that differ from the document background inside a region. */
 function inkIn(

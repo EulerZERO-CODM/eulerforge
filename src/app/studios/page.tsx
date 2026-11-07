@@ -63,7 +63,7 @@ export default function StudiosPage() {
         />
         <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {available.map((studio) => (
-            <li key={studio.id} className="relative">
+            <li key={studio.id} className="relative min-w-0">
               <StudioCard studio={studio} className="h-full" />
             </li>
           ))}
@@ -102,7 +102,7 @@ export default function StudiosPage() {
             />
             <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {group.studios.map((studio) => (
-                <li key={studio.id} className="relative">
+                <li key={studio.id} className="relative min-w-0">
                   <StudioCard studio={studio} className="h-full" />
                 </li>
               ))}

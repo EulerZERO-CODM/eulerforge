@@ -11,6 +11,7 @@
 
 import { createRect, rectContainsPoint, type Point, type Rect } from './geometry';
 import type { Layer, LayerId, Scene } from './layer-types';
+import { hitTestPath } from '../vector/hit';
 import type { Size } from './types';
 
 /**
@@ -590,4 +591,46 @@ export function toDocumentPoint(
     x: (point.x - origin.x + scroll.x) / scale,
     y: (point.y - origin.y + scroll.y) / scale,
   };
+}
+
+/**
+ * Hit-test a scene, treating a vector layer as its outline rather than as its bounding box.
+ *
+ * `layerContainsPoint` is the right answer for a rectangle, a text box or a graphic: they fill their
+ * frames. A path does not. A star's frame is mostly empty space, and an icon's curve leaves the
+ * corners of its box untouched, so a frame test would make a click in one shape's corner select the
+ * layer above it and make a click on a thin stroke miss entirely. This test therefore asks the
+ * geometry: is the point inside the filled outline, or within the stroke's width?
+ *
+ * The scene's own rules are unchanged — topmost first, hidden layers skipped, locked layers optional.
+ */
+export function hitTestVectorScene(
+  scene: Scene,
+  point: Point,
+  options: { readonly includeLocked?: boolean } = {},
+): Layer | null {
+  for (let index = scene.layers.length - 1; index >= 0; index -= 1) {
+    const layer = scene.layers[index];
+    if (!layer || !layer.visible) continue;
+    if (layer.locked && options.includeLocked !== true) continue;
+    if (vectorLayerContainsPoint(layer, point)) return layer;
+  }
+  return null;
+}
+
+/** Whether a point is on a layer, using the geometry of a vector layer and the box of any other. */
+export function vectorLayerContainsPoint(layer: Layer, point: Point): boolean {
+  if (layer.type !== 'path') return layerContainsPoint(layer, point);
+  const { style, path } = layer.vector;
+  const fills = style.fill !== null && style.fillOpacity > 0;
+  const strokes = style.stroke !== null && style.strokeWidth > 0 && style.strokeOpacity > 0;
+  // An invisible layer is not a target: a path with no fill and no stroke cannot be clicked, which
+  // is why the empty corner of its frame falls through to whatever is behind it.
+  if (!fills && !strokes) return false;
+  return hitTestPath(path, point, {
+    fill: fills,
+    stroke: strokes,
+    strokeWidth: style.strokeWidth,
+    fillRule: style.fillRule,
+  }).hit;
 }

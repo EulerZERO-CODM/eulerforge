@@ -79,3 +79,26 @@ export async function loadImageFixtures(
     return image ? { image } : { error: 'no fixture registered for this source' };
   };
 }
+
+/**
+ * Whether this host can actually *draw* text, not merely measure it.
+ *
+ * `measureText()` returns a plausible width even where no glyph can be rasterised — a Linux container
+ * with an empty font directory does exactly that, and the CI runner image has already changed under
+ * this suite once. Measuring is therefore not evidence that text will appear, and a test about where
+ * text is drawn, or about text fitting its frame, is meaningless on a host that cannot draw it. Such
+ * tests skip on the capability rather than fail on it; real browser text rendering is verified in
+ * `e2e/text-wrapping.spec.ts`, where fonts exist.
+ */
+export function hostCanDrawText(): boolean {
+  const probe = pixelCanvas(48, 24);
+  probe.context.fillStyle = '#ffffff';
+  probe.context.font = '20px sans-serif';
+  probe.context.fillText('Hg', 2, 20);
+  const { data } = probe.context.getImageData(0, 0, 48, 24);
+  // Alpha channel only: any painted pixel means a glyph was rasterised.
+  for (let index = 3; index < data.length; index += 4) {
+    if (data[index] !== 0) return true;
+  }
+  return false;
+}

@@ -1,6 +1,7 @@
 'use client';
 
 import type { Scene } from '../../core/documents/layer-types';
+import type { ReactNode } from 'react';
 import type { ReorderTarget } from '../../core/documents/layer-operations';
 import {
   deleteLayersCommand,
@@ -11,6 +12,7 @@ import {
   setLayerVisibilityCommand,
 } from '../../core/editor/commands';
 import { isSelected, type Selection } from '../../core/editor/selection';
+import { InterchangePanel } from '../illustration/interchange-panel';
 import { ExportPanel } from './export-panel';
 import { HistoryPanel } from './history-panel';
 import { InspectorPanel } from './inspector-panel';
@@ -38,6 +40,7 @@ export function DocumentAside({
   canRedo,
   onUndo,
   onRedo,
+  assistant,
 }: {
   readonly api: WorkspaceApi;
   readonly scene: Scene;
@@ -49,12 +52,15 @@ export function DocumentAside({
   readonly canRedo: boolean;
   readonly onUndo: () => void;
   readonly onRedo: () => void;
+  /** An optional panel at the top of the inspector, used for the assistant. */
+  readonly assistant?: ReactNode;
 }) {
   return (
     <aside
       aria-label="Document inspector"
       className="forge-scroll min-w-0 space-y-7 lg:sticky lg:top-[4.25rem] lg:max-h-[calc(100dvh-5.5rem)] lg:overflow-y-auto lg:pr-1"
     >
+      {assistant}
       <LayerTree
         scene={scene}
         selection={selection}
@@ -99,6 +105,10 @@ export function DocumentAside({
 
       <div className="border-line border-t pt-4">
         <ExportPanel api={api} images={images} />
+      </div>
+
+      <div className="border-line border-t pt-4">
+        <InterchangePanel api={api} direction="to-vector" selectedIds={selection.map(String)} />
       </div>
 
       <div className="border-line border-t pt-4">

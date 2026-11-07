@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { parseProjectFile, serialiseProjectFile } from '../export/project-file';
 import { createDocument } from './factories';
-import { migrateDocument } from './migrations';
+import { CURRENT_SCHEMA_VERSION, migrateDocument } from './migrations';
 import { forgeDocumentSchema } from './schema';
 import {
   attributionRecord,
@@ -141,7 +141,7 @@ describe('layer persistence', () => {
 
     expect(migrated.ok).toBe(true);
     if (!migrated.ok) return;
-    expect(migrated.value.schemaVersion).toBe(2);
+    expect(migrated.value.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(migrated.value.scene.layers).toEqual([]);
     expect(migrated.value.attribution).toEqual([]);
     // The migration must produce a document the current schema accepts, not just "something".

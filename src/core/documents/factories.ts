@@ -11,7 +11,8 @@ import { brand } from '../types/brand';
 import type { PartialProps } from '../types/optional';
 import { freezeDocument } from './freeze';
 import { emptyScene } from './layer-operations';
-import type { AttributionRecord, Scene } from './layer-types';
+import type { Scene } from './layer-types';
+import { defaultStudioPayload } from './payload';
 import { createDocumentInputSchema, formatIssues } from './schema';
 import { CURRENT_SCHEMA_VERSION } from './migrations';
 import type { Canvas, CreateDocumentInput, ForgeDocument, GuideSettings } from './types';
@@ -98,7 +99,7 @@ export function createDocument(
     guides: resolveGuides(value.guides),
     palette: value.palette ?? [],
     scene: resolveScene(value.scene),
-    attribution: [] as readonly AttributionRecord[],
+    attribution: value.attribution ?? [],
     metadata: {
       authorLabel: '',
       tags: value.tags ?? [],
@@ -106,6 +107,8 @@ export function createDocument(
     },
     status: 'draft',
     revision: 1,
+    studioPayload: value.studioPayload ?? defaultStudioPayload(value.documentTypeId),
+    lineage: value.lineage ?? null,
     createdAt: timestamp,
     updatedAt: timestamp,
   };

@@ -97,11 +97,16 @@ export function ProjectCard({
       </div>
 
       <div className="border-line-subtle mt-auto flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2.5">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge tone={document.status === 'archived' ? 'planned' : 'neutral'}>
             {DOCUMENT_STATUS_LABELS[document.status]}
           </Badge>
           <span className="text-2xs text-fg-subtle">{studio?.name ?? document.studioId}</span>
+          {/* Carried work says where it came from, so a design, its retouch and its animation read
+              as one line of work in the library instead of three unrelated projects. */}
+          {document.lineage ? (
+            <span className="text-2xs text-fg-subtle">from “{document.lineage.sourceTitle}”</span>
+          ) : null}
         </div>
         <p className="text-2xs text-fg-subtle">Edited {formatRelative(document.updatedAt)}</p>
       </div>

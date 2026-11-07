@@ -141,8 +141,15 @@ export function DataList({
           key={item.label}
           className="border-line-subtle/60 flex items-baseline justify-between gap-4 border-b pb-2"
         >
-          <dt className="text-fg-subtle text-xs">{item.label}</dt>
-          <dd className={cn('text-fg text-right text-base', item.mono && 'forge-numeric')}>
+          <dt className="text-fg-subtle shrink-0 text-xs">{item.label}</dt>
+          {/* A path or an identifier has no spaces to break at; wrapping anywhere keeps a narrow
+            screen from scrolling sideways to reach the end of one long value. */}
+          <dd
+            className={cn(
+              'text-fg min-w-0 text-right text-base wrap-anywhere',
+              item.mono && 'forge-numeric',
+            )}
+          >
             {item.value}
           </dd>
         </div>

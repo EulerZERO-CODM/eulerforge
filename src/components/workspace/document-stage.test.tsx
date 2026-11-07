@@ -61,6 +61,7 @@ function stageElement(canvas: Canvas, services?: TestForgeServices): React.React
     retry: () => {
       /* nothing to retry in this fixture */
     },
+    revision: 0,
   };
 
   function Harness() {

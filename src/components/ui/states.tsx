@@ -16,6 +16,7 @@ export function EmptyState({
   actions,
   className,
   size = 'md',
+  titleAs: Title = 'p',
 }: {
   readonly icon?: ReactNode | undefined;
   readonly title: string;
@@ -23,6 +24,12 @@ export function EmptyState({
   readonly actions?: ReactNode | undefined;
   readonly className?: string | undefined;
   readonly size?: 'sm' | 'md';
+  /**
+   * Heading level for the title. An empty state inside a panel or a list is a paragraph; a screen
+   * that exists *only* as a state — a 404, an unusable share link — needs a real `h1`, otherwise the
+   * page has no heading at all for keyboard and screen-reader navigation.
+   */
+  readonly titleAs?: 'p' | 'h1' | 'h2';
 }) {
   return (
     <div
@@ -41,7 +48,7 @@ export function EmptyState({
         </span>
       ) : null}
       <div className="space-y-1">
-        <p className="text-md text-fg font-medium">{title}</p>
+        <Title className="text-md text-fg font-medium">{title}</Title>
         <p className="text-fg-muted mx-auto max-w-md text-sm">{description}</p>
       </div>
       {actions ? (
@@ -109,16 +116,19 @@ export function ErrorState({
   detail,
   action,
   className,
+  titleAs: Title = 'p',
 }: {
   readonly title?: string | undefined;
   readonly description: string;
   readonly detail?: string | undefined;
   readonly action?: ReactNode | undefined;
   readonly className?: string | undefined;
+  /** A full-screen error is the heading of the page; an inline one is not. See `EmptyState`. */
+  readonly titleAs?: 'p' | 'h1' | 'h2';
 }) {
   return (
     <div className={cn('rounded-md border border-rose-600/40 bg-rose-600/6 px-4 py-4', className)}>
-      <p className="text-md text-fg font-medium">{title}</p>
+      <Title className="text-md text-fg font-medium">{title}</Title>
       <p className="text-fg-muted mt-1 text-sm">{description}</p>
       {detail ? (
         <p className="forge-scroll border-line bg-ink-1000/60 text-fg-subtle mt-2 max-h-32 overflow-auto rounded-sm border px-2.5 py-2 text-xs">

@@ -113,7 +113,10 @@ export default function PlatformStatusPage() {
                           </p>
                           <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
                             {capability.verification.map((evidence) => (
-                              <li key={evidence} className="forge-numeric text-2xs text-fg-muted">
+                              <li
+                                key={evidence}
+                                className="forge-numeric text-2xs text-fg-muted wrap-anywhere"
+                              >
                                 {evidence}
                               </li>
                             ))}

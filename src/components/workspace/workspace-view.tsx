@@ -3,10 +3,11 @@
 import { ArrowLeft, CircleAlert, Redo2, Undo2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 
 import { EMPTY_SELECTION, type Selection } from '../../core/editor/selection';
 import type { Scene } from '../../core/documents/layer-types';
+import { derivedWorks } from '../../core/handoff';
 import { getStudio } from '../../core/studios';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -20,7 +21,13 @@ import { storageBadge } from '../../state/storage-status';
 import type { Result } from '../../core/result';
 import type { CommitOptions, DocumentPatch } from '../../state/document-session';
 import type { SceneCommand } from '../../core/editor/commands';
+import { AssistantPanel } from '../assistant/assistant-panel';
+import { IllustrationWorkspace, isVectorDocument } from '../illustration/illustration-workspace';
+import { MotionWorkspace, isMotionDocument } from '../motion/motion-workspace';
+import { PhotoWorkspace, isPhotoDocument } from '../photo/photo-workspace';
+import { VideoWorkspace, isVideoDocument } from '../video/video-workspace';
 import { ContextHelp } from './context-help';
+import { HandoffPanel } from './handoff-panel';
 import { DocumentAside } from './document-aside';
 import { DocumentStage } from './document-stage';
 import { SaveState } from './history-panel';
@@ -132,6 +139,7 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
     return (
       <div className="mx-auto max-w-3xl p-4 sm:p-6">
         <ErrorState
+          titleAs="h1"
           title="The project library could not be read"
           description={library.error?.message ?? 'Local storage is unavailable in this browser.'}
           detail={library.error?.detail}
@@ -155,6 +163,9 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
       <div className="mx-auto max-w-3xl p-4 sm:p-6">
         <EmptyState
           icon={<ArrowLeft aria-hidden />}
+          // The address asked for a specific project and that project is gone: this is the screen,
+          // so it carries the heading. Without it the page had no `h1` at all.
+          titleAs="h1"
           title="Project not found"
           description="This project is not in this browser's storage. It may have been deleted, or it may live in a different browser profile on another device."
           actions={
@@ -174,7 +185,20 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
 
   const doc = state.document;
   const studio = getStudio(doc.studioId);
+  // The library is the index: lineage is stored on the copy, so the projects this one was carried
+  // into are the ones whose lineage points back here.
+  const derived = derivedWorks(doc, library.documents);
   const api: WorkspaceApi = { doc, commit, run, undo, redo };
+  // The document type decides the editing surface: a vector artboard gets the Illustration Studio,
+  // an image gets Photo Studio, everything else keeps the design workspace. The shell, the session,
+  // undo and persistence are shared, so no surface has its own private editing path.
+  const vectorDocument = isVectorDocument(String(doc.documentTypeId));
+  const photoDocument = isPhotoDocument(String(doc.documentTypeId));
+  const photoPayload = doc.studioPayload?.kind === 'photo' ? doc.studioPayload : null;
+  const motionDocument = isMotionDocument(String(doc.documentTypeId));
+  const motionPayload = doc.studioPayload?.kind === 'motion' ? doc.studioPayload : null;
+  const videoDocument = isVideoDocument(String(doc.documentTypeId));
+  const videoPayload = doc.studioPayload?.kind === 'video' ? doc.studioPayload : null;
 
   return (
     <div className="mx-auto max-w-[100rem] space-y-5 p-4 sm:p-6">
@@ -192,6 +216,42 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
             />
             <span aria-hidden>·</span>
             <span className="forge-numeric">revision {doc.revision}</span>
+            {doc.lineage ? (
+              <>
+                <span aria-hidden>·</span>
+                {/* The link is what makes a carried project traceable back to the work it came
+                    from. If the source was deleted the workspace shows its own not-found state,
+                    which is the honest answer rather than a dead end styled as a link. */}
+                <Link
+                  href={`/workspace/${doc.lineage.sourceDocumentId}`}
+                  className="text-fg-muted hover:text-fg decoration-line-strong underline decoration-1 underline-offset-4"
+                >
+                  Carried from “{doc.lineage.sourceTitle}”
+                </Link>
+              </>
+            ) : null}
+            {derived.length > 0 ? (
+              <>
+                <span aria-hidden>·</span>
+                {/* The other direction of the same relation. Without it, a design would know
+                    nothing about the projects it started, and the only way to find the retouch of
+                    this poster would be to scan the whole library. */}
+                <span>
+                  Carried into{' '}
+                  {derived.map((child, index) => (
+                    <Fragment key={child.id}>
+                      {index > 0 ? ', ' : null}
+                      <Link
+                        href={`/workspace/${child.id}`}
+                        className="text-fg-muted hover:text-fg decoration-line-strong underline decoration-1 underline-offset-4"
+                      >
+                        “{child.title}”
+                      </Link>
+                    </Fragment>
+                  ))}
+                </span>
+              </>
+            ) : null}
             <span aria-hidden>·</span>
             {/* Three states, three labels: see `storageBadge()` in the state layer. */}
             <Badge tone={badge.warning ? 'warning' : 'neutral'}>{badge.label}</Badge>
@@ -202,6 +262,9 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
             <Button asChild variant="quiet" size="md" iconLeft={<ArrowLeft aria-hidden />}>
               <Link href="/projects">Projects</Link>
             </Button>
+            {/* The way out of this studio and into the next one. Renders nothing for documents
+                whose work no other studio can yet take. */}
+            <HandoffPanel source={doc} resolveImage={images.resolver} />
             <IconButton label="Undo (Cmd/Ctrl + Z)" disabled={!state.canUndo} onClick={undo}>
               <Undo2 aria-hidden />
             </IconButton>
@@ -261,22 +324,77 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
         </InlineNote>
       ) : null}
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_26rem]">
-        <div className="min-w-0 space-y-5">
-          <DocumentStage
+      {motionDocument ? (
+        motionPayload ? (
+          <MotionWorkspace
             api={api}
-            selection={selection}
-            onSelectionChange={setSelection}
-            images={images}
-            snapping={snapping}
-            onSnappingChange={setSnapping}
-            showGuides={showGuides}
-            onGuidesChange={setShowGuides}
+            payload={motionPayload}
+            history={state.history}
+            canUndo={state.canUndo}
+            canRedo={state.canRedo}
+            onUndo={undo}
+            onRedo={redo}
           />
-          <ContextHelp studioId={doc.studioId} />
-        </div>
-
-        <DocumentAside
+        ) : (
+          <InlineNote
+            tone="danger"
+            icon={<CircleAlert aria-hidden />}
+            title="This motion project is missing its animation data"
+          >
+            <p>
+              The document has no motion payload, so there is nothing to play. Export the project
+              file and reopen it, or create a new motion project.
+            </p>
+          </InlineNote>
+        )
+      ) : photoDocument ? (
+        photoPayload ? (
+          <PhotoWorkspace
+            api={api}
+            payload={photoPayload}
+            history={state.history}
+            canUndo={state.canUndo}
+            canRedo={state.canRedo}
+            onUndo={undo}
+            onRedo={redo}
+          />
+        ) : (
+          <InlineNote
+            tone="danger"
+            icon={<CircleAlert aria-hidden />}
+            title="This photo project is missing its image data"
+          >
+            <p>
+              The document has no photo payload, so there is nothing to edit. Export the project
+              file and reopen it, or create a new photo project.
+            </p>
+          </InlineNote>
+        )
+      ) : videoDocument ? (
+        videoPayload ? (
+          <VideoWorkspace
+            api={api}
+            payload={videoPayload}
+            history={state.history}
+            canUndo={state.canUndo}
+            canRedo={state.canRedo}
+            onUndo={undo}
+            onRedo={redo}
+          />
+        ) : (
+          <InlineNote
+            tone="danger"
+            icon={<CircleAlert aria-hidden />}
+            title="This video project is missing its timeline"
+          >
+            <p>
+              The document has no video payload, so there is nothing to play. Export the project
+              file and reopen it, or create a new video project.
+            </p>
+          </InlineNote>
+        )
+      ) : vectorDocument ? (
+        <IllustrationWorkspace
           api={api}
           scene={doc.scene}
           images={images}
@@ -288,7 +406,45 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
           onUndo={undo}
           onRedo={redo}
         />
-      </div>
+      ) : (
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_26rem]">
+          <div className="min-w-0 space-y-5">
+            <DocumentStage
+              api={api}
+              selection={selection}
+              onSelectionChange={setSelection}
+              images={images}
+              snapping={snapping}
+              onSnappingChange={setSnapping}
+              showGuides={showGuides}
+              onGuidesChange={setShowGuides}
+            />
+            <ContextHelp studioId={doc.studioId} />
+          </div>
+
+          <DocumentAside
+            assistant={
+              <AssistantPanel
+                api={api}
+                studio="design"
+                selection={selection}
+                onUndo={undo}
+                canUndo={state.canUndo}
+              />
+            }
+            api={api}
+            scene={doc.scene}
+            images={images}
+            selection={selection}
+            onSelectionChange={setSelection}
+            history={state.history}
+            canUndo={state.canUndo}
+            canRedo={state.canRedo}
+            onUndo={undo}
+            onRedo={redo}
+          />
+        </div>
+      )}
 
       <ConfirmDialog
         open={deleteOpen}

@@ -65,7 +65,24 @@ The parts every studio must share. Each module is small, pure where possible, an
   that satisfies `PainterContext`. `text-layout.ts` and `measure.ts` do wrapping and alignment
   through an injected measure function. Nothing here imports React or touches a DOM: the browser
   canvas adapter lives in `src/lib/browser/canvas.ts` and is passed in as a factory (ADR-0016,
-  ADR-0019).
+  ADR-0019). Path fills and strokes may be a solid colour, a gradient or a motif pattern; the painter
+  builds a real `CanvasGradient` from the same resolved geometry the SVG writer receives (ADR-0028).
+- **`vector/`** — the framework-free path kernel: an immutable path model (contours of nodes with
+  Bezier handles), bounds, transforms, flattening, arc-length sampling, fill/stroke hit-testing,
+  node/handle operations, pen construction, shape generation, path-data serialisation, validation,
+  and the boolean operations that go through `polygon-clipping` (ADR-0020, ADR-0021). `paint.ts`
+  describes solid, gradient and pattern paint as fractions of a shape's bounds and resolves it into
+  absolute coordinates for the painter and the writer, so neither renderer owns a second definition
+  (ADR-0028). One module, `tolerance.ts`, owns every numeric epsilon, and every fallible operation
+  returns a `Result`.
+- **`svg/`** — the SVG boundary: a deterministic serializer, a defended importer, the artwork model
+  that sits between a scene and a file, the naive serializer the compact one is measured against, a
+  stored-mode zip writer and the icon-set builder. It consumes the path model and never the editor.
+  Gradients and patterns are written once into `<defs>` and referenced by positional id from the
+  shapes; the importer resolves only same-document references and converts absolute coordinates back
+  to bounds-relative fractions. The icon-set builder exports the layers it is given — the panel passes
+  exactly the selection — reports the ones it cannot write, and collects paint definitions once for the
+  whole sprite so every `url(#…)` in it resolves.
 - **`editor/`** — the interaction model: `selection.ts` (what is selected, never persisted),
   `commands.ts` (each edit as a label plus the patch that performs it) and `gesture.ts` (move and
   resize previews in document coordinates, resolved once on release, with snapping).
@@ -162,6 +179,178 @@ Three rules hold this together:
    `buildRenderPlan(document)` and both paint through `paintPlan`, so "what you see is what you
    export" is a property of the code rather than a promise (ADR-0016).
 
+### The vector editing pipeline
+
+The Illustration Studio reuses that pipeline end to end, with the path kernel in place of the frame
+model:
+
+```
+pointer / keyboard on the vector stage (components/illustration/vector-stage.tsx)
+        ↓ a gesture or a discrete action is resolved into one editor/vector-commands command
+        ↓ each command re-derives the path layer's frame from its geometry
+WorkspaceApi.run(command) → DocumentSession.commit(label, patch)   (same validation, same history)
+        ↓
+core/render/plan.ts paints path layers through the same painter the Design Studio uses
+core/svg/from-scene.ts turns the same geometry into an SVG file
+core/documents/interchange.ts converts the same layers for the other studio
+```
+
+Paint is part of that one geometry: a layer's style carries an optional gradient or pattern, the
+painter resolves it against the shape's bounds, and the SVG writer resolves the same fractions against
+the same bounds, so a change of fill shows up identically on the artboard and in the file.
+
+Two boundaries are deliberate. The kernel never learns about SVG syntax or React (ADR-0020), so the
+editor, the painter and the exporter are three consumers of one geometry. And a path layer's frame is
+derived from its nodes rather than stored independently, so a moved node and a transformed box cannot
+disagree; `setLayerFramesCommand` converts a box transform into a path transform.
+
+### The raster editing pipeline
+
+Photo Studio keeps the same command/history/document path and swaps the renderer:
+
+```
+file input or drop (components/photo/photo-import-panel.tsx)
+        ↓ lib/browser/photo-engine.ts preparePhoto: decode, refusal for SVG, 2048 px capped copy
+        ↓ setPhotoSourceCommand — one history entry, the source bytes go into studioPayload
+components/photo/*  →  core/photo/commands.ts  →  WorkspaceApi.run → the same DocumentSession
+        ↓
+core/photo/pipeline.ts (applyPhotoPipeline) is the definition of every adjustment
+core/photo/range.ts evaluates stored luminance/colour ranges against the source bytes  (ADR-0029)
+        ↓ GPU: one fragment pass per adjustment      CPU: the same function, per pixel
+lib/browser/photo-engine.ts renderPhoto → canvas   → export re-renders at the stored size
+```
+
+The mask is rasterised to one strength byte per pixel before either renderer sees it: painted
+strokes and range selections are unioned, then `inverted` is applied once, and these consumers
+cannot tell which half of the mask came from which source. Ranges store parameters rather than a
+bitmap, so they re-evaluate deterministically at preview and export sizes and are part of document
+history like any other edit.
+
+Three boundaries hold here too. The payload is document state and is validated by the same Zod
+schema as the rest of the document, so a photo project is saved, migrated, reopened and exported
+through the shared path rather than a side channel. The pipeline in `src/core/photo` is pure — it
+takes and returns pixels and never touches a canvas — which is why the shader and the CPU reference
+can be compared byte for byte in a test. And the tool, brush radius, hardness, clone source and
+"show original" toggle are transient (ADR-0017): they configure the next stroke, so they never
+reach the document, the history or storage.
+
+### The motion evaluation pipeline
+
+Motion Studio is the first studio whose output is a *time series* rather than one picture, so the
+pipeline has one extra boundary: the clock.
+
+```
+playback clock (components/motion/use-motion-playback.ts) ─┐
+                                                           ├─ t ─→ core/motion/evaluate.ts
+export plan (core/motion/export.ts: times[]) ──────────────┘         │
+                                                                     ▼
+                                       evaluateDocumentAt(document, t) → a ForgeDocument
+                                                                     │
+                                   buildRenderPlan + paintPlan (the Design renderer)
+                                                                     │
+                            preview canvas                     exportRasterImage → PNG → zip
+```
+
+The evaluator is a pure function of `(document, t)`: no clock, no randomness, no DOM. That is what
+makes the preview and the export agree, and it is why the test can assert an exported frame against
+the preview canvas pixel for pixel rather than approximately. The playhead itself is transient
+component state (ADR-0017); the composition's length and frame rate are document state and travel
+through the normal command path.
+
+### The media pipeline
+
+Video Studio is the first studio whose source material is too large to live in the document. That
+forces two boundaries the other studios do not need: a byte store, and a decoder.
+
+```
+File (components/video/media-bin.tsx)
+   ↓ lib/browser/media-import.ts probeMediaFile — decode metadata, refuse what this browser cannot play
+   ↓ core/video/media-store.ts MediaStore.put — bytes → IndexedDB (`lib/browser/media-store.ts`)
+   ↓ registerMediaCommand — metadata only → studioPayload.media          (one history entry)
+   ↓ placeClipCommand     — a clip window → studioPayload.tracks[].clips (one history entry)
+
+playback:  core/video/evaluate.ts @ t → lib/browser/video-engine.ts
+           one <video>/<audio> element per media file, played by the browser's decoder
+           paintVideoFrame: background → letterboxed clips → titles → canvas
+
+export:    planVideoExport (pure) → seek every clip to its source time → PNG → zip + manifest
+           planVideoCapture       → play in real time → MediaRecorder(canvas + audio graph) → WebM
+```
+
+Three things are deliberately *not* in the document: the bytes (IndexedDB), the decoded elements
+(the pool) and the playhead (component state, ADR-0017). The document holds only what must survive a
+save: media metadata, clip windows and the composition's length and frame rate. That is why a video
+project stays a small JSON object, and why reopening it on another machine honestly reports the
+missing files instead of pretending to have them.
+
+### The optional server boundary
+
+Local-first is not a phase this app is waiting to leave; it is the default, and the server is a
+second repository behind the same boundary (ADR-0027).
+
+```
+src/app/api/**/route.ts        the HTTP surface (real Request → real Response)
+        ↓
+src/server/runtime.ts          one ForgeStore per data directory
+        ↓
+src/server/store.ts            accounts, sessions, documents, share links; JSON files, one queue
+        ↓
+forgeDocumentSchema            the platform's own schema: the server cannot store what the app cannot open
+
+src/components/account/account-panel.tsx
+        ↓ lib/browser/remote-client.ts   (fetch; every response is untrusted and parsed)
+        ↓ core/account/sync.ts           (pure: upload / download / in-sync / conflict, with reasons)
+        ↓ DocumentsStore.update          (a downloaded document goes through the same local path)
+```
+
+Four rules hold the boundary:
+
+1. **The server is optional and absent by default.** With no server running, `fetchSession` reports
+   `unavailable` and the panel says so; every studio keeps working against local storage.
+2. **Nothing secret reaches the client.** The session is an HttpOnly cookie; the only token the
+   browser ever sees is a share-link token, shown once.
+3. **Every response is untrusted.** `remote-client` parses shapes rather than casting them, and a
+   downloaded document is migrated and validated before it is stored locally.
+4. **Ownership is enforced in the store, not the UI.** Another account's document, share or session
+   resolves to `not-found`; the API does not confirm that an id exists.
+5. **"Nobody is signed in" and "accounts cannot work here" are different answers.** `requireAccount`
+   returns a session, `anonymous` or `unavailable`; the first two answer `401`, the third answers
+   `503` with the operator's sentence. A serverless deployment that refuses its store therefore never
+   tells a visitor to sign in to something that can never accept a sign-in.
+
+### The assistant is a planner, an executor and a boundary
+
+The assistant is not a chat panel bolted onto the studios. It is three separate things, and the
+separation is what makes it safe (ADR-0031):
+
+```
+goal ──▶ planner                      a plan: typed tool calls, never code
+           native planner (no network, deterministic)
+           or POST /api/assistant/plan (server-side model, validated against the registry)
+        ↓
+      assistant/executor.ts            runs the plan through the studio's own commands
+        ↓ commit → WorkspaceApi.run   the same history entry a panel click produces
+        ↓ verify → read the document back after every step
+        ↓ checkpoint → localStorage keyed by document id, step index after each commit
+```
+
+Four rules hold the assistant boundary:
+
+1. **A plan is data, not code.** A step names a tool from `assistant/registry.ts` and arguments
+   validated against that tool's schema; there is no eval, no generated script and no path to a file
+   system. An unknown tool, another studio's tool, an unavailable tool or an out-of-range argument
+   rejects the whole plan.
+2. **Planning is not execution.** The panel shows the plan before anything runs. Execution goes
+   through the workspace's ordinary command API, so every step is undoable and every step is verified
+   by reading the document back; a commit that claims success without changing the document is
+   reported as a failure.
+3. **The provider key stays on the server.** `ASSISTANT_PROVIDER_*` is read only in the route, the
+   route returns a plan plus a model label, and the disclosure endpoint reports whether a model is
+   configured without naming a URL or a key. With no provider, the native planner is the only planner
+   and the panel says so.
+4. **Interruption is recoverable.** A step commits before its checkpoint advances, so resuming offers
+   only the steps that did not run; a checkpoint from another document is not offered at all.
+
 ## Data flow of a real edit
 
 ```
@@ -231,6 +420,12 @@ tests use too. The same suite decodes the artboard's own canvas pixels, so the p
 snapping guides occupy and the words each line of a text layer lands on are asserted as well, at 25%,
 100% and 200% zoom (`e2e/snapping.spec.ts`, `e2e/text-wrapping.spec.ts`), and a session started with
 browser storage refused is driven through the whole creation-and-edit flow
-(`e2e/storage-restricted.spec.ts`). What even that cannot reach — other browser engines, the
+(`e2e/storage-restricted.spec.ts`). Phase 3 adds `e2e/illustration.spec.ts`, which creates a vector
+document through the studio's real entry point, draws with the pen, edits nodes and Bezier handles,
+performs a boolean operation in the browser (the regression that unit tests could not see: the
+dependency resolves differently under the browser bundler), imports hostile SVG, downloads an SVG and
+re-imports its own bytes, downloads an icon-set zip from a subset of the selected layers and checks its exact entry list and
+manifest (with no unselected or hidden layer inside), and converts
+artwork between the Design and Illustration documents in both directions. What even that cannot reach — other browser engines, the
 responsiveness of a 30-layer document, font metrics that would only hold on one machine — is listed as
 a manual check in `docs/ROADMAP.md` rather than quietly assumed.

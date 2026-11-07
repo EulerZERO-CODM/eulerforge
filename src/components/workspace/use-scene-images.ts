@@ -28,6 +28,14 @@ export type SceneImages = {
   readonly errors: readonly string[];
   /** Re-attempts every failed source; used by the "reload graphics" action. */
   readonly retry: () => void;
+  /**
+   * Increments every time a source settles.
+   *
+   * The resolver is stable by design (it reads a ref), so a paint effect that depends on it alone
+   * never re-runs when a graphic finishes decoding — the artwork would appear only after the next
+   * unrelated edit. Effects that paint depend on this number instead.
+   */
+  readonly revision: number;
 };
 
 export function useSceneImages(scene: Scene): SceneImages {
@@ -35,6 +43,7 @@ export function useSceneImages(scene: Scene): SceneImages {
   // because the interface does render it. Both are only written from load callbacks.
   const loaded = useRef(new Map<string, HTMLImageElement>());
   const [status, setStatus] = useState<ReadonlyMap<string, ImageStatus>>(new Map());
+  const [revision, setRevision] = useState(0);
 
   const hrefs = useMemo(() => {
     const seen = new Set<string>();
@@ -56,10 +65,12 @@ export function useSceneImages(scene: Scene): SceneImages {
         if (cancelled) return;
         loaded.current.set(href, image);
         setStatus((previous) => new Map(previous).set(href, 'ready'));
+        setRevision((value) => value + 1);
       };
       image.onerror = () => {
         if (cancelled) return;
         setStatus((previous) => new Map(previous).set(href, 'error'));
+        setRevision((value) => value + 1);
       };
       image.src = href;
     }
@@ -92,6 +103,7 @@ export function useSceneImages(scene: Scene): SceneImages {
   const retry = useCallback(() => {
     for (const href of hrefs) loaded.current.delete(href);
     setStatus(new Map());
+    setRevision((value) => value + 1);
   }, [hrefs]);
 
   return {
@@ -100,5 +112,6 @@ export function useSceneImages(scene: Scene): SceneImages {
     loading: hrefs.some((href) => currentStatus.get(href) === 'loading'),
     errors,
     retry,
+    revision,
   };
 }
