@@ -3,10 +3,11 @@
 import { ArrowLeft, CircleAlert, Redo2, Undo2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 
 import { EMPTY_SELECTION, type Selection } from '../../core/editor/selection';
 import type { Scene } from '../../core/documents/layer-types';
+import { derivedWorks } from '../../core/handoff';
 import { getStudio } from '../../core/studios';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -184,6 +185,9 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
 
   const doc = state.document;
   const studio = getStudio(doc.studioId);
+  // The library is the index: lineage is stored on the copy, so the projects this one was carried
+  // into are the ones whose lineage points back here.
+  const derived = derivedWorks(doc, library.documents);
   const api: WorkspaceApi = { doc, commit, run, undo, redo };
   // The document type decides the editing surface: a vector artboard gets the Illustration Studio,
   // an image gets Photo Studio, everything else keeps the design workspace. The shell, the session,
@@ -224,6 +228,28 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
                 >
                   Carried from “{doc.lineage.sourceTitle}”
                 </Link>
+              </>
+            ) : null}
+            {derived.length > 0 ? (
+              <>
+                <span aria-hidden>·</span>
+                {/* The other direction of the same relation. Without it, a design would know
+                    nothing about the projects it started, and the only way to find the retouch of
+                    this poster would be to scan the whole library. */}
+                <span>
+                  Carried into{' '}
+                  {derived.map((child, index) => (
+                    <Fragment key={child.id}>
+                      {index > 0 ? ', ' : null}
+                      <Link
+                        href={`/workspace/${child.id}`}
+                        className="text-fg-muted hover:text-fg decoration-line-strong underline decoration-1 underline-offset-4"
+                      >
+                        “{child.title}”
+                      </Link>
+                    </Fragment>
+                  ))}
+                </span>
               </>
             ) : null}
             <span aria-hidden>·</span>

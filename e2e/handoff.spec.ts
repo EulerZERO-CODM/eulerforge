@@ -187,6 +187,13 @@ test.describe('carrying work between studios', () => {
     const source = await documentById(page, designId);
     expect(source.scene.layers).toEqual(design.scene.layers);
     expect(source.lineage).toBeNull();
+
+    // Lineage runs both ways: the source names the project it started, so "where did this go?"
+    // is answerable without scanning the library for a card that happens to say so.
+    const forward = page.getByRole('link', { name: '“Launch poster — motion”' });
+    await expect(forward).toBeVisible();
+    await forward.click();
+    await expect(page).toHaveURL(new RegExp(`/workspace/${motionId}$`));
   });
 
   test('renders the artboard into Photo and reads as one line of work in the library', async ({
@@ -237,5 +244,9 @@ test.describe('carrying work between studios', () => {
     await expect(cards).toHaveCount(2);
     await expect(cards.filter({ hasText: 'from “Launch poster”' })).toHaveCount(1);
     await expect(cards.filter({ hasText: 'Launch poster — retouch' })).toHaveCount(1);
+
+    // ...and the library's label is the same relation the source project shows.
+    await page.goto(`/workspace/${designId}`);
+    await expect(page.getByRole('link', { name: '“Launch poster — retouch”' })).toBeVisible();
   });
 });

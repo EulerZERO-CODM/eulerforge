@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   carriedTitle,
+  derivedWorks,
   handoffRasterScale,
   handoffRasterSize,
   handoffTargets,
@@ -249,5 +250,66 @@ describe('titles for carried work', () => {
   it('survives a title that is already at the limit', () => {
     const title = carriedTitle(design({ title: 'Short' }), 'motion');
     expect(title).toBe('Short — motion');
+  });
+});
+
+describe('the projects a document has been carried into', () => {
+  function carriedChild(
+    suffix: 'motion' | 'retouch',
+    id: string,
+    at: string,
+    overrides: Partial<Parameters<typeof createDocument>[0]> = {},
+  ): ForgeDocument {
+    const source = design();
+    const input =
+      suffix === 'motion'
+        ? toMotionDocument(source, { at })
+        : toPhotoDocument(
+            source,
+            {
+              name: 'Field audit.png',
+              href: 'data:image/png;base64,AAAA',
+              width: 1080,
+              height: 1350,
+              mimeType: 'image/png',
+              originalWidth: 1080,
+              originalHeight: 1350,
+            },
+            { at },
+          );
+    const created = createDocument(
+      { ...input, ...overrides },
+      { generateId: () => id, now: () => new Date(at) },
+    );
+    if (!created.ok) throw new Error(created.error.message);
+    return created.value;
+  }
+
+  it('finds the copies, newest first, and ignores unrelated projects', () => {
+    const source = design();
+    const older = carriedChild('motion', 'doc-older', '2026-11-07T10:00:00.000Z');
+    const newer = carriedChild('retouch', 'doc-newer', '2026-11-07T11:00:00.000Z');
+    const unrelated = design({ title: 'Field audit' });
+    expect(
+      derivedWorks(source, [source, older, newer, unrelated]).map((entry) => entry.id),
+    ).toEqual(['doc-newer', 'doc-older']);
+  });
+
+  it('is empty for a project nothing has been carried from', () => {
+    const source = design();
+    expect(derivedWorks(source, [source])).toEqual([]);
+    // A copy is not its own descendant, and its lineage points the other way.
+    const child = carriedChild('motion', 'doc-child', AT);
+    expect(derivedWorks(child, [source, child])).toEqual([]);
+  });
+
+  it('orders copies made in the same millisecond by title, not by library order', () => {
+    const source = design();
+    const first = carriedChild('motion', 'doc-a', AT);
+    const second = carriedChild('retouch', 'doc-b', AT);
+    expect(derivedWorks(source, [second, first]).map((entry) => entry.title)).toEqual([
+      'Field audit — motion',
+      'Field audit — retouch',
+    ]);
   });
 });

@@ -99,6 +99,30 @@ export function handoffTargets(source: ForgeDocument): readonly HandoffTarget[] 
 }
 
 /**
+ * The projects this document has already been carried into, newest first.
+ *
+ * Lineage is stored on the *copy*, so the forward direction is a scan of the library rather than a
+ * second list kept beside it — a list could disagree with the documents, and the documents are what
+ * a person can open. The scan is also the honest answer to "is this still carried?":
+ * a copy that was deleted is not a descendant any more.
+ *
+ * Ties on `at` (two copies made inside the same millisecond) are broken by title so the order is
+ * stable rather than whatever the library happened to return.
+ */
+export function derivedWorks(
+  source: ForgeDocument,
+  library: readonly ForgeDocument[],
+): readonly ForgeDocument[] {
+  return library
+    .filter((candidate) => candidate.lineage?.sourceDocumentId === source.id)
+    .sort(
+      (left, right) =>
+        (right.lineage?.at ?? '').localeCompare(left.lineage?.at ?? '') ||
+        left.title.localeCompare(right.title),
+    );
+}
+
+/**
  * The scale a design is rendered at on its way into Photo Studio.
  *
  * The photo working copy is capped at `MAX_PHOTO_WORKING_EDGE` on its long edge, so rendering above

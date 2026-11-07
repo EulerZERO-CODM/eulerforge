@@ -1,5 +1,6 @@
 export {
   carriedTitle,
+  derivedWorks,
   handoffRasterScale,
   handoffRasterSize,
   handoffTargets,
