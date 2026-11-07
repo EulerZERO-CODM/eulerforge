@@ -16,7 +16,7 @@ import type { ForgeDocument } from './types';
 import { defaultStudioPayload } from './payload';
 import { SCREEN_DPI } from './units';
 
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 
 export type Migration = {
   readonly from: number;
@@ -167,6 +167,21 @@ const migrateV6ToV7: Migration = {
 };
 
 /**
+ * v7 → v8: a document may record the studio work it was carried from.
+ *
+ * `null` for every existing document, which is the truth: they were started from scratch. The
+ * version is bumped for ADR-0005's usual reason — a v8 writer produces a key a v7 build would strip
+ * while reporting a clean load, losing the link between a design and the document made from it.
+ */
+const migrateV7ToV8: Migration = {
+  from: 7,
+  to: 8,
+  description:
+    'Documents may record the project they were carried from; existing projects are unchanged.',
+  migrate: (raw) => ({ ...raw, schemaVersion: 8, lineage: raw.lineage ?? null }),
+};
+
+/**
  * v3 → v4: documents gained a studio payload for Photo, Motion and Video.
  *
  * Existing projects are design canvases and vector artboards, which carry no payload, so the honest
@@ -193,6 +208,7 @@ export const MIGRATIONS: readonly Migration[] = [
   migrateV4ToV5,
   migrateV5ToV6,
   migrateV6ToV7,
+  migrateV7ToV8,
 ];
 
 export function readSchemaVersion(raw: unknown): number | undefined {

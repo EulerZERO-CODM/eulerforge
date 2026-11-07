@@ -24,6 +24,8 @@ export function MotionStage({
   className,
   canvasRef,
   onCanvas,
+  resolveImage,
+  imageRevision,
 }: {
   readonly doc: ForgeDocument;
   readonly time: number;
@@ -31,6 +33,15 @@ export function MotionStage({
   readonly canvasRef?: React.RefObject<HTMLCanvasElement | null>;
   /** Handed the live canvas so the export panel can compare against what is on screen. */
   readonly onCanvas?: (canvas: HTMLCanvasElement | null) => void;
+  /**
+   * Resolves the artwork inside `image` layers.
+   *
+   * Without one, a placed graphic is an unresolved layer and the render plan reports it as a
+   * blocking issue — so a composition carried over from Design Studio would lose its photograph.
+   */
+  readonly resolveImage?: ImageResolver;
+  /** Bumped when a source settles; a dependency of the paint effect, not of the plan. */
+  readonly imageRevision?: number;
 }) {
   const localRef = useRef<HTMLCanvasElement>(null);
   const targetRef = canvasRef ?? localRef;
@@ -44,17 +55,16 @@ export function MotionStage({
     canvas.height = doc.canvas.height;
     const context = canvas.getContext('2d') as unknown as PainterContext | null;
     if (!context) return;
-    const resolveImage: ImageResolver = () => undefined;
     const plan = buildRenderPlan(frame, {
       measureFont: contextMeasureFactory(context),
-      resolveImage,
+      ...(resolveImage === undefined ? {} : { resolveImage }),
       includeBackground: true,
     });
     context.save();
     paintPlan(context, plan, { clear: true });
     context.restore();
     onCanvas?.(canvas);
-  }, [doc, time, targetRef, onCanvas]);
+  }, [doc, time, targetRef, onCanvas, resolveImage, imageRevision]);
 
   return (
     <div

@@ -5,6 +5,7 @@ import { useState } from 'react';
 
 import type { MotionPayload } from '../../core/documents/payload';
 import type { ForgeDocument } from '../../core/documents/types';
+import type { ImageResolver } from '../../core/render/plan';
 import {
   MAX_MOTION_EXPORT_FRAMES,
   motionArchiveName,
@@ -37,9 +38,12 @@ type ExportReport = {
 export function MotionExportPanel({
   doc,
   payload,
+  resolveImage,
 }: {
   readonly doc: ForgeDocument;
   readonly payload: MotionPayload;
+  /** Resolves placed graphics; without it the export refuses rather than omitting a layer. */
+  readonly resolveImage?: ImageResolver;
 }) {
   const [from, setFrom] = useState('0');
   const [to, setTo] = useState(String(payload.duration));
@@ -81,7 +85,9 @@ export function MotionExportPanel({
       document: doc,
       payload,
       plan: planned,
-      resolveImage: () => undefined,
+      // An unresolved graphic blocks the render plan, so the export fails with the layer named
+      // rather than writing frames that are missing it.
+      resolveImage: resolveImage ?? (() => undefined),
       onProgress: setProgress,
     });
     setBusy(false);

@@ -270,7 +270,9 @@ export function Artboard({
     context.restore();
     // Guides are *editor aids*, not artwork: they live in the DOM overlay below, so they stay one
     // pixel wide at every zoom and can never leak into an exported image.
-  }, [doc, scene, images.resolver, zoom, dpr]);
+    // `images.revision` is what repaints this canvas when a placed graphic finishes decoding: the
+    // resolver is stable, so without it the artwork would stay blank until the next edit.
+  }, [doc, scene, images.resolver, images.revision, zoom, dpr]);
 
   const toDocument = (event: { clientX: number; clientY: number }): Point => {
     const surface = surfaceRef.current;

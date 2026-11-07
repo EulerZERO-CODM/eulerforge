@@ -26,6 +26,7 @@ import { MotionWorkspace, isMotionDocument } from '../motion/motion-workspace';
 import { PhotoWorkspace, isPhotoDocument } from '../photo/photo-workspace';
 import { VideoWorkspace, isVideoDocument } from '../video/video-workspace';
 import { ContextHelp } from './context-help';
+import { HandoffPanel } from './handoff-panel';
 import { DocumentAside } from './document-aside';
 import { DocumentStage } from './document-stage';
 import { SaveState } from './history-panel';
@@ -211,6 +212,20 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
             />
             <span aria-hidden>·</span>
             <span className="forge-numeric">revision {doc.revision}</span>
+            {doc.lineage ? (
+              <>
+                <span aria-hidden>·</span>
+                {/* The link is what makes a carried project traceable back to the work it came
+                    from. If the source was deleted the workspace shows its own not-found state,
+                    which is the honest answer rather than a dead end styled as a link. */}
+                <Link
+                  href={`/workspace/${doc.lineage.sourceDocumentId}`}
+                  className="text-fg-muted hover:text-fg decoration-line-strong underline decoration-1 underline-offset-4"
+                >
+                  Carried from “{doc.lineage.sourceTitle}”
+                </Link>
+              </>
+            ) : null}
             <span aria-hidden>·</span>
             {/* Three states, three labels: see `storageBadge()` in the state layer. */}
             <Badge tone={badge.warning ? 'warning' : 'neutral'}>{badge.label}</Badge>
@@ -221,6 +236,9 @@ export function WorkspaceView({ documentId }: { readonly documentId: string }) {
             <Button asChild variant="quiet" size="md" iconLeft={<ArrowLeft aria-hidden />}>
               <Link href="/projects">Projects</Link>
             </Button>
+            {/* The way out of this studio and into the next one. Renders nothing for documents
+                whose work no other studio can yet take. */}
+            <HandoffPanel source={doc} resolveImage={images.resolver} />
             <IconButton label="Undo (Cmd/Ctrl + Z)" disabled={!state.canUndo} onClick={undo}>
               <Undo2 aria-hidden />
             </IconButton>

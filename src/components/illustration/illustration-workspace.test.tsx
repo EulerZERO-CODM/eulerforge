@@ -54,6 +54,7 @@ const images: SceneImages = {
   retry: () => {
     /* nothing to retry in this fixture */
   },
+  revision: 0,
 };
 
 function vectorDocument(extraLayers: Scene['layers'] = []): CreateDocumentInput {

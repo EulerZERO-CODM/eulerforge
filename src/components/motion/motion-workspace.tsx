@@ -17,6 +17,7 @@ import { Field, Input } from '../ui/field';
 import { InlineNote } from '../ui/states';
 import { AssistantUnavailable } from '../assistant/assistant-unavailable';
 import { HistoryPanel } from '../workspace/history-panel';
+import { useSceneImages } from '../workspace/use-scene-images';
 import type { WorkspaceApi } from '../workspace/workspace-api';
 import { KeyframePanel } from './keyframe-panel';
 import { MotionExportPanel } from './motion-export-panel';
@@ -59,6 +60,9 @@ export function MotionWorkspace({
   const [property, setProperty] = useState<MotionProperty>('x');
   const [selection, setSelection] = useState<TimelineSelection | null>(null);
   const playback = useMotionPlayback({ duration: payload.duration, fps: payload.fps });
+  // One decode per distinct graphic, shared by the preview and the frame export — the same cache the
+  // Design artboard uses, so a composition carried over from Design paints its photograph.
+  const images = useSceneImages(api.doc.scene);
 
   // Derived, not synchronised in an effect: a layer deleted by any means (this panel, undo, another
   // tab) must not stay selected, and the panel should simply fall back to the first layer that is
@@ -112,7 +116,12 @@ export function MotionWorkspace({
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_26rem]">
       <div className="min-w-0 space-y-5">
         <div className="space-y-3">
-          <MotionStage doc={api.doc} time={playback.time} />
+          <MotionStage
+            doc={api.doc}
+            time={playback.time}
+            resolveImage={images.resolver}
+            imageRevision={images.revision}
+          />
           <Transport
             time={playback.time}
             duration={payload.duration}
@@ -203,7 +212,7 @@ export function MotionWorkspace({
           }}
         />
         <TimingPanel api={api} payload={payload} />
-        <MotionExportPanel doc={api.doc} payload={payload} />
+        <MotionExportPanel doc={api.doc} payload={payload} resolveImage={images.resolver} />
         <AssistantUnavailable studio="motion" />
         <HistoryPanel
           labels={history}

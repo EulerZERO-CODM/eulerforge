@@ -492,6 +492,21 @@ export const attributionSchema = z
   )
   .readonly();
 
+/**
+ * Lineage: the link a carried document keeps to the work it was made from.
+ *
+ * The title is stored rather than looked up, so the record survives the source being renamed or
+ * deleted; the id is what makes the link navigable while the source still exists.
+ */
+export const documentLineageSchema = z.object({
+  sourceDocumentId: idSchema('DocumentId'),
+  sourceTitle: z.string().min(1).max(120),
+  sourceStudioId: z.string().min(1).max(60),
+  sourceDocumentTypeId: idSchema('DocumentTypeId'),
+  operation: z.enum(['scene-copy', 'raster']),
+  at: z.iso.datetime(),
+});
+
 export const forgeDocumentSchema = z
   .object({
     id: idSchema('DocumentId'),
@@ -512,6 +527,7 @@ export const forgeDocumentSchema = z
     status: z.enum(['draft', 'in-review', 'ready', 'archived']),
     revision: z.number().int().min(1),
     studioPayload: studioPayloadSchema,
+    lineage: documentLineageSchema.nullable(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
@@ -548,6 +564,8 @@ export const createDocumentInputSchema = z
     tags: z.array(z.string().trim().min(1).max(40)).max(12).readonly().optional(),
     scene: sceneSchema.optional(),
     studioPayload: studioPayloadValueSchema.optional(),
+    attribution: attributionSchema.optional(),
+    lineage: documentLineageSchema.optional(),
   })
   .superRefine((input, context) => {
     if (input.studioPayload === undefined) return;

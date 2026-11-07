@@ -379,7 +379,7 @@ describe('v6 → v7: a path that carried no text keeps meaning the same', () => 
     const result = migrateDocument(legacyRecord);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.schemaVersion).toBe(7);
+    expect(result.value.schemaVersion).toBe(8);
   });
 });
 
@@ -400,11 +400,13 @@ describe('pendingMigrations', () => {
       '4->5',
       '5->6',
       '6->7',
+      '7->8',
     ]);
     expect(steps[0]?.description).toMatch(/vector path layers/i);
     expect(steps[1]?.description).toMatch(/studio payload/i);
     expect(steps[2]?.description).toMatch(/gradient or pattern paint/i);
     expect(steps[3]?.description).toMatch(/range selections/i);
     expect(steps[4]?.description).toMatch(/text on their contour/i);
+    expect(steps[5]?.description).toMatch(/carried from/i);
   });
 });

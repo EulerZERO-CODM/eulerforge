@@ -304,7 +304,7 @@ export const MOTION_STUDIO: StudioDefinition = {
       label: 'Vector scene composition',
       status: 'planned',
       detail:
-        'Text, rectangle and ellipse layers already share the Design Studio document model and renderer; imported illustration artboards, path layers and true vector masks are not yet offered in the motion workspace.',
+        'Text, rectangle, ellipse and placed-graphic layers already share the Design Studio document model and renderer; imported illustration artboards, path layers and true vector masks are not yet offered in the motion workspace.',
     },
     {
       id: 'expressions',

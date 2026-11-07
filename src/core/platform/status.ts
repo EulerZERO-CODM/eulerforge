@@ -454,7 +454,7 @@ export const PLATFORM_CAPABILITIES: readonly PlatformCapability[] = [
     area: 'studios',
     label: 'Motion Studio',
     description:
-      'A real motion-graphics editor on the shared document model: text, rectangle and ellipse layers, per-property keyframes for position, scale and opacity, linear/eased/held/custom-cubic interpolation, a timeline with a draggable playhead and draggable keyframes, playback with frame stepping, a value-graph editor, undo/redo, autosave, and a genuine PNG frame sequence with a JSON manifest in a zip.',
+      'A real motion-graphics editor on the shared document model: text, rectangle, ellipse and placed-graphic layers, per-property keyframes for position, scale and opacity, linear/eased/held/custom-cubic interpolation, a timeline with a draggable playhead and draggable keyframes, playback with frame stepping, a value-graph editor, undo/redo, autosave, and a genuine PNG frame sequence with a JSON manifest in a zip.',
     status: 'partial',
     verification: [
       'src/core/motion/evaluate.test.ts',

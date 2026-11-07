@@ -50,6 +50,7 @@ const images: SceneImages = {
   retry: () => {
     /* nothing to retry in this fixture */
   },
+  revision: 0,
 };
 
 function renderAside(services: TestForgeServices, session: DocumentSession) {
