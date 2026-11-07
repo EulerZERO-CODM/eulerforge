@@ -9,7 +9,7 @@
  * Method (documented in docs/PERFORMANCE.md):
  *  - a deterministic 1280 × 853 buffer (1.09 MP, the preview cap across both dimensions);
  *  - a nine-entry stack covering every maths branch plus a half-frame mask;
- *  - one warm-up pass, then five measured passes, reporting median and worst case;
+ *  - one warm-up pass, then three measured passes, reporting median and worst case;
  *  - the absolute ceiling applies to the median and to the worst case separately, and a ratio check
  *    (two adjustments vs nine) catches a sublinear regression that an absolute ceiling would miss.
  */
