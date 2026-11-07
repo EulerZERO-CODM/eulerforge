@@ -67,6 +67,15 @@ describe('shipped studio registry', () => {
     }
   });
 
+  it('phrases every entry action the same way', () => {
+    // The labels sit side by side in a grid, so "Open Design Studio" next to "Video Studio" read as
+    // a different kind of control rather than the same action on a different studio.
+    for (const studio of listStudios()) {
+      if (studio.entry.route === null) continue;
+      expect(studio.entry.label, `${studio.id} entry label`).toBe(`Open ${studio.name}`);
+    }
+  });
+
   it('points every entry route at a page the App Router serves', () => {
     for (const studio of listStudios()) {
       if (studio.entry.route === null) continue;

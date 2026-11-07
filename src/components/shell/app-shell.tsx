@@ -66,6 +66,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
 
         <div className="flex min-h-dvh min-w-0 flex-col">
           <Topbar
+            documents={library.documents}
             onOpenPalette={() => {
               setPaletteOpen(true);
             }}

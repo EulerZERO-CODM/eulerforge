@@ -178,13 +178,16 @@ export function CreationFlow() {
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
       <div className="min-w-0 space-y-6">
         <ol
-          className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+          className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs"
           aria-label="Creation steps"
         >
           {STEPS.map((candidate, index) => {
             const state = index === stepIndex ? 'current' : index < stepIndex ? 'done' : 'upcoming';
             return (
               <li key={candidate.id} className="inline-flex items-center gap-2">
+                {/* Every step carries the same numbered disc, so the row reads as one progress
+                    track. Previously the current step alone was drawn as a filled chip and the
+                    rest as plain text, which looked like two different controls. */}
                 <button
                   type="button"
                   aria-current={state === 'current' ? 'step' : undefined}
@@ -194,24 +197,30 @@ export function CreationFlow() {
                   }}
                   disabled={index > stepIndex}
                   className={cn(
-                    'inline-flex items-center gap-1.5 rounded-sm px-2 py-1 transition-colors',
-                    state === 'current' && 'bg-ink-850 text-fg',
-                    state === 'done' && 'text-mint-400 hover:bg-ink-900',
+                    'inline-flex items-center gap-2 rounded-sm py-0.5 pr-1 transition-colors',
+                    state === 'current' && 'text-fg',
+                    state === 'done' && 'text-fg-muted hover:text-fg',
                     state === 'upcoming' && 'text-fg-subtle',
-                    index <= stepIndex && 'cursor-pointer',
+                    index <= stepIndex ? 'cursor-pointer' : 'cursor-default',
                   )}
                 >
-                  {state === 'done' ? (
-                    <Check aria-hidden className="size-3.5" />
-                  ) : (
-                    <span className="forge-numeric">{index + 1}</span>
-                  )}
+                  <span
+                    aria-hidden
+                    className={cn(
+                      'forge-numeric text-2xs grid size-5 shrink-0 place-items-center rounded-full border font-medium',
+                      state === 'current' && 'border-accent bg-accent text-fg-inverse',
+                      state === 'done' && 'border-mint-400/40 bg-mint-400/10 text-mint-400',
+                      state === 'upcoming' && 'border-line text-fg-subtle',
+                    )}
+                  >
+                    {state === 'done' ? <Check className="size-3" /> : index + 1}
+                  </span>
                   {candidate.label}
                 </button>
+                {/* The rule is a desktop affordance: when the track wraps on a phone a trailing
+                    line has nothing to point at, so spacing does the work there instead. */}
                 {index < STEPS.length - 1 ? (
-                  <span aria-hidden className="text-fg-subtle">
-                    /
-                  </span>
+                  <span aria-hidden className="bg-line hidden h-px w-5 shrink-0 sm:block" />
                 ) : null}
               </li>
             );
@@ -258,9 +267,16 @@ export function CreationFlow() {
                     >
                       <StudioGlyph name={studio.icon} accent={studio.accent} />
                       <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="text-fg text-base font-medium">{studio.name}</span>
-                          <AvailabilityBadge availability={studio.availability} />
+                        {/* Badge pinned right, name wraps beside it — the same rule as the studio
+                            cards, so a long name never drops the badge onto its own row. */}
+                        <span className="flex items-start justify-between gap-2">
+                          <span className="text-fg min-w-0 text-base font-medium">
+                            {studio.name}
+                          </span>
+                          <AvailabilityBadge
+                            availability={studio.availability}
+                            className="shrink-0"
+                          />
                         </span>
                         <span className="text-fg-muted mt-1 block text-sm">{studio.tagline}</span>
                         {!selectable ? (

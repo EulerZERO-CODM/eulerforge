@@ -1,4 +1,4 @@
-import { within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { act } from 'react';
 import { hydrateRoot } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
@@ -6,7 +6,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AppShell } from './app-shell';
 import { ForgeProvider } from '../../state/forge-provider';
-import { createTestServices } from '../../testing/forge-services';
+import { createTestServices, type TestForgeServices } from '../../testing/forge-services';
+import { DEFAULT_CANVAS, DEFAULT_GUIDES } from '../../core/documents/factories';
+import { brand } from '../../core/types/brand';
 
 /**
  * The pathname the mocked router reports.
@@ -23,9 +25,9 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-function shell() {
+function shell(services: TestForgeServices = createTestServices()) {
   return (
-    <ForgeProvider services={createTestServices()}>
+    <ForgeProvider services={services}>
       <AppShell>
         <p>Screen content</p>
       </AppShell>
@@ -90,5 +92,81 @@ describe('top bar during hydration', () => {
     expect(recovered).toEqual([]);
     expect(within(header).getByText('Learn')).toBeInTheDocument();
     expect(header.textContent).toContain('/ vector versus raster');
+  });
+});
+
+/**
+ * "Where am I" has to answer with the project, not the product.
+ *
+ * The workspace route has no navigation entry of its own — it is reached with a document id — so
+ * the bar fell through to the product name and every open project read "Euler's Forge". The name
+ * comes from the library the shell already loads, which keeps the server render (no library yet)
+ * and the first client render in agreement.
+ */
+describe('top bar on a project', () => {
+  async function savedProject(services: TestForgeServices, title: string): Promise<string> {
+    const created = await services.documents.create({
+      title,
+      studioId: 'design',
+      documentTypeId: brand<'DocumentTypeId'>('design.canvas'),
+      canvas: DEFAULT_CANVAS,
+      guides: DEFAULT_GUIDES,
+    });
+    if (!created.ok) throw new Error(created.error.message);
+    return created.value.id;
+  }
+
+  it('names the open project instead of the product', async () => {
+    const services = createTestServices();
+    const id = await savedProject(services, 'Audit project');
+    navigation.pathname = `/workspace/${id}`;
+
+    render(shell(services));
+
+    const header = screen.getByRole('banner');
+    await waitFor(() =>
+      expect(within(header).getByText('Audit project', { selector: 'p' })).toBeInTheDocument(),
+    );
+    expect(within(header).queryByText("Euler's Forge")).toBeNull();
+  });
+
+  it('lodges a project that no longer exists as "Workspace", never as the product', async () => {
+    navigation.pathname = '/workspace/deleted-elsewhere';
+
+    render(shell());
+
+    const header = screen.getByRole('banner');
+    await waitFor(() =>
+      expect(within(header).getByText('Workspace', { selector: 'p' })).toBeInTheDocument(),
+    );
+    expect(within(header).queryByText("Euler's Forge")).toBeNull();
+  });
+});
+
+/**
+ * The bar's creation action must not point at the screen already open: on `/create` it was a dead
+ * link, and on a phone it squeezed the page title down to "New pr…".
+ */
+describe('the top bar creation action', () => {
+  it('is not offered on the creation flow itself', () => {
+    navigation.pathname = '/create';
+
+    render(shell());
+
+    const header = screen.getByRole('banner');
+    expect(within(header).queryByRole('link', { name: 'New project' })).toBeNull();
+    expect(within(header).getByText('New project')).toBeInTheDocument();
+  });
+
+  it('is offered on every other screen', () => {
+    navigation.pathname = '/projects';
+
+    render(shell());
+
+    const header = screen.getByRole('banner');
+    expect(within(header).getByRole('link', { name: 'New project' })).toHaveAttribute(
+      'href',
+      '/create',
+    );
   });
 });

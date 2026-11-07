@@ -259,7 +259,7 @@ export const VIDEO_STUDIO: StudioDefinition = {
     rationale:
       'Video cannot share the raster engine: it is a time-based model with different caching, memory and determinism requirements. It shares the document model, history, media storage and the download boundary, and it reuses the project’s zip writer for its frame archives.',
   },
-  entry: { route: '/studios/video', label: 'Video Studio' },
+  entry: { route: '/studios/video', label: 'Open Video Studio' },
   learningSlugs: ['timeline-basics'],
   consumesFrom: [PHOTO_STUDIO.id, DESIGN_STUDIO.id],
   definitionVersion: 1,

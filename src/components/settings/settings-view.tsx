@@ -380,7 +380,10 @@ export function SettingsView() {
           columns={2}
           items={[
             { label: 'Environment', value: env.environment },
-            { label: 'Site URL', value: env.siteUrl },
+            // The configured value for this build, not the address the page happens to be
+            // served from — the default is `http://localhost:3000`, which would otherwise read
+            // like a claim about the current origin.
+            { label: 'Configured site URL', value: env.siteUrl },
             { label: 'Catalogue source', value: env.catalogSource },
             { label: 'Telemetry', value: env.telemetry },
             { label: 'App version', value: '0.1.0' },
